@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="./">Solana&nbsp;Ecosystem&nbsp;Builder</a>
+    <nav aria-label="Sections">
+      <a href="#tools">Tools</a>
+      <a href="#catalogue">Catalogue</a>
+      <a href="#guide">Guide</a>
+      <a href="#support">Support</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <h1>Build, fix and improve across the Solana ecosystem</h1>
+    <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
+    <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
+  </section>
+
+  <section class="wrap" aria-labelledby="explainer-h">
+    <h2 id="explainer-h">Solana in 30 seconds</h2>
+    <div class="cards">
+      <article class="card">
+        <h3>Accounts &amp; lamports</h3>
+        <p>Everything on Solana is an account: wallets, tokens, programs and data all live in accounts holding lamports, the smallest unit of SOL (1 SOL = 1,000,000,000 lamports). Balances are whole lamports — a SOL amount never has more than 9 decimal places.</p>
+      </article>
+      <article class="card">
+        <h3>Programs</h3>
+        <p>Smart contracts are called programs. They are stateless code; the state they work on lives in separate accounts they own. The SPL Token program, for example, manages every classic Solana token through token accounts it owns.</p>
+      </article>
+      <article class="card">
+        <h3>Fees &amp; rent</h3>
+        <p>A transaction pays a base fee of 5,000 lamports per signature, plus optional priority fees. Accounts pay rent for the data they store — or hold two years of rent up front (the rent-exempt minimum) and pay none again.</p>
+      </article>
+      <article class="card">
+        <h3>Speed</h3>
+        <p>Proof of History gives the network a shared clock before consensus, so validators can order transactions fast: blocks land roughly every 400 milliseconds and finality follows in seconds. That speed is why Solana hosts busy DEXs, payment rails and consumer apps.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="wrap" id="tools" aria-labelledby="tools-h">
+    <h2 id="tools-h">Tools — educational models</h2>
+    <p>Each tool runs entirely in your browser and is labelled for what it is: a model that teaches the mechanic, never a live quote.</p>
+
+    <article class="tool">
+      <h3>1. SOL ⇄ lamports converter</h3>
+      <p>Exact conversion with integer math — no rounding, no floating point. Fill in one side and convert.</p>
+      <form id="lamp-calc">
+        <div class="grid">
+          <div>
+            <label for="sol-in">SOL amount</label>
+            <input id="sol-in" name="sol-in" inputmode="decimal" placeholder="1.5">
+          </div>
+          <div>
+            <label for="lam-out">Lamports (result)</label>
+            <input id="lam-out" name="lam-out" readonly>
+          </div>
+          <div>
+            <label for="lam-in">Lamports</label>
+            <input id="lam-in" name="lam-in" inputmode="numeric" placeholder="890880">
+          </div>
+          <div>
+            <label for="sol-out">SOL (result)</label>
+            <input id="sol-out" name="sol-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Convert</button>
+        <p class="result" id="lamp-result" aria-live="polite"></p>
+      </form>
+    </article>
+
+    <article class="tool">
+      <h3>2. Constant-product swap model</h3>
+      <p>The x·y=k mechanic behind AMM pools across Solana (Raydium CP-Swap, Orca and others): the fee comes off your input, the rest trades against the reserves, and the price moves against you as size grows.</p>
+      <form id="swap-calc">
+        <div class="grid">
+          <div>
+            <label for="swap-rin">Reserve of token in</label>
+            <input id="swap-rin" name="swap-rin" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="swap-rout">Reserve of token out</label>
+            <input id="swap-rout" name="swap-rout" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="swap-ain">Amount in</label>
+            <input id="swap-ain" name="swap-ain" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="swap-fee">Pool fee (basis points)</label>
+            <input id="swap-fee" name="swap-fee" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="swap-out">Amount out (model)</label>
+            <input id="swap-out" name="swap-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the model</button>
+        <p class="result" id="swap-result" aria-live="polite"></p>
+      </form>
+    </article>
+
+    <article class="tool">
+      <h3>3. Rent-exempt minimum calculator</h3>
+      <p>What an account must hold to be rent-exempt: (128 + data length) × 3,480 lamports per byte-year × 2 years. Try 0 for a plain wallet account, 82 for a token mint, 165 for a token account.</p>
+      <form id="rent-calc">
+        <div class="grid">
+          <div>
+            <label for="rent-len">Account data length (bytes)</label>
+            <input id="rent-len" name="rent-len" inputmode="numeric" value="165">
+          </div>
+          <div>
+            <label for="rent-out">Rent-exempt minimum (lamports)</label>
+            <input id="rent-out" name="rent-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Calculate</button>
+        <p class="result" id="rent-result" aria-live="polite"></p>
+      </form>
+    </article>
+
+    <article class="tool">
+      <h3>4. Impermanent-loss calculator</h3>
+      <p>For a 50/50 constant-product position: how far the LP position trails simply holding, when the price moves by the ratio you enter — the cost that pool fees have to beat.</p>
+      <form id="il-calc">
+        <div class="grid">
+          <div>
+            <label for="il-ratio">Price ratio (new ÷ entry)</label>
+            <input id="il-ratio" name="il-ratio" inputmode="decimal" value="2">
+          </div>
+          <div>
+            <label for="il-out">Impermanent loss</label>
+            <input id="il-out" name="il-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Calculate</button>
+        <p class="result" id="il-result" aria-live="polite"></p>
+      </form>
+    </article>
+  </section>
+
+  <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
+    <h2 id="catalogue-h">Ecosystem catalogue</h2>
+    <p>The projects and infrastructure this hub builds around. Every link was verified live when the catalogue was written. My own Solana work is flagged as mine; everything else is the project's own site.</p>
+    <div class="filters" role="group" aria-label="Filter catalogue">
+      <button type="button" data-filter="all" class="active">All</button>
+      <button type="button" data-filter="mine">My work</button>
+      <button type="button" data-filter="core">Core &amp; dev</button>
+      <button type="button" data-filter="dex">DEX &amp; liquidity</button>
+      <button type="button" data-filter="staking">Staking &amp; infrastructure</button>
+      <button type="button" data-filter="payments">Payments</button>
+      <button type="button" data-filter="wallets">Wallets &amp; explorers</button>
+      <button type="button" data-filter="nft">NFTs</button>
+    </div>
+    <ul class="catalogue">
+      <li data-cat="mine payments">
+        <a href="https://kshot3000.github.io/solana-pay-link-desk/">Solana Pay Link Desk</a> — my work
+        <p>Build Solana Pay links and QR codes locally, with an honestly labelled service-fee model. No wallet connects; nothing is sent.</p>
+      </li>
+      <li data-cat="mine dex">
+        <a href="https://kshot3000.github.io/Raydium-Renaissance/">Raydium Renaissance</a> — my work
+        <p>My Raydium builder hub: 130+ educational pool tools covering CP, CLMM and fee mechanics, all labelled as models.</p>
+      </li>
+      <li data-cat="core">
+        <a href="https://solana.com">Solana</a>
+        <p>The network itself — official site of the Solana Foundation (@solana-foundation on GitHub, @solana on X).</p>
+      </li>
+      <li data-cat="core">
+        <a href="https://www.anchor-lang.com">Anchor</a>
+        <p>The framework most Solana programs are written in: Rust macros, IDLs and a TypeScript client out of the box.</p>
+      </li>
+      <li data-cat="core staking">
+        <a href="https://www.helius.dev">Helius</a>
+        <p>RPCs, webhooks and data APIs for building on Solana.</p>
+      </li>
+      <li data-cat="dex">
+        <a href="https://raydium.io">Raydium</a>
+        <p>Solana's home-grown AMM and launchpad (@raydium-io on GitHub, @Raydium on X) — CP-Swap, CLMM and AcceleRaytor.</p>
+      </li>
+      <li data-cat="dex">
+        <a href="https://jup.ag">Jupiter</a>
+        <p>The main swap aggregator: routes across Solana's pools for a quoted price.</p>
+      </li>
+      <li data-cat="dex">
+        <a href="https://www.orca.so">Orca</a>
+        <p>Whirlpools concentrated liquidity, built to be the human-friendly DEX.</p>
+      </li>
+      <li data-cat="dex">
+        <a href="https://www.drift.trade">Drift</a>
+        <p>Perpetuals and spot trading protocol with an on-chain order book.</p>
+      </li>
+      <li data-cat="staking">
+        <a href="https://marinade.finance">Marinade</a>
+        <p>Liquid staking: stake SOL across many validators and hold mSOL.</p>
+      </li>
+      <li data-cat="staking">
+        <a href="https://www.jito.network">Jito</a>
+        <p>MEV infrastructure and the JitoSOL liquid staking pool, run by Jito Labs.</p>
+      </li>
+      <li data-cat="payments">
+        <a href="https://solanapay.com">Solana Pay</a>
+        <p>The payments specification: transfer requests as URLs and QR codes, used by my Link Desk above.</p>
+      </li>
+      <li data-cat="wallets">
+        <a href="https://phantom.app">Phantom</a>
+        <p>The most widely used Solana wallet, now multichain.</p>
+      </li>
+      <li data-cat="wallets">
+        <a href="https://solana.fm">SolanaFM</a>
+        <p>A block explorer for following accounts, tokens and transactions.</p>
+      </li>
+      <li data-cat="nft">
+        <a href="https://magiceden.io">Magic Eden</a>
+        <p>The long-running Solana NFT marketplace, now multichain.</p>
+      </li>
+    </ul>
+  </section>
+
+  <section class="wrap" id="guide" aria-labelledby="guide-h">
+    <h2 id="guide-h">Getting started building on Solana</h2>
+    <ol class="guide-list">
+      <li><strong>Install the Solana CLI</strong> from <a href="https://solana.com/docs/intro/installation">the official installation guide</a>, then point it at devnet: <code>solana config set --url devnet</code>.</li>
+      <li><strong>Make a devnet wallet and fund it free:</strong> <code>solana-keygen new</code>, then <code>solana airdrop 2</code>. Devnet SOL has no value — it exists so you can break things safely.</li>
+      <li><strong>Learn the account model first</strong> (Tool 3 above): every program you write allocates accounts, and rent-exempt minimums decide how much SOL each one locks up.</li>
+      <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
+      <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
+      <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
+      <li><strong>Ship and catalogue it:</strong> the full checklist lives in the <a href="guides/getting-started-solana.md">getting-started guide in the repo</a>.</li>
+    </ol>
+  </section>
+
+  <section class="wrap" id="support" aria-labelledby="support-h">
+    <h2 id="support-h">Support this work</h2>
+    <p>I'm an independent builder — this hub, the upstream fixes and the guides are my own work, not any team's. If they help you, SOL donations keep the loops running:</p>
+    <p class="address-row">
+      <code id="donation-address">G7xepVyQSrxtH61ZooXvPAmnS8omQ1TvHqB8qDmHXWm</code>
+      <button type="button" id="copy-address">Copy address</button>
+      <span id="copy-status" aria-live="polite"></span>
+    </p>
+    <p>Find me at <a href="https://x.com/kshot9000">@kshot9000</a> and <a href="https://github.com/Kshot3000">github.com/Kshot3000</a>. Ecosystem thanks: <a href="https://github.com/solana-foundation">@solana-foundation</a> / <a href="https://x.com/solana">@solana</a>, <a href="https://github.com/raydium-io">@raydium-io</a> / <a href="https://x.com/Raydium">@Raydium</a>.</p>
+    <p class="honesty">Not affiliated with the Solana Foundation, Raydium, or any catalogued project. Tools are educational models — not live quotes, not live data, not financial advice.</p>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Solana Ecosystem Builder — built by Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>). SOL donations: G7xepVyQSrxtH61ZooXvPAmnS8omQ1TvHqB8qDmHXWm</p>
+  </div>
+</footer>
+
+<script src="app.js?v=1"></script>
+</body>
+</html>

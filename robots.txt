@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://kshot3000.github.io/Solana-Builder/sitemap.xml
