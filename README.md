@@ -12,6 +12,7 @@ I build, fix and improve across Solana: Raydium, Jupiter, Orca, Anchor, Solana P
 2. **Constant-product swap model** — x·y=k with the fee on the input and price impact, exact scaled-BigInt math.
 3. **Rent-exempt minimum calculator** — (128 + dataLen) × 3,480 × 2 lamports, the network's rent parameters.
 4. **Impermanent-loss calculator** — 2√r/(1+r) − 1 for a 50/50 pool position.
+5. **Transaction fee estimator** — 5,000 lamports per signature plus the priority fee, ceil(CU limit × CU price in micro-lamports ÷ 1,000,000), charged on the requested CU limit (capped at 1,400,000).
 
 Every tool is labelled on the page for what it is: an educational model, not live quotes, not live data, not financial advice. No wallet connects and nothing executes on-chain.
 

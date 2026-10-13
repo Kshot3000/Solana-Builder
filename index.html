@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -148,6 +148,33 @@
         <p class="result" id="il-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>5. Transaction fee estimator — base + priority fee</h3>
+      <p>What a transaction costs before rent: a base fee of 5,000 lamports per signature, plus an optional priority fee — ceil(compute-unit limit × compute-unit price ÷ 1,000,000) lamports, where the price is in micro-lamports per compute unit. The priority fee is charged on the limit you request, not the compute you use, and a transaction's limit is capped at 1,400,000 compute units.</p>
+      <form id="fee-calc">
+        <div class="grid">
+          <div>
+            <label for="fee-sigs">Signatures</label>
+            <input id="fee-sigs" name="fee-sigs" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label for="fee-cu">Compute-unit limit</label>
+            <input id="fee-cu" name="fee-cu" inputmode="numeric" value="200000">
+          </div>
+          <div>
+            <label for="fee-price">Compute-unit price (micro-lamports per CU)</label>
+            <input id="fee-price" name="fee-price" inputmode="numeric" value="10000">
+          </div>
+          <div>
+            <label for="fee-out">Total fee (lamports, model)</label>
+            <input id="fee-out" name="fee-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Estimate the fee</button>
+        <p class="result" id="fee-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -233,6 +260,7 @@
       <li><strong>Install the Solana CLI</strong> from <a href="https://solana.com/docs/intro/installation">the official installation guide</a>, then point it at devnet: <code>solana config set --url devnet</code>.</li>
       <li><strong>Make a devnet wallet and fund it free:</strong> <code>solana-keygen new</code>, then <code>solana airdrop 2</code>. Devnet SOL has no value — it exists so you can break things safely.</li>
       <li><strong>Learn the account model first</strong> (Tool 3 above): every program you write allocates accounts, and rent-exempt minimums decide how much SOL each one locks up.</li>
+      <li><strong>Price a transaction before you send it</strong> (Tool 5 above): 5,000 lamports per signature plus a priority fee charged on the compute-unit limit you request — simulate, then set the limit close to real usage instead of overpaying for headroom you never use.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -259,6 +287,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=1"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

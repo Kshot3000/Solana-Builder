@@ -88,6 +88,35 @@ function rentExempt(dataLen) {
   };
 }
 
+/* ---------- Tool 5: transaction fee (base + priority) ---------- */
+/* Total fee = base fee + prioritization fee.
+   Base fee: 5,000 lamports per signature.
+   Prioritization fee: ceil(computeUnitLimit * computeUnitPriceMicroLamports / 1,000,000)
+   lamports — charged on the CU LIMIT you request, not the CU you actually use.
+   A transaction's CU limit is capped at 1,400,000 by the runtime. */
+var BASE_FEE_LAMPORTS_PER_SIGNATURE = 5000;
+var MAX_COMPUTE_UNIT_LIMIT = 1400000;
+
+function txFee(signatures, cuLimit, cuPriceMicro) {
+  var sigs = Number(signatures);
+  var cu = Number(cuLimit);
+  var price = Number(cuPriceMicro);
+  if (!Number.isInteger(sigs) || sigs < 1) return null;
+  if (!Number.isInteger(cu) || cu < 1 || cu > MAX_COMPUTE_UNIT_LIMIT) return null;
+  if (!Number.isInteger(price) || price < 0) return null;
+  var base = BigInt(sigs) * BigInt(BASE_FEE_LAMPORTS_PER_SIGNATURE);
+  var prod = BigInt(cu) * BigInt(price);
+  var priority = (prod + 999999n) / 1000000n; /* ceil division; 0 when price is 0 */
+  var total = base + priority;
+  return {
+    signatures: sigs,
+    baseFeeLamports: Number(base),
+    priorityFeeLamports: Number(priority),
+    totalFeeLamports: Number(total),
+    totalFeeSol: formatScaled(total)
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -106,8 +135,9 @@ function catalogueMatch(cat, filter) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     parseScaled, formatScaled, solToLamports, lamportsToSol, cpSwap,
-    rentExempt, impermanentLoss, catalogueMatch,
-    RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE
+    rentExempt, impermanentLoss, txFee, catalogueMatch,
+    RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
+    BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT
   };
 }
 
@@ -178,6 +208,21 @@ if (typeof document !== "undefined") {
       setText("il-result", "Model output: at a price ratio of " + res.ratio + ", a 50/50 constant-product position is worth " +
         Math.abs(res.ilPct).toFixed(4) + "% " + (res.ilPct < 0 ? "less" : "the same") +
         " than simply holding the two assets, before fees. Fees earned can offset this; concentrated-liquidity positions differ. An educational model, not a live quote. Not financial advice.");
+    });
+
+    var feeForm = document.getElementById("fee-calc");
+    if (feeForm) feeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = txFee(val("fee-sigs"), val("fee-cu"), val("fee-price"));
+      if (res === null) {
+        setText("fee-result", "Check the inputs: signatures must be a whole number of 1 or more, the compute-unit limit a whole number from 1 to 1,400,000 (the runtime cap), and the compute-unit price a whole number of micro-lamports, 0 or more.");
+        return;
+      }
+      document.getElementById("fee-out").value = String(res.totalFeeLamports);
+      setText("fee-result", "Model output: base fee " + res.baseFeeLamports + " lamports (" + res.signatures +
+        " signature" + (res.signatures === 1 ? "" : "s") + " at 5,000 each) + priority fee " + res.priorityFeeLamports +
+        " lamports = " + res.totalFeeLamports + " lamports total (" + res.totalFeeSol +
+        " SOL). The priority fee is charged on the compute-unit limit you request, not the compute you actually use — simulate first and set the limit close to real usage. Base and priority rates are set by the network and can change; this is an educational model, not a live fee quote. Not financial advice.");
     });
 
     /* catalogue filter */

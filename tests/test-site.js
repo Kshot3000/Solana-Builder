@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=1"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=2"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "lamp-result", "swap-result", "rent-result", "il-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("four tool forms", (html.match(/<form id=/g) || []).length === 4);
+check("five tool forms", (html.match(/<form id=/g) || []).length === 5);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -104,6 +104,25 @@ near("IL at 1x is 0%", app.impermanentLoss("1").ilPct, 0, 1e-12);
 near("IL at 2x is about -5.7191%", app.impermanentLoss("2").ilPct, -5.719095, 1e-4);
 check("IL rejects zero ratio", app.impermanentLoss("0") === null);
 check("IL rejects junk", app.impermanentLoss("abc") === null);
+
+/* Tool 5 — transaction fee (base + priority), checked against the canonical formula */
+const tf = app.txFee(1, 200000, 10000);
+check("base fee is 5000 lamports per signature", tf && tf.baseFeeLamports === 5000);
+check("200k CU @10,000 micro = 2000 lamports priority", tf && tf.priorityFeeLamports === 2000);
+check("total fee 7000 lamports = 0.000007 SOL", tf && tf.totalFeeLamports === 7000 && tf.totalFeeSol === "0.000007");
+const tf2 = app.txFee(1, 300000, 50000);
+check("300k CU @50,000 micro = 15000 lamports priority, 20000 total", tf2 && tf2.priorityFeeLamports === 15000 && tf2.totalFeeLamports === 20000 && tf2.totalFeeSol === "0.00002");
+const tf3 = app.txFee(2, 200000, 10000);
+check("two signatures double the base fee", tf3 && tf3.baseFeeLamports === 10000 && tf3.totalFeeLamports === 12000);
+check("zero price means zero priority fee", (() => { const t = app.txFee(1, 200000, 0); return t && t.priorityFeeLamports === 0 && t.totalFeeLamports === 5000; })());
+check("priority fee rounds UP, not down (1 CU @ 1 micro = 1 lamport)", (() => { const t = app.txFee(1, 1, 1); return t && t.priorityFeeLamports === 1 && t.totalFeeLamports === 5001; })());
+check("CU limit capped at 1400000", (() => { const t = app.txFee(1, 1400000, 100000); return t && t.priorityFeeLamports === 140000 && t.totalFeeLamports === 145000; })());
+check("txFee rejects CU limit above the runtime cap", app.txFee(1, 1400001, 1000) === null);
+check("txFee rejects zero CU limit", app.txFee(1, 0, 1000) === null);
+check("txFee rejects zero signatures", app.txFee(0, 200000, 1000) === null);
+check("txFee rejects negative price", app.txFee(1, 200000, -1) === null);
+check("txFee rejects fractional CU limit", app.txFee(1, 200000.5, 1000) === null);
+check("txFee exposes the base-fee and CU-limit constants", app.BASE_FEE_LAMPORTS_PER_SIGNATURE === 5000 && app.MAX_COMPUTE_UNIT_LIMIT === 1400000);
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
