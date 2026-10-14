@@ -532,6 +532,44 @@ function lpDeposit(reserveAStr, reserveBStr, supplyStr, depositAStr, depositBStr
   };
 }
 
+
+/* ---------- Tool 19: token vesting (cliff + linear unlock) ---------- */
+/* Team, investor and ecosystem allocations on Solana commonly vest on a
+   cliff + linear schedule (the shape Jupiter Lock, Streamflow and most
+   launch allocations use): the allocation accrues linearly over the full
+   duration from day one - accrued(m) = total * min(m, duration) / duration,
+   floored at the token's smallest unit in exact scaled-BigInt - but NOTHING
+   is claimable before the cliff month; at the cliff the whole accrued share
+   releases at once, and from then on claimable = accrued. This model works
+   in whole months; real schedules run on timestamps (per second or per
+   slot), and a minority of schedules instead start the linear accrual AT
+   the cliff - read your schedule's terms and check which convention it
+   uses before trusting either one's numbers. */
+var MAX_VESTING_MONTHS = 1200;
+
+function vestingSchedule(totalStr, cliffMonths, durationMonths, elapsedMonths) {
+  var T = parseScaled(totalStr);
+  var C = Number(cliffMonths), D = Number(durationMonths), M = Number(elapsedMonths);
+  if (T === null || T <= 0n) return null;
+  if (!Number.isInteger(C) || !Number.isInteger(D) || !Number.isInteger(M)) return null;
+  if (D < 1 || D > MAX_VESTING_MONTHS || C < 0 || C > D || M < 0 || M > 12000) return null;
+  var capped = Math.min(M, D);
+  var accrued = (T * BigInt(capped)) / BigInt(D);
+  var atCliff = (T * BigInt(C)) / BigInt(D);
+  var claimable = M < C ? 0n : accrued;
+  return {
+    total: formatScaled(T),
+    cliffMonths: C, durationMonths: D, elapsedMonths: M,
+    accrued: formatScaled(accrued),
+    atCliff: formatScaled(atCliff),
+    claimable: formatScaled(claimable),
+    locked: formatScaled(T - claimable),
+    accruedPct: Number(BigInt(capped) * 100000000n / BigInt(D)) / 1000000,
+    status: M >= D ? "complete" : (M < C ? "cliff" : "vesting"),
+    monthsRemaining: Math.max(0, D - M)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1018,7 +1056,7 @@ if (typeof module !== "undefined" && module.exports) {
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     sandwichAttack, liquidStaking,
-    clmmPosition, lpDeposit, isqrtBigInt,
+    clmmPosition, lpDeposit, isqrtBigInt, vestingSchedule, MAX_VESTING_MONTHS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1408,6 +1446,27 @@ if (typeof document !== "undefined") {
       setText("lpdep-result", res.firstDeposit
         ? "Model output: this is a FIRST deposit — the pool is empty, so the deposit itself sets the pool's price (" + res.depositA + " A against " + res.depositB + " B) and mints the geometric mean, sqrt(" + res.depositA + " × " + res.depositB + ") = " + res.minted + " LP tokens. The depositor holds the whole pool. Some pools permanently lock a small minimum of a first mint as an inflation-attack defence; that lock is pool-specific and is not modelled here. Choose this ratio carefully: the first price is the price every later trade starts from. An educational model, not a live pool quote. Not financial advice."
         : "Model output: against reserves of " + res.reserveA + " A / " + res.reserveB + " B with " + res.supply + " LP tokens outstanding, a deposit of " + res.depositA + " A / " + res.depositB + " B mints " + res.minted + " LP tokens — " + res.sharePct.toFixed(6) + "% of the pool afterwards. The mint is set by " + (res.limiting === "both" ? "both sides equally: the deposit matches the pool's ratio exactly, so all of it is used" : "token " + res.limiting + ", the limiting side: only " + res.usedA + " A and " + res.usedB + " B are used at the pool's ratio" + (res.limiting === "A" ? (res.excessB !== "0" ? ", and the excess " + res.excessB + " B buys no extra LP tokens — a good interface returns it or sizes the deposit to the ratio first." : ".") : (res.excessA !== "0" ? ", and the excess " + res.excessA + " A buys no extra LP tokens — a good interface returns it or sizes the deposit to the ratio first." : "."))) + " Burning those LP tokens later returns that share of whatever reserves the pool holds then — which, after trades and fees, is a different amount and split than went in (see impermanent loss, Tool 4). An educational model, not a live pool quote. Not financial advice.");
+    });
+
+
+    var vestForm = document.getElementById("vest-calc");
+    if (vestForm) vestForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = vestingSchedule(val("vest-total"), val("vest-cliff"), val("vest-duration"), val("vest-elapsed"));
+      if (res === null) {
+        document.getElementById("vest-claim-out").value = "Invalid";
+        document.getElementById("vest-cliff-out").value = "Invalid";
+        setText("vest-result", "Check the inputs: the total allocation must be a positive number with at most 9 decimals, the duration a whole number of months from 1 to 1,200, the cliff a whole number of months from 0 up to the duration, and the elapsed time a whole number of months from 0 up.");
+        return;
+      }
+      document.getElementById("vest-claim-out").value = res.claimable + " tokens";
+      document.getElementById("vest-cliff-out").value = res.atCliff + " tokens at month " + res.cliffMonths;
+      var where = res.status === "complete"
+        ? "The schedule is complete: the full allocation of " + res.total + " tokens is unlocked and claimable, and nothing remains locked."
+        : res.status === "cliff"
+          ? "Nothing is claimable yet: month " + res.elapsedMonths + " is before the month-" + res.cliffMonths + " cliff, even though " + res.accrued + " tokens (" + res.accruedPct.toFixed(6) + "% of the allocation) have accrued on paper. At the cliff the accrued share releases at once - " + res.atCliff + " tokens - and from then on the claimable amount follows the linear accrual: " + res.locked + " tokens stay locked for now, and the schedule completes at month " + res.durationMonths + "."
+          : "The cliff has passed, so the claimable amount is the accrued amount: " + res.claimable + " of " + res.total + " tokens (" + res.accruedPct.toFixed(6) + "%), with " + res.locked + " still locked and " + res.monthsRemaining + " months until the schedule completes at month " + res.durationMonths + ". The cliff at month " + res.cliffMonths + " released " + res.atCliff + " tokens at once.";
+      setText("vest-result", "Model output: " + where + " This model accrues linearly from day one in whole months and floors at the token's smallest unit; real schedules run on timestamps, and some start the linear accrual at the cliff instead - check which convention your schedule's terms use. An educational model, not a live vesting contract. Not financial advice.");
     });
 
     /* catalogue filter */

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -665,6 +665,40 @@
         <p class="result" id="lpdep-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>19. Token vesting calculator - cliff &amp; linear unlock</h3>
+      <p>Team, investor and ecosystem allocations on Solana commonly vest on a <strong>cliff + linear</strong> schedule (the shape Jupiter Lock, Streamflow and most launch allocations use): the allocation accrues linearly over the full duration from day one - <code>accrued = total x elapsed / duration</code>, floored at the token's smallest unit - but <strong>nothing is claimable before the cliff</strong>, and at the cliff the whole accrued share releases at once. Headline: a 1,000,000-token allocation with a 12-month cliff over 48 months has accrued 375,000 tokens (37.5%) by month 18, all of it claimable - but at month 6 it had accrued 125,000 with exactly 0 claimable, and the cliff itself released 250,000 at month 12. This model works in whole months; real schedules run on timestamps, and a minority start the linear accrual at the cliff instead - check which convention your schedule's terms use. An educational model, not a live vesting contract. Not financial advice.</p>
+      <form id="vest-calc">
+        <div class="grid">
+          <div>
+            <label for="vest-total">Total allocation (tokens)</label>
+            <input id="vest-total" name="vest-total" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="vest-cliff">Cliff (months)</label>
+            <input id="vest-cliff" name="vest-cliff" inputmode="numeric" value="12">
+          </div>
+          <div>
+            <label for="vest-duration">Vesting duration (months)</label>
+            <input id="vest-duration" name="vest-duration" inputmode="numeric" value="48">
+          </div>
+          <div>
+            <label for="vest-elapsed">Elapsed (months)</label>
+            <input id="vest-elapsed" name="vest-elapsed" inputmode="numeric" value="18">
+          </div>
+          <div>
+            <label for="vest-claim-out">Claimable now (model)</label>
+            <input id="vest-claim-out" name="vest-claim-out" readonly>
+          </div>
+          <div>
+            <label for="vest-cliff-out">Released at the cliff (model)</label>
+            <input id="vest-cliff-out" name="vest-cliff-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Compute the unlock</button>
+        <p class="result" id="vest-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -764,6 +798,7 @@
       <li><strong>Derive program addresses from seeds, never store a key for them</strong> (Tool 16 above): a PDA is <code>SHA-256(seeds ‖ bump ‖ program ID ‖ "ProgramDerivedAddress")</code> kept only when the hash lands off the ed25519 curve — a result on the curve could have a private key and is rejected, which is why derivation scans bump 255 downward for the first off-curve hash. At most 16 seeds, each at most 32 bytes; seeds are raw bytes (text means its UTF-8 encoding; a pubkey seed is its 32 bytes — an associated token account is exactly this derivation). A PDA has no private key: only its program can sign for it, with those seeds and that bump.</li>
       <li><strong>Size a concentrated position from its liquidity, not from token amounts</strong> (Tool 17 above): a CLMM position is L plus a tick range, and the amounts follow — inside the range it holds both assets in the proportion the current tick sets, below the range only token0, above it only token1, sliding continuously as the price crosses. At tick 0 over −600…600, L = 1,000,000 holds about 29,553 of each. The amounts are principal only: earned fees accrue separately, and every price move re-splits the position toward the asset being sold — that drift is the exposure behind impermanent loss.</li>
       <li><strong>Deposit into a pool at its ratio, not yours</strong> (Tool 18 above): a constant-product pool mints LP tokens from the smaller side's contribution — <code>supply × min(depositA ÷ reserveA, depositB ÷ reserveB)</code> — and only the ratio-matching part of a deposit is used, so an off-ratio deposit wastes the excess unless the interface returns it. The first deposit is the exception: into an empty pool it sets the starting price and mints <code>sqrt(depositA × depositB)</code>. Your share afterwards is minted ÷ new supply, and burning it later returns that share of whatever the pool holds then — not what you put in.</li>
+      <li><strong>Read a vesting schedule by its cliff, not its accrual</strong> (Tool 19 above): an allocation can accrue linearly from day one yet be claimable for exactly 0 until the cliff month, when the whole accrued share releases at once - a 1,000,000-token allocation on a 12-month cliff over 48 months shows 125,000 accrued and 0 claimable at month 6, then 250,000 released at the cliff. Schedules differ: some start the linear accrual at the cliff instead of gating it, and real contracts run on timestamps, not whole months - read the terms before valuing any locked allocation.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -790,6 +825,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

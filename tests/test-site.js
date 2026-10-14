@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=15"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=16"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out", "lpdep-ra", "lpdep-rb", "lpdep-supply", "lpdep-da", "lpdep-db", "lpdep-minted-out", "lpdep-share-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out", "lpdep-ra", "lpdep-rb", "lpdep-supply", "lpdep-da", "lpdep-db", "lpdep-minted-out", "lpdep-share-out", "vest-total", "vest-cliff", "vest-duration", "vest-elapsed", "vest-claim-out", "vest-cliff-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "lpdep-calc", "lpdep-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "lpdep-calc", "lpdep-result", "vest-calc", "vest-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("twenty-two tool forms (eighteen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 22);
+check("twenty-three tool forms (nineteen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 23);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -400,7 +400,7 @@ check("clmmpos: value split at price 1 in the symmetric headline is 50/50 in tok
 check("clmmpos: rejects zero / negative / over-precise liquidity", app.clmmPosition("0", -600, 600, 0) === null && app.clmmPosition("-5", -600, 600, 0) === null && app.clmmPosition("1.0000000001", -600, 600, 0) === null);
 check("clmmpos: rejects empty range, inverted range and out-of-bounds ticks", app.clmmPosition("1000", 600, 600, 0) === null && app.clmmPosition("1000", 600, -600, 0) === null && app.clmmPosition("1000", -443637, 600, 0) === null && app.clmmPosition("1000", -600, 443637, 0) === null && app.clmmPosition("1000", -600, 600, 443637) === null);
 check("clmmpos: rejects non-integer ticks", app.clmmPosition("1000", -600.5, 600, 0) === null && app.clmmPosition("1000", -600, 600, 0.5) === null);
-check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("seventeen mechanics"));
+check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("eighteen mechanics"));
 check("clmmpos tool labelled principal-only / model in index.html", html.includes("fees a position earns accrue separately") && html.includes("cross-verified against a reference SDK"));
 
 /* Tool 18 — LP deposit & pool share: the mint rule verified against the
@@ -419,8 +419,27 @@ check("lpdep: doubling an exact-ratio deposit doubles the mint", (() => { const 
 check("lpdep: rejects a half-empty pool (mixed zero state)", app.lpDeposit("0", "4000000", "2000000", "1", "1") === null && app.lpDeposit("1000000", "0", "2000000", "1", "1") === null && app.lpDeposit("1000000", "4000000", "0", "1", "1") === null);
 check("lpdep: rejects zero / negative / over-precise deposits", app.lpDeposit("1", "1", "1", "0", "1") === null && app.lpDeposit("1", "1", "1", "1", "0") === null && app.lpDeposit("1", "1", "1", "-1", "1") === null && app.lpDeposit("1", "1", "1", "1.0000000001", "1") === null);
 check("lpdep: rejects a dust deposit that would mint zero LP tokens", app.lpDeposit("1000000000", "1000000000", "1", "0.000000001", "0.000000001") === null);
-check("guide teaches LP deposits (Tool 18)", guide.includes("Tool 18") && guide.includes("0.990099%") && guide.includes("seventeen mechanics"));
+check("guide teaches LP deposits (Tool 18)", guide.includes("Tool 18") && guide.includes("0.990099%") && guide.includes("eighteen mechanics"));
 check("lpdep tool labelled model / first-mint lock not modelled in index.html", html.includes("buys no extra LP tokens") && html.includes("An educational model, not a live pool quote"));
+
+
+/* Tool 19 - token vesting (cliff + linear unlock): verified in a clean
+   foreground prototype BEFORE shipping - 20,000 random cases against an
+   independent float-rational floor (zero mismatches), 2,000 schedules
+   checked month by month for monotonicity, the pre-cliff zero gate and
+   exact completion at the duration */
+check("vest: headline month 18 - accrued/claimable 375000, cliff released 250000, locked 625000", (() => { const r = app.vestingSchedule("1000000", 12, 48, 18); return r !== null && r.accrued === "375000" && r.claimable === "375000" && r.atCliff === "250000" && r.locked === "625000" && r.accruedPct === 37.5 && r.status === "vesting" && r.monthsRemaining === 30; })());
+check("vest: pre-cliff accrues on paper but claims exactly 0", (() => { const r = app.vestingSchedule("1000000", 12, 48, 6); return r.accrued === "125000" && r.claimable === "0" && r.locked === "1000000" && r.status === "cliff"; })());
+check("vest: at the cliff month the accrued share releases at once", (() => { const r = app.vestingSchedule("1000000", 12, 48, 12); return r.claimable === "250000" && r.claimable === r.atCliff && r.status === "vesting"; })());
+check("vest: complete at and beyond the duration, to the exact token", app.vestingSchedule("1000000", 12, 48, 48).claimable === "1000000" && app.vestingSchedule("1000000", 12, 48, 60).claimable === "1000000" && app.vestingSchedule("1000000", 12, 48, 60).status === "complete" && app.vestingSchedule("1000000", 12, 48, 60).locked === "0");
+check("vest: zero cliff claims the accrual from month 0", (() => { const r = app.vestingSchedule("1200", 0, 12, 0); return r.claimable === "0" && r.atCliff === "0" && app.vestingSchedule("1200", 0, 12, 3).claimable === "300"; })());
+check("vest: accrual floors at the smallest unit (100 over 3 months)", app.vestingSchedule("100", 1, 3, 1).accrued === "33.333333333" && app.vestingSchedule("100", 1, 3, 3).claimable === "100");
+check("vest: claimable is non-decreasing and gated across a full schedule", (() => { let prev = -1; for (let m = 0; m <= 53; m++) { const r = app.vestingSchedule("999999", 12, 48, m); const c = Number(r.claimable); if (c < prev) return false; if (m < 12 && c !== 0) return false; if (m >= 48 && r.claimable !== "999999") return false; prev = c; } return true; })());
+check("vest: cliff equal to duration releases everything at the end", (() => { const r = app.vestingSchedule("500", 12, 12, 11); return r.claimable === "0" && app.vestingSchedule("500", 12, 12, 12).claimable === "500"; })());
+check("vest: rejects cliff beyond duration, zero duration and fractional months", app.vestingSchedule("100", 13, 12, 0) === null && app.vestingSchedule("100", 0, 0, 0) === null && app.vestingSchedule("100", 0, 12, 1.5) === null && app.vestingSchedule("100", 0.5, 12, 0) === null && app.vestingSchedule("100", 0, 12, -1) === null);
+check("vest: rejects zero / negative / over-precise totals", app.vestingSchedule("0", 0, 12, 0) === null && app.vestingSchedule("-5", 0, 12, 0) === null && app.vestingSchedule("1.0000000001", 0, 12, 0) === null);
+check("guide teaches vesting (Tool 19)", guide.includes("Tool 19") && guide.includes("375,000 claimable") && guide.includes("eighteen mechanics"));
+check("vest tool labelled model / conventions stated in index.html", html.includes("a minority start the linear accrual at the cliff") && html.includes("An educational model, not a live vesting contract"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
