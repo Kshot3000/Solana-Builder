@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=12"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=13"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("nineteen tool forms (fifteen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 19);
+check("twenty tool forms (sixteen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 20);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -350,6 +350,36 @@ check("lst: round-trip — redeeming freshly minted tokens returns at most the d
 check("lst: rejects junk — zero total/supply, dust deposit of zero, redemption above supply", app.liquidStaking("0", "1000", "0", "1", "1") === null && app.liquidStaking("1000", "0", "0", "1", "1") === null && app.liquidStaking("1000", "1000", "0", "0", "1") === null && app.liquidStaking("1000", "1000", "0", "1", "1001") === null && app.liquidStaking("1000", "1000", "0", "1", "0") === null && app.liquidStaking("abc", "1000", "0", "1", "1") === null && app.liquidStaking("1000", "1000", "-5", "1", "1") === null && app.liquidStaking("1000.0000000001", "1000", "0", "1", "1") === null);
 check("guide teaches liquid staking (Tool 15)", guide.includes("Tool 15") && guide.includes("115.5"));
 check("lst tool labelled model / not-live in index.html", html.includes("An educational model of one pool's exchange rate, not a live pool's rate"));
+
+/* Tool 16 — program-derived addresses. Every vector cross-verified in a clean
+   foreground prototype against @solana/web3.js + @solana/spl-token BEFORE
+   pinning: SHA-256 vs node:crypto on 17 lengths incl. block edges, the curve
+   check vs PublicKey.isOnCurve on 1,520 byte strings incl. crafted edges,
+   60 random findProgramAddress cases, and a real ATA derivation. */
+const TOKEN_PROG = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const hexOf = (bs) => bs.map((b) => b.toString(16).padStart(2, "0")).join("");
+check("pda: sha256 of the empty input is the known digest", hexOf(app.sha256Bytes([])) === "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+check("pda: sha256 of 'abc' is the known digest", hexOf(app.sha256Bytes(app.utf8Bytes("abc"))) === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+check("pda: sha256 of a 1000-byte pattern (multi-block + padding edges)", (() => { const pat = []; for (let i = 0; i < 1000; i++) pat.push((i * 7) % 256); return hexOf(app.sha256Bytes(pat)) === "89f4ff56a25dd1db06a4ce6033603775d705fb96f30f8693733fef602a1ca532"; })());
+check("pda: ed25519 d is the canonical constant", app.ED25519_D.toString() === "37095705934669439343138083508754565189542113879843219016388785533085940283555");
+check("pda: utf8 encodes multi-byte characters as bytes, not characters", app.utf8Bytes("é").join(",") === "195,169" && app.utf8Bytes("a").join(",") === "97" && app.utf8Bytes("").length === 0);
+check("pda: real pubkeys are on the curve (hub wallet, USDC mint, System Program)", [SOL, USDC_MINT, "11111111111111111111111111111111"].every((a) => app.isOnCurveBytes(app.base58Decode(a)) === true));
+check("pda: y=1 with the sign bit set is 'negative zero' — NOT a valid point", (() => { const b = new Array(32).fill(0); b[0] = 1; b[31] = 128; const c = new Array(32).fill(0); c[0] = 1; return app.isOnCurveBytes(b) === false && app.isOnCurveBytes(c) === true; })());
+check("pda: headline — seed 'vault' under the Token program derives at bump 254 after 2 candidates", (() => { const r = app.findProgramAddress(TOKEN_PROG, ["vault"]); return r.address === "AispKP3Ls5d2m6t411kMtP1xkPemdZPGPJUvemsBqmXA" && r.bump === 254 && r.candidatesTried === 2; })());
+check("pda: the headline's bump-255 candidate lands ON the curve and is refused", app.createProgramAddressBytes([app.utf8Bytes("vault"), [255]], app.base58Decode(TOKEN_PROG)) === null);
+check("pda: create at the found bump returns the headline bytes", (() => { const b = app.createProgramAddressBytes([app.utf8Bytes("vault"), [254]], app.base58Decode(TOKEN_PROG)); return b !== null && app.base58Encode(b) === "AispKP3Ls5d2m6t411kMtP1xkPemdZPGPJUvemsBqmXA"; })());
+check("pda: two seeds — ['vault','usdc'] derives at bump 254", (() => { const r = app.findProgramAddress(TOKEN_PROG, ["vault", "usdc"]); return r.address === "Ebehkhj7FHLPEsbSyWpwMJac88BKzVNcCWCvG9dtwkTx" && r.bump === 254; })());
+check("pda: seed 'a' lands off-curve on the first candidate (bump 255, 1 try)", (() => { const r = app.findProgramAddress(TOKEN_PROG, ["a"]); return r.address === "3MsEZk7CJgp5wQrHtasn7QbEHeTtFeDpb59C458uZtnG" && r.bump === 255 && r.candidatesTried === 1; })());
+check("pda: no seeds at all still derives (program alone)", (() => { const r = app.findProgramAddress(TOKEN_PROG, []); return r.address === "29aDZ12ST2mQkLeVfoeKkkm7WA83MCyiGU3Zf8MjDDGV" && r.bump === 255; })());
+check("pda: a multi-byte seed hashes as its UTF-8 bytes ('é' = 2 bytes)", (() => { const r = app.findProgramAddress(TOKEN_PROG, ["é"]); return r.address === "8akeFFyVSWT5gnL3H7eWnrbAAFkywTnrR6HMp4P8yQuC" && r.bump === 253; })());
+check("pda: a 32-byte seed is allowed, 33 bytes refused — bytes, not characters", app.findProgramAddress(TOKEN_PROG, ["a".repeat(32)]).address === "9KYV7PK8igxf6M2uYriB9BA1KgRsNgHG2pJTu8gAAyUE" && app.findProgramAddress(TOKEN_PROG, ["a".repeat(33)]) === null && app.findProgramAddress(TOKEN_PROG, ["é".repeat(17)]) === null);
+check("pda: a derived PDA is itself off-curve and valid address format", (() => { const r = app.findProgramAddress(TOKEN_PROG, ["vault"]); return app.isOnCurveBytes(app.base58Decode(r.address)) === false && app.checkAddress(r.address).valid === true; })());
+check("pda: real-world check — the hub wallet's USDC associated token account", (() => { const f = app.findProgramAddressBytes([app.base58Decode(SOL), app.base58Decode(TOKEN_PROG), app.base58Decode(USDC_MINT)], app.base58Decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")); return f.address === "BeJv9nhxhAhGVUpVaN4USa9TgpGiYhauc6VU5QyQZrbq" && f.bump === 255; })());
+check("pda: rejects a bad program id (junk, wrong length, the 45-char stray-paste form)", app.findProgramAddress("abc0def", ["a"]) === null && app.findProgramAddress("1111", ["a"]) === null && app.findProgramAddress(SOL_INVALID_45, ["a"]) === null);
+check("pda: 16 seeds allowed (bump 251, matching the reference SDK), 17 refused", (() => { const r = app.findProgramAddress(TOKEN_PROG, new Array(16).fill("a")); return r.address === "81BvRrbDHRavuraA1z3Nv7rP9GhgfVMXRvZ5FZ5e5eQS" && r.bump === 251 && app.findProgramAddress(TOKEN_PROG, new Array(17).fill("a")) === null; })());
+check("pda: exposes the runtime limits and marker", app.MAX_PDA_SEEDS === 16 && app.MAX_PDA_SEED_BYTES === 32 && app.PDA_MARKER === "ProgramDerivedAddress");
+check("guide teaches PDAs (Tool 16)", guide.includes("Tool 16") && guide.includes("AispKP3Ls5d2m6t411kMtP1xkPemdZPGPJUvemsBqmXA") && guide.includes("BeJv9nhxhAhGVUpVaN4USa9TgpGiYhauc6VU5QyQZrbq"));
+check("pda tool labelled model / no private key in index.html", html.includes("A PDA has no private key") && html.includes("no lookup, no execution"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);

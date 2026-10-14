@@ -710,6 +710,183 @@ function liquidStaking(totalSolStr, supplyStr, rewardsStr, depositStr, redeemStr
   };
 }
 
+/* ---------- Tool 16: program-derived addresses (PDAs) ---------- */
+/* A program-derived address is how a Solana program owns accounts and
+   "signs" without a private key. It is derived, not generated:
+     address = SHA-256(seed bytes... || bump byte || program id bytes
+                       || "ProgramDerivedAddress")
+   and the 32-byte result must NOT be a valid ed25519 point — an address
+   ON the curve could have a private key, so it can never be a PDA.
+   findProgramAddress tries bump 255, 254, ... and keeps the first hash
+   that lands off the curve (about half of all hashes are off-curve, so
+   the scan usually succeeds within a couple of tries); the bump that
+   worked is stored with the account and passed back as the last seed
+   whenever the program signs with invoke_signed. The runtime's rules:
+   at most 16 seeds, each at most 32 bytes. Seeds are raw bytes — a text
+   seed means its UTF-8 encoding, and real-world seeds are just as often
+   a pubkey's 32 bytes (an associated token account is exactly this: the
+   ATA program deriving from [wallet, token program, mint]).
+   This page derives locally with a self-contained SHA-256 and BigInt
+   field math for the curve check — derivation is pure hashing, so the
+   result is identical on every cluster and needs no lookup. It proves
+   the derivation is well-formed; it does not prove whose PDA an address
+   is — check the program id and the seeds against the source you trust,
+   in full, exactly as with any address (Tool 7). */
+var MAX_PDA_SEEDS = 16;
+var MAX_PDA_SEED_BYTES = 32;
+var PDA_MARKER = "ProgramDerivedAddress";
+
+var SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+];
+function sha256Rotr(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+function sha256Bytes(msg) {
+  var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  var bitLen = msg.length * 8;
+  var padded = [];
+  for (var i = 0; i < msg.length; i++) padded.push(msg[i] & 255);
+  padded.push(0x80);
+  while (padded.length % 64 !== 56) padded.push(0);
+  var hi = Math.floor(bitLen / 4294967296), lo = bitLen >>> 0;
+  padded.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255,
+              (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+  var w = new Array(64);
+  for (var off = 0; off < padded.length; off += 64) {
+    var t;
+    for (t = 0; t < 16; t++) {
+      w[t] = ((padded[off + 4 * t] << 24) | (padded[off + 4 * t + 1] << 16) |
+              (padded[off + 4 * t + 2] << 8) | padded[off + 4 * t + 3]) >>> 0;
+    }
+    for (t = 16; t < 64; t++) {
+      var s0 = (sha256Rotr(w[t - 15], 7) ^ sha256Rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3)) >>> 0;
+      var s1 = (sha256Rotr(w[t - 2], 17) ^ sha256Rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10)) >>> 0;
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) >>> 0;
+    }
+    var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (t = 0; t < 64; t++) {
+      var S1 = (sha256Rotr(e, 6) ^ sha256Rotr(e, 11) ^ sha256Rotr(e, 25)) >>> 0;
+      var ch = ((e & f) ^ (~e & g)) >>> 0;
+      var t1 = (h + S1 + ch + SHA256_K[t] + w[t]) >>> 0;
+      var S0 = (sha256Rotr(a, 2) ^ sha256Rotr(a, 13) ^ sha256Rotr(a, 22)) >>> 0;
+      var maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+      var t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+  }
+  var out = [];
+  for (var k = 0; k < 8; k++) out.push((H[k] >>> 24) & 255, (H[k] >>> 16) & 255, (H[k] >>> 8) & 255, H[k] & 255);
+  return out;
+}
+
+/* ed25519 field: p = 2^255 - 19, curve -x^2 + y^2 = 1 + d x^2 y^2.
+   A compressed point stores y little-endian with the x sign in the top
+   bit. The point exists iff x^2 = (y^2 - 1) / (d y^2 + 1) has a solution:
+   x^2 is 0 (valid only with the sign bit clear — "negative zero" is not
+   a valid encoding) or a quadratic residue, by Euler's criterion. */
+var ED25519_P = (1n << 255n) - 19n;
+function ed25519Pow(base, exp) {
+  var r = 1n, b = ((base % ED25519_P) + ED25519_P) % ED25519_P;
+  while (exp > 0n) { if (exp & 1n) r = (r * b) % ED25519_P; b = (b * b) % ED25519_P; exp >>= 1n; }
+  return r;
+}
+var ED25519_D = ((-121665n * ed25519Pow(121666n, ED25519_P - 2n)) % ED25519_P + ED25519_P) % ED25519_P;
+function isOnCurveBytes(bytes) {
+  if (!bytes || bytes.length !== 32) return false;
+  var y = 0n;
+  for (var i = 31; i >= 0; i--) y = (y << 8n) | BigInt(bytes[i] & 255);
+  y &= (1n << 255n) - 1n; /* the top bit is the x sign, not part of y */
+  if (y >= ED25519_P) return false;
+  var y2 = (y * y) % ED25519_P;
+  var u = (y2 - 1n + ED25519_P) % ED25519_P;
+  var v = (ED25519_D * y2 + 1n) % ED25519_P;
+  if (v === 0n) return false;
+  var x2 = (u * ed25519Pow(v, ED25519_P - 2n)) % ED25519_P;
+  if (x2 === 0n) return (bytes[31] & 128) === 0;
+  return ed25519Pow(x2, (ED25519_P - 1n) / 2n) === 1n;
+}
+
+function utf8Bytes(str) {
+  if (typeof str !== "string") return null;
+  var out = [];
+  for (var i = 0; i < str.length; i++) {
+    var cp = str.codePointAt(i);
+    if (cp > 0xffff) i++; /* surrogate pair consumed */
+    if (cp < 0x80) out.push(cp);
+    else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+  }
+  return out;
+}
+function pdaMarkerBytes() {
+  var out = [];
+  for (var i = 0; i < PDA_MARKER.length; i++) out.push(PDA_MARKER.charCodeAt(i));
+  return out;
+}
+function validSeedBytes(seedBytesList, maxCount) {
+  if (!Array.isArray(seedBytesList) || seedBytesList.length > maxCount) return false;
+  for (var i = 0; i < seedBytesList.length; i++) {
+    var s = seedBytesList[i];
+    if (!s || typeof s.length !== "number" || s.length > MAX_PDA_SEED_BYTES) return false;
+    for (var j = 0; j < s.length; j++) {
+      if (!Number.isInteger(s[j]) || s[j] < 0 || s[j] > 255) return false;
+    }
+  }
+  return true;
+}
+function createProgramAddressBytes(seedBytesList, programBytes) {
+  /* the list handed in here already ends with the bump byte, so the cap is
+     the runtime's 16 seeds plus that one bump entry */
+  if (!validSeedBytes(seedBytesList, MAX_PDA_SEEDS + 1)) return null;
+  if (!programBytes || programBytes.length !== 32) return null;
+  var msg = [];
+  for (var i = 0; i < seedBytesList.length; i++) msg = msg.concat(seedBytesList[i]);
+  msg = msg.concat(programBytes, pdaMarkerBytes());
+  var hash = sha256Bytes(msg);
+  if (isOnCurveBytes(hash)) return null; /* on-curve: could have a keypair, so never a PDA */
+  return hash;
+}
+function findProgramAddressBytes(seedBytesList, programBytes) {
+  if (!validSeedBytes(seedBytesList, MAX_PDA_SEEDS)) return null;
+  if (!programBytes || programBytes.length !== 32) return null;
+  for (var bump = 255; bump >= 0; bump--) {
+    var addr = createProgramAddressBytes(seedBytesList.concat([[bump]]), programBytes);
+    if (addr !== null) return { address: base58Encode(addr), addressBytes: addr, bump: bump, candidatesTried: 256 - bump };
+  }
+  return null;
+}
+function findProgramAddress(programIdStr, seedStrs) {
+  if (typeof programIdStr !== "string" || !Array.isArray(seedStrs)) return null;
+  var program = programIdStr.trim();
+  var programBytes = base58Decode(program);
+  if (programBytes === null || programBytes.length !== 32) return null;
+  if (seedStrs.length > MAX_PDA_SEEDS) return null;
+  var seedBytesList = [];
+  for (var i = 0; i < seedStrs.length; i++) {
+    var bytes = utf8Bytes(seedStrs[i]);
+    if (bytes === null || bytes.length > MAX_PDA_SEED_BYTES) return null;
+    seedBytesList.push(bytes);
+  }
+  var found = findProgramAddressBytes(seedBytesList, programBytes);
+  if (found === null) return null;
+  return {
+    programId: program,
+    seeds: seedStrs.slice(),
+    address: found.address,
+    bump: found.bump,
+    candidatesTried: found.candidatesTried
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -735,6 +912,9 @@ if (typeof module !== "undefined" && module.exports) {
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     sandwichAttack, liquidStaking,
+    sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
+    findProgramAddressBytes, findProgramAddress, ED25519_D,
+    MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
     epochForSlot, epochRange, slotsInEpoch, firstSlotInEpoch,
     MIN_SLOTS_PER_EPOCH, FIRST_NORMAL_EPOCH, FIRST_NORMAL_SLOT,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
@@ -1059,6 +1239,29 @@ if (typeof document !== "undefined") {
       document.getElementById("lst-rate-out").value = res.rateAfterRewards.toFixed(9);
       document.getElementById("lst-redeem-out").value = res.redeemOutAfterRewards;
       setText("lst-result", "Model output: the pool's exchange rate is " + res.rate.toFixed(9) + " SOL per token (" + res.totalSol + " SOL backing " + res.supply + " tokens). Depositing " + res.deposit + " SOL mints " + res.tokensMinted + " tokens" + (res.mintedFloorsToZero ? " — that deposit is dust at this rate: it floors to ZERO tokens, so on-chain it would stake SOL and mint nothing; deposit more or not at all" : "") + ", and redeeming " + res.redeem + " tokens returns " + res.redeemOut + " SOL. After " + res.rewards + " SOL of rewards land (total " + res.totalAfterRewards + " SOL, supply unchanged), the rate rises to " + res.rateAfterRewards.toFixed(9) + ": the same deposit then mints only " + res.tokensMintedAfterRewards + " tokens, while the same redemption returns " + res.redeemOutAfterRewards + " SOL — a gain of " + res.redeemGain + " SOL on an unchanged token balance. That rising rate, not a growing balance, is the yield. This model charges no pool fees and models no unstake delay; a real pool's terms differ. An educational model of one pool's exchange rate, not a live pool's rate. Not financial advice.");
+    });
+
+    var pdaForm = document.getElementById("pda-calc");
+    if (pdaForm) pdaForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var seedStrs = [];
+      var s1 = val("pda-seed1"), s2 = val("pda-seed2");
+      if (s1 !== "") seedStrs.push(s1);
+      if (s2 !== "") seedStrs.push(s2);
+      var res = findProgramAddress(val("pda-program"), seedStrs);
+      if (res === null) {
+        document.getElementById("pda-out").value = "Invalid";
+        setText("pda-result", "Check the inputs: the program ID must be a valid-format 32-byte base58 address, and each seed at most 32 bytes when UTF-8 encoded (32 plain ASCII characters, fewer for multi-byte characters — a longer seed can never be part of a PDA, the runtime rejects it).");
+        return;
+      }
+      document.getElementById("pda-out").value = res.address;
+      setText("pda-result", "Derived locally: " +
+        (res.seeds.length ? "seed" + (res.seeds.length === 1 ? "" : "s") + " [" + res.seeds.map(function (s) { return '"' + s + '"'; }).join(", ") + "]" : "no seeds (the program alone)") +
+        " under that program — the program-derived address is " + res.address + " at bump " + res.bump +
+        " — " + (res.candidatesTried === 1
+          ? "the first candidate tried, bump 255, already hashed off the ed25519 curve."
+          : "the scan tried " + res.candidatesTried + " candidates: every bump from 255 down to " + (res.bump + 1) + " hashed to a point ON the ed25519 curve, where a private key could exist, so it can never be a PDA; bump " + res.bump + " landed off-curve.") +
+        " A PDA has no private key: only that program can sign for it, by presenting these seeds and this bump. Derivation is pure SHA-256 hashing — nothing was looked up and nothing executed on-chain, and the same inputs derive this address on every cluster. Well-formed is not the same as trustworthy: check the program ID and seeds against the source you trust, in full, before treating anything sent to this address as the program's.");
     });
 
     /* catalogue filter */

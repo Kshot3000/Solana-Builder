@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -564,6 +564,33 @@
         <p class="result" id="lst-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>16. Program-derived address (PDA) finder — seeds, bump and the curve check</h3>
+      <p>Programs own accounts and "sign" without any private key through <strong>program-derived addresses</strong>: <code>SHA-256(seeds ‖ bump ‖ program ID ‖ "ProgramDerivedAddress")</code>, kept only when the 32-byte hash is <em>not</em> a valid ed25519 point — an on-curve result could have a private key, so it can never be a PDA. Derivation starts at <strong>bump 255</strong> and steps down until a hash lands off the curve; about half of all hashes qualify, so the scan usually succeeds within a couple of tries, and the working bump is stored and presented again whenever the program signs with <code>invoke_signed</code>. The runtime's rules: at most 16 seeds, each at most 32 bytes — and seeds are raw bytes: a text seed means its UTF-8 encoding, while many real seeds are a pubkey's 32 bytes (every associated token account is a PDA of the ATA program derived from wallet, token program and mint). This finder derives entirely in your browser — its own SHA-256 and curve check, no lookup, no execution — so the same inputs give this address on every cluster. Try the defaults: the seed <code>vault</code> under the SPL Token program, whose bump-255 candidate lands on the curve and is skipped for bump 254. An educational model of the derivation, not a lookup of any live account. Not financial advice.</p>
+      <form id="pda-calc">
+        <div class="grid">
+          <div>
+            <label for="pda-program">Program ID</label>
+            <input id="pda-program" name="pda-program" value="TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA">
+          </div>
+          <div>
+            <label for="pda-seed1">Seed 1 (text — its UTF-8 bytes)</label>
+            <input id="pda-seed1" name="pda-seed1" value="vault">
+          </div>
+          <div>
+            <label for="pda-seed2">Seed 2 (optional)</label>
+            <input id="pda-seed2" name="pda-seed2" placeholder="second seed">
+          </div>
+          <div>
+            <label for="pda-out">Program-derived address (result)</label>
+            <input id="pda-out" name="pda-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Derive the address</button>
+        <p class="result" id="pda-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -660,6 +687,7 @@
       <li><strong>Check whether a token withholds a transfer fee</strong> (Tool 13 above): a Token-2022 mint can carry a transfer fee — the sender is debited in full, the recipient is credited the amount minus ceil(amount × rate ÷ 10,000), capped at the mint's maximum fee, and the withheld fee sits in the recipient's token account until harvested. A quote or invoice in such a token that ignores the fee under-delivers on every payment; gross up when an exact received amount matters, and remember the classic SPL Token program has no transfer fees at all.</li>
       <li><strong>Understand what a sandwich does to a loose tolerance</strong> (Tool 14 above): an attacker front-runs a visible swap, lets it fill worse, and back-runs into the price move — the profit is the victim's loss. The slippage bound is the defence: tight enough and the victim's transaction aborts instead of filling (the attacker then loses the round-trip unwinding alone); loose enough and the bad fill passes its own protection. Private routing keeps a swap out of the public flow the attack reads.</li>
       <li><strong>Price a liquid staking token by its rate, not its balance</strong> (Tool 15 above): an LST does not rebase — rewards grow the pool's total SOL while the supply stands still, so the SOL-per-token rate rises and the same token amount redeems for more SOL over time. A rate below 1, or a deposit that mints at a stale rate, is a red flag; and a dust deposit can floor to zero tokens, so never deposit an amount whose minted figure you have not checked.</li>
+      <li><strong>Derive program addresses from seeds, never store a key for them</strong> (Tool 16 above): a PDA is <code>SHA-256(seeds ‖ bump ‖ program ID ‖ "ProgramDerivedAddress")</code> kept only when the hash lands off the ed25519 curve — a result on the curve could have a private key and is rejected, which is why derivation scans bump 255 downward for the first off-curve hash. At most 16 seeds, each at most 32 bytes; seeds are raw bytes (text means its UTF-8 encoding; a pubkey seed is its 32 bytes — an associated token account is exactly this derivation). A PDA has no private key: only its program can sign for it, with those seeds and that bump.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -686,6 +714,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>
