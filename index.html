@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch)), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1071,6 +1071,37 @@
         <p class="result" id="fgro-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>26. Inflation schedule calculator — how fast new SOL is issued</h3>
+      <p>SOL has no supply cap: new SOL is issued every epoch as staking rewards, at a rate set by the network's <strong>inflation schedule</strong> — three parameters in the validator code: an <strong>initial rate of 8%</strong> per year, a <strong>disinflation rate of 15%</strong> per year, and a <strong>long-term terminal rate of 1.5%</strong> the schedule never falls below: <code>rate = max(1.5%, 8% × (1 − disinflation)<sup>years</sup>)</code>. The year is <strong>fractional</strong> on-chain — the validator recomputes the rate every epoch from the fraction of a year elapsed since inflation began at epoch 150 (February 2021), so the rate glides down continuously rather than stepping once a year. Headline: at year 5 the rate is 3.5496%, which on a supply of 500,000,000 SOL issues 17,748,212.5 new SOL that year; the terminal floor arrives at year ≈10.30 (the first whole year at 1.5% is year 11). The disinflation rate is an input so the governance change adopted in 2026 — doubling it to 30%, which would pull the floor forward to year ≈4.69 — can be modelled honestly: it is <strong>not yet implemented</strong> in the validator, so 1,500 bps (15%) remains the shipped schedule. Annual issuance here holds the supply at the figure you enter; on-chain the supply itself grows by the issuance. An educational model of the inflation schedule, not live network data. Not financial advice.</p>
+      <form id="infl-calc">
+        <div class="grid">
+          <div>
+            <label for="infl-years">Years since the inflation start (fractions allowed)</label>
+            <input id="infl-years" name="infl-years" inputmode="decimal" value="5">
+          </div>
+          <div>
+            <label for="infl-supply">Total supply (SOL, held constant)</label>
+            <input id="infl-supply" name="infl-supply" inputmode="decimal" value="500000000">
+          </div>
+          <div>
+            <label for="infl-disinfl">Disinflation rate (basis points per year; 1,500 = the shipped 15%)</label>
+            <input id="infl-disinfl" name="infl-disinfl" inputmode="numeric" value="1500">
+          </div>
+          <div>
+            <label for="infl-rate-out">Inflation rate (model, % per year)</label>
+            <input id="infl-rate-out" name="infl-rate-out" readonly>
+          </div>
+          <div>
+            <label for="infl-issue-out">New SOL issued that year (model)</label>
+            <input id="infl-issue-out" name="infl-issue-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Compute the inflation rate</button>
+        <p class="result" id="infl-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1176,6 +1207,7 @@
       <li><strong>Size every account before you allocate it</strong> (Tool 22 above): an Anchor account is 8 discriminator bytes plus its Borsh field bytes, packed with no padding — Pubkey 32, u64 8, bool 1, a String 4 plus its maximum length — and the total is exactly the rent-exempt deposit it locks: a vault struct of Pubkey + u64 + bool + String(32) is 85 bytes and 1,482,480 lamports. Over-allocate and the waste is permanent; under-allocate and the first write that outgrows the space fails.</li>
       <li><strong>Time a stake's warmup or cooldown by the queue, not the calendar</strong> (Tool 24 above): stake changes state only at epoch boundaries, and per epoch at most 9% of the cluster's effective stake may activate or deactivate in total (900 bps; it was 25% before the rate reduction), shared pro-rata by everything moving — your epoch change is your portion ÷ the total moving × that cap, floored, with a 1-lamport minimum. A stake small against the cluster is fully effective after one epoch; whale-sized moves and crowded exits take several, which is why an unstake can still be draining after the epoch rolls.</li>
       <li><strong>Read a CLMM position's fees from its counters, not a balance</strong> (Tool 25 above): uncollected fees are floor((fee growth inside now − at last touch) × liquidity ÷ 2<sup>64</sup>) plus what an earlier touch already settled as owed — and the subtraction wraps modulo 2<sup>128</sup>, so a counter lower than its stored value is the u128 wrapping, not negative fees. Touching a position settles and re-stores the counter, which is why "since the last touch" is the only span the growth delta ever describes.</li>
+      <li><strong>Price dilution from the schedule, not from headlines</strong> (Tool 26 above): new SOL is issued at max(1.5%, 8% × 0.85<sup>years</sup>) — at year 5 that is 3.5496%, and the 1.5% terminal floor arrives at year ≈10.30, so issuance never stops, it just slows to the floor. The rate glides per epoch (the year is fractional on-chain), and a governance-adopted doubling of the disinflation rate to 30% is not a live parameter until the validator implements it — model it at 3,000 bps, don't quote it as current.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1202,6 +1234,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

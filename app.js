@@ -965,6 +965,71 @@ function clmmFeesOwed(liqStr, nowAStr, lastAStr, nowBStr, lastBStr, owedAStr, ow
   };
 }
 
+/* ---------- Tool 26: inflation schedule ---------- */
+/* SOL has no supply cap: new SOL is issued every epoch as staking
+   rewards, at a rate set by the network's inflation schedule - the
+   three parameters the validator code (solana-sdk's Inflation) ships
+   with: an initial rate of 8% per year, a disinflation rate of 15%
+   per year, and a long-term (terminal) rate of 1.5% per year that the
+   schedule never falls below:
+     rate(year) = max(terminal, initial x (1 - disinflation)^year)
+   The year is FRACTIONAL on-chain - the validator recomputes the rate
+   every epoch from the fraction of a year elapsed, so the rate glides
+   down continuously rather than stepping once a year - which is why
+   this tool takes fractional years. Inflation began at epoch 150
+   (February 2021); "years" here are years since that start. The math
+   is floating point because the schedule itself is f64 on-chain -
+   unlike the integer tools, there is no exact integer form to match.
+   Annual issuance is rate x total supply with the supply HELD at the
+   entered figure: on-chain the supply itself grows by the issuance,
+   so a multi-year projection compounds the base as well - stated on
+   the page, not modelled. The disinflation rate is an input (default
+   1,500 bps, the shipped schedule) so the adopted-but-not-yet-
+   implemented governance change to 30% (3,000 bps) can be modelled
+   without presenting it as live: at 15% the terminal rate arrives at
+   year ~10.30 (first whole year 11); at 30%, year ~4.69 (year 5). */
+var INITIAL_INFLATION_PCT = 8;
+var TERMINAL_INFLATION_PCT = 1.5;
+
+function formatRateNum(x, places) {
+  var s = x.toFixed(places);
+  if (s.indexOf(".") !== -1) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return s;
+}
+
+function inflationSchedule(yearsStr, supplyStr, disinflationBps) {
+  var yearsScaled = parseScaled(yearsStr);
+  var supplyScaled = parseScaled(supplyStr);
+  var disBps = Number(disinflationBps);
+  if (yearsScaled === null || supplyScaled === null) return null;
+  if (supplyScaled <= 0n) return null;
+  if (yearsScaled > 10000n * SCALE) return null;
+  if (!Number.isInteger(disBps) || disBps < 0 || disBps > 9999) return null;
+  var years = Number(yearsScaled) / 1e9;
+  var supply = Number(supplyScaled) / 1e9;
+  var dis = disBps / 10000;
+  var rawRate = INITIAL_INFLATION_PCT * Math.pow(1 - dis, years);
+  var rate = Math.max(TERMINAL_INFLATION_PCT, rawRate);
+  var atTerminal = rawRate <= TERMINAL_INFLATION_PCT;
+  var yearsToTerminal = null;
+  var firstWholeYearAtTerminal = null;
+  if (disBps > 0) {
+    var crossing = Math.log(TERMINAL_INFLATION_PCT / INITIAL_INFLATION_PCT) / Math.log(1 - dis);
+    yearsToTerminal = formatRateNum(Math.max(0, crossing - years), 2);
+    firstWholeYearAtTerminal = Math.ceil(crossing - 1e-9);
+  }
+  return {
+    years: formatScaled(yearsScaled),
+    supply: formatScaled(supplyScaled),
+    disinflationBps: disBps,
+    ratePct: rate.toFixed(4),
+    annualIssuance: formatRateNum(supply * rate / 100, 4),
+    atTerminal: atTerminal,
+    yearsToTerminal: yearsToTerminal,
+    firstWholeYearAtTerminal: firstWholeYearAtTerminal
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1457,6 +1522,7 @@ if (typeof module !== "undefined" && module.exports) {
     saleSplit,
     stakeWarmup, CURRENT_WARMUP_COOLDOWN_BPS, LEGACY_WARMUP_COOLDOWN_BPS,
     clmmFeesOwed, FEE_GROWTH_Q64, FEE_GROWTH_MODULUS,
+    inflationSchedule, INITIAL_INFLATION_PCT, TERMINAL_INFLATION_PCT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1993,6 +2059,26 @@ if (typeof document !== "undefined") {
         ? " One counter is lower than its last-touch value: that is the u128 counter wrapping, not an error - the subtraction is done modulo 2^128 exactly as on-chain, so the delta is still the true small increment."
         : "";
       setText("fgro-result", "Model output: at liquidity " + res.liquidity + ", token A accrued " + res.accruedA + " raw units since the last touch (" + res.accruedAUi + " at " + res.decimalsA + " decimals) on a fee-growth delta of " + res.deltaA + ", and token B accrued " + res.accruedB + " raw units (" + res.accruedBUi + " at " + res.decimalsB + " decimals) on a delta of " + res.deltaB + ". Added to what was already settled as owed (" + res.owedA + " A / " + res.owedB + " B raw), the position can collect " + res.totalA + " raw A (" + res.totalAUi + ") and " + res.totalB + " raw B (" + res.totalBUi + ")." + wrapNote + " The growth counters are inputs here, as an explorer or the SDK reports them - this tool does not read a live position. An educational model of CLMM fee accounting, not a live position quote. Not financial advice.");
+    });
+
+    var inflForm = document.getElementById("infl-calc");
+    if (inflForm) inflForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = inflationSchedule(val("infl-years"), val("infl-supply"), val("infl-disinfl"));
+      if (res === null) {
+        document.getElementById("infl-rate-out").value = "Invalid";
+        document.getElementById("infl-issue-out").value = "Invalid";
+        setText("infl-result", "Check the inputs: years since the inflation start is a number from 0 to 10,000 (fractions allowed - the rate glides per epoch, it does not step yearly), the total supply is a positive SOL amount with at most 9 decimal places, and the disinflation rate is a whole number of basis points from 0 to 9,999 (1,500 bps = 15% is the shipped schedule).");
+        return;
+      }
+      document.getElementById("infl-rate-out").value = res.ratePct + "%";
+      document.getElementById("infl-issue-out").value = res.annualIssuance;
+      var termNote = res.disinflationBps === 0
+        ? " At a 0 bps disinflation rate the schedule never decays, so the terminal rate is never reached."
+        : (res.atTerminal
+          ? " The raw schedule rate has fallen to or past the 1.5% terminal rate, so the rate is clamped at the floor - it first reached the floor at year " + res.firstWholeYearAtTerminal + "."
+          : " At this disinflation rate the schedule reaches its 1.5% terminal floor in " + res.yearsToTerminal + " more years - the first whole year at the floor is year " + res.firstWholeYearAtTerminal + ".");
+      setText("infl-result", "Model output: " + res.years + " year(s) after the inflation start, at a disinflation rate of " + res.disinflationBps + " bps per year, the inflation rate is " + res.ratePct + "% per year. On a total supply of " + res.supply + " SOL held constant, that issues " + res.annualIssuance + " new SOL over that year, paid as staking rewards." + termNote + " The supply is held at your figure for the year shown - on-chain the supply itself grows by the issuance - and the 30% disinflation adopted by governance in 2026 is not yet implemented in the validator, so 1,500 bps remains the shipped schedule; enter 3,000 bps to model it. An educational model of the inflation schedule, not live network data. Not financial advice.");
     });
 
     /* catalogue filter */
