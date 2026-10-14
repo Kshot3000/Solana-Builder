@@ -14,6 +14,7 @@ I build, fix and improve across Solana: Raydium, Jupiter, Orca, Anchor, Solana P
 4. **Impermanent-loss calculator** — 2√r/(1+r) − 1 for a 50/50 pool position.
 5. **Transaction fee estimator** — 5,000 lamports per signature plus the priority fee, ceil(CU limit × CU price in micro-lamports ÷ 1,000,000), charged on the requested CU limit (capped at 1,400,000).
 6. **SPL token amount converter** — UI amount ⇄ raw units by the mint's own decimals (USDC 6, SOL 9, some mints 0), exact BigInt; amounts finer than the mint's decimals are rejected, never rounded.
+7. **Solana address checker** — base58 format validation: every character in the base58 alphabet (no 0, O, I or l) and a decoded length of exactly 32 bytes; format only — it does not check that an account exists or is safe to send to.
 
 Every tool is labelled on the page for what it is: an educational model, not live quotes, not live data, not financial advice. No wallet connects and nothing executes on-chain.
 

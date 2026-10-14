@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -206,6 +206,25 @@
         <p class="result" id="tok-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>7. Solana address checker — base58 format</h3>
+      <p>Every Solana address is 32 bytes written in base58, the alphabet that omits 0, O, I and l so addresses can't be misread. Paste an address and check its format locally, before you trust it anywhere: every character must be base58 and the decoded value must be exactly 32 bytes. A pasted address with stray extra characters decodes to the wrong length and fails here. This checks format only — not that the account exists, holds anything, or is the address you meant.</p>
+      <form id="addr-calc">
+        <div class="grid">
+          <div>
+            <label for="addr-in">Address to check</label>
+            <input id="addr-in" name="addr-in" placeholder="G7xepVyQSrxtH61ZooXvPAmnS8omQ1TvHqB8qDmHXWm">
+          </div>
+          <div>
+            <label for="addr-out">Format result</label>
+            <input id="addr-out" name="addr-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Check the address</button>
+        <p class="result" id="addr-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -293,6 +312,7 @@
       <li><strong>Learn the account model first</strong> (Tool 3 above): every program you write allocates accounts, and rent-exempt minimums decide how much SOL each one locks up.</li>
       <li><strong>Price a transaction before you send it</strong> (Tool 5 above): 5,000 lamports per signature plus a priority fee charged on the compute-unit limit you request — simulate, then set the limit close to real usage instead of overpaying for headroom you never use.</li>
       <li><strong>Convert token amounts with the mint's own decimals</strong> (Tool 6 above): token accounts store raw integers, and the same raw number is a different UI amount under every mint — read the decimals off the mint before you move an amount between code and UI.</li>
+      <li><strong>Check every address before you trust it</strong> (Tool 7 above): an address is 32 bytes in base58 — a paste with stray or missing characters decodes to the wrong length. Format is only the first check; still compare the full address character-for-character with its source.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -319,6 +339,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

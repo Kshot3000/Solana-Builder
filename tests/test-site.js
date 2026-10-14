@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=3"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=4"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("six tool forms", (html.match(/<form id=/g) || []).length === 6);
+check("seven tool forms", (html.match(/<form id=/g) || []).length === 7);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -142,6 +142,27 @@ check("negative or fractional decimals rejected", app.tokenToRaw("1", -1) === nu
 check("round trip 42.42 at 6 decimals", app.rawToToken(app.tokenToRaw("42.42", 6), 6) === "42.42");
 check("token converter exposes the decimals cap", app.MAX_TOKEN_DECIMALS === 18);
 check("guide teaches token decimals (Tool 6)", guide.includes("Tool 6") && guide.includes("10^decimals"));
+
+/* Tool 7 — address checker: base58 format, exactly 32 decoded bytes */
+check("hub donation address is valid format (43 chars, 32 bytes)", (() => { const r = app.checkAddress(SOL); return r.valid && r.charLength === 43 && r.byteLength === 32; })());
+check("invalid 45-char stray-paste form rejected as wrong length (33 bytes)", (() => { const r = app.checkAddress(SOL_INVALID_45); return !r.valid && r.reason === "wrong-length" && r.byteLength === 33; })());
+check("System Program address (32 ones) is 32 zero bytes and valid", (() => { const r = app.checkAddress("11111111111111111111111111111111"); const b = app.base58Decode("11111111111111111111111111111111"); return r.valid && b.length === 32 && b.every((x) => x === 0); })());
+check("wrapped SOL mint valid", app.checkAddress("So11111111111111111111111111111111111111112").valid === true);
+check("USDC mint valid (44 chars)", app.checkAddress("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").valid === true);
+check("SPL Token program valid", app.checkAddress("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").valid === true);
+check("characters 0 O I l each rejected as invalid-character", ["0", "O", "I", "l"].every((c) => app.checkAddress("abc" + c + "def").reason === "invalid-character"));
+check("bad character is named", app.checkAddress("abc0def").badCharacter === "0");
+check("empty and whitespace-only rejected as empty", app.checkAddress("").reason === "empty" && app.checkAddress("   ").reason === "empty");
+check("short base58 rejected as wrong length", (() => { const r = app.checkAddress("1111"); return !r.valid && r.reason === "wrong-length" && r.byteLength === 4; })());
+check("internal space rejected as invalid character", app.checkAddress("G7xep VyQ").reason === "invalid-character");
+check("outer whitespace trimmed before checking", app.checkAddress("  " + SOL + " ").valid === true);
+check("non-string rejected", app.checkAddress(null).valid === false && app.checkAddress(42).valid === false);
+check("decode-encode round trip on real addresses", [SOL, "So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "11111111111111111111111111111111"].every((a) => app.base58Encode(app.base58Decode(a)) === a));
+check("encode of 32 zero bytes is 32 ones", app.base58Encode(new Array(32).fill(0)) === "11111111111111111111111111111111");
+check("base58Decode rejects junk and empty", app.base58Decode("0") === null && app.base58Decode("") === null);
+check("base58 alphabet omits 0 O I l and has 58 chars", app.BASE58_ALPHABET.length === 58 && !/[0OIl]/.test(app.BASE58_ALPHABET));
+check("guide teaches address format (Tool 7)", guide.includes("Tool 7") && guide.includes("32 bytes"));
+check("address checker labelled format-only in index.html", html.includes("This checks format only"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);

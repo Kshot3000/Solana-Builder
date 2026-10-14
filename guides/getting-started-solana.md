@@ -23,13 +23,15 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the five mechanics that decide your costs
+## 3. Learn the six mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
 3. **Pool pricing.** AMM swaps price off the constant-product curve. Run the swap model (Tool 2) at a few sizes and watch price impact: that curve is what Raydium, Orca and every aggregator route around.
 4. **Transaction fees.** Every transaction pays 5,000 lamports per signature, plus an optional priority fee: `ceil(CU limit × CU price ÷ 1,000,000)` lamports, with the price in micro-lamports per compute unit. The fee is charged on the limit you request (capped at 1,400,000 CU), not the compute you use — simulate first and set the limit close to real usage. The hub's estimator (Tool 5) works the numbers.
 5. **Token decimals.** Lamports are the 9-decimal special case: every SPL mint sets its own decimals (USDC 6, many mints 9, some 0), token accounts store raw integer amounts, and the UI amount is raw ÷ 10^decimals. Never hardcode 9 for a token — read the decimals off the mint, and reject amounts finer than they allow instead of rounding them. The hub's converter (Tool 6) shows both directions exactly.
+
+6. **Address format.** An address is 32 bytes in base58 — the alphabet omits 0, O, I and l so addresses can't be misread, and leading `1`s are leading zero bytes (the System Program is 32 zero bytes). Anything that isn't base58, or decodes to anything but exactly 32 bytes, is not an address: a paste with two stray characters tacked on decodes to 33 bytes and fails. The hub's checker (Tool 7) validates the format locally — then still compare the full address character-for-character with its source, because format says nothing about whose address it is.
 
 ## 4. Scaffold and test
 

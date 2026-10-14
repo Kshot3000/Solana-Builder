@@ -157,6 +157,65 @@ function rawToToken(rawStr, decimals) {
   return whole.toString() + (frac ? "." + frac : "");
 }
 
+/* ---------- Tool 7: Solana address checker (base58, 32 bytes) ---------- */
+/* A Solana public key / address is 32 bytes written in base58 — the alphabet
+   Bitcoin introduced, which omits 0, O, I and l so addresses can't be misread.
+   Leading '1' characters are leading zero bytes (the System Program address
+   111...1 is 32 zero bytes). Valid FORMAT is exactly: every character in the
+   alphabet and a decoded length of exactly 32 bytes. That is all this checks,
+   locally: it does NOT prove the account exists, holds anything, is on the
+   ed25519 curve (program-derived addresses are valid 32-byte addresses that
+   are deliberately off-curve), or is safe to send to — always compare the full
+   address character-for-character with the source you trust. */
+var BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function base58Decode(str) {
+  if (typeof str !== "string" || str.length === 0) return null;
+  var n = 0n;
+  for (var i = 0; i < str.length; i++) {
+    var idx = BASE58_ALPHABET.indexOf(str[i]);
+    if (idx < 0) return null;
+    n = n * 58n + BigInt(idx);
+  }
+  var zeros = 0;
+  while (zeros < str.length && str[zeros] === "1") zeros++;
+  var body = [];
+  while (n > 0n) { body.unshift(Number(n % 256n)); n = n / 256n; }
+  var out = [];
+  for (var z = 0; z < zeros; z++) out.push(0);
+  return out.concat(body);
+}
+
+function base58Encode(bytes) {
+  if (!bytes || typeof bytes.length !== "number") return null;
+  var zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  var n = 0n;
+  for (var i = 0; i < bytes.length; i++) {
+    if (!Number.isInteger(bytes[i]) || bytes[i] < 0 || bytes[i] > 255) return null;
+    n = n * 256n + BigInt(bytes[i]);
+  }
+  var s = "";
+  while (n > 0n) { s = BASE58_ALPHABET[Number(n % 58n)] + s; n = n / 58n; }
+  return "1".repeat(zeros) + s;
+}
+
+function checkAddress(str) {
+  if (typeof str !== "string") return { valid: false, charLength: 0, byteLength: null, reason: "empty" };
+  var s = str.trim();
+  if (s.length === 0) return { valid: false, charLength: 0, byteLength: null, reason: "empty" };
+  for (var i = 0; i < s.length; i++) {
+    if (BASE58_ALPHABET.indexOf(s[i]) < 0) {
+      return { valid: false, charLength: s.length, byteLength: null, reason: "invalid-character", badCharacter: s[i] };
+    }
+  }
+  var bytes = base58Decode(s);
+  if (bytes.length !== 32) {
+    return { valid: false, charLength: s.length, byteLength: bytes.length, reason: "wrong-length" };
+  }
+  return { valid: true, charLength: s.length, byteLength: 32, reason: null };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -176,8 +235,10 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     parseScaled, formatScaled, solToLamports, lamportsToSol, cpSwap,
     rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch,
+    base58Decode, base58Encode, checkAddress,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
-    BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS
+    BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS,
+    BASE58_ALPHABET
   };
 }
 
@@ -283,6 +344,23 @@ if (typeof document !== "undefined") {
         if (u !== null) document.getElementById("tok-ui-out").value = u;
       } else {
         setText("tok-result", "Set the mint's decimals, fill in either the UI amount or the raw amount, then convert.");
+      }
+    });
+
+    var addrForm = document.getElementById("addr-calc");
+    if (addrForm) addrForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = checkAddress(val("addr-in"));
+      if (res.valid) {
+        document.getElementById("addr-out").value = "Valid format — 32 bytes";
+        setText("addr-result", "Format check passed: " + res.charLength + " base58 characters decoding to exactly 32 bytes. This local check proves only the format — not that the account exists, holds anything, or is the address you meant. Compare the full address character-for-character with the source you trust before sending anything to it.");
+      } else {
+        document.getElementById("addr-out").value = "Invalid";
+        setText("addr-result", res.reason === "invalid-character"
+          ? "Invalid: the character '" + res.badCharacter + "' is not in the base58 alphabet — base58 omits 0, O, I and l precisely so addresses cannot be misread. This string is not a Solana address."
+          : res.reason === "wrong-length"
+            ? "Invalid: this is well-formed base58 but decodes to " + res.byteLength + " bytes, and a Solana address is exactly 32 bytes. A pasted address with extra or missing characters lands here — re-copy it from the source and compare in full."
+            : "Enter an address to check — a string of base58 characters that should decode to exactly 32 bytes.");
       }
     });
 
