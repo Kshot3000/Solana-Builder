@@ -570,6 +570,53 @@ function vestingSchedule(totalStr, cliffMonths, durationMonths, elapsedMonths) {
   };
 }
 
+
+/* ---------- Tool 20: lending health & liquidation ---------- */
+/* Solana lending markets (Kamino, Marginfi, Drift and peers) track a
+   position by three numbers this model computes in exact scaled BigInt:
+   collateral value = amount x price; loan-to-value = debt / value; and
+   the health factor = (value x liquidation threshold) / debt. A market
+   may liquidate when the health factor falls below 1 - the collateral
+   price where it equals 1 is the liquidation price,
+   debt / (amount x threshold). Borrowing power is set by the LOWER max
+   LTV, not the threshold: max borrow total = value x max LTV, and the
+   gap between the two percentages is the market's safety buffer - a
+   position opened at max LTV is not liquidatable yet, but any price
+   drop eats the buffer first. Single collateral, single debt, no
+   interest accrual, no liquidation bonus or fee and no cross-asset
+   weighting beyond the two percentages entered - real markets weight
+   several assets and accrue interest continuously, so a real health
+   factor drifts even at a flat price. */
+function lendingHealth(amountStr, priceStr, debtStr, liqThresholdBps, maxLtvBps) {
+  var A = parseScaled(amountStr), P = parseScaled(priceStr), D = parseScaled(debtStr);
+  var liq = Number(liqThresholdBps), mx = Number(maxLtvBps);
+  if (A === null || P === null || D === null) return null;
+  if (A <= 0n || P <= 0n || D < 0n) return null;
+  if (!Number.isInteger(liq) || !Number.isInteger(mx)) return null;
+  if (liq < 1 || liq > 10000 || mx < 0 || mx > liq) return null;
+  var V = (A * P) / SCALE;
+  if (V <= 0n) return null;
+  var maxBorrowTotal = (V * BigInt(mx)) / 10000n;
+  var additionalBorrow = maxBorrowTotal > D ? maxBorrowTotal - D : 0n;
+  var liqPrice = D === 0n ? 0n : (D * 10000n * SCALE) / (A * BigInt(liq));
+  var thresholdValue = V * BigInt(liq);
+  var debtAtThreshold = D * 10000n;
+  var status = D === 0n ? "no-debt" : (thresholdValue < debtAtThreshold ? "liquidatable" : (thresholdValue === debtAtThreshold ? "at-threshold" : "healthy"));
+  return {
+    amount: formatScaled(A), price: formatScaled(P), debt: formatScaled(D),
+    liqThresholdBps: liq, maxLtvBps: mx,
+    collateralValue: formatScaled(V),
+    ltvPct: Number(D * 100000000n / V) / 1000000,
+    healthFactor: D === 0n ? null : Number(thresholdValue) / Number(debtAtThreshold),
+    maxBorrowTotal: formatScaled(maxBorrowTotal),
+    additionalBorrow: formatScaled(additionalBorrow),
+    overMaxBorrow: D > maxBorrowTotal,
+    liquidationPrice: formatScaled(liqPrice),
+    priceDropPct: D === 0n ? 100 : Number((P - liqPrice) * 100000000n / P) / 1000000,
+    status: status
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1056,7 +1103,7 @@ if (typeof module !== "undefined" && module.exports) {
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     sandwichAttack, liquidStaking,
-    clmmPosition, lpDeposit, isqrtBigInt, vestingSchedule, MAX_VESTING_MONTHS,
+    clmmPosition, lpDeposit, isqrtBigInt, vestingSchedule, MAX_VESTING_MONTHS, lendingHealth,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1467,6 +1514,29 @@ if (typeof document !== "undefined") {
           ? "Nothing is claimable yet: month " + res.elapsedMonths + " is before the month-" + res.cliffMonths + " cliff, even though " + res.accrued + " tokens (" + res.accruedPct.toFixed(6) + "% of the allocation) have accrued on paper. At the cliff the accrued share releases at once - " + res.atCliff + " tokens - and from then on the claimable amount follows the linear accrual: " + res.locked + " tokens stay locked for now, and the schedule completes at month " + res.durationMonths + "."
           : "The cliff has passed, so the claimable amount is the accrued amount: " + res.claimable + " of " + res.total + " tokens (" + res.accruedPct.toFixed(6) + "%), with " + res.locked + " still locked and " + res.monthsRemaining + " months until the schedule completes at month " + res.durationMonths + ". The cliff at month " + res.cliffMonths + " released " + res.atCliff + " tokens at once.";
       setText("vest-result", "Model output: " + where + " This model accrues linearly from day one in whole months and floors at the token's smallest unit; real schedules run on timestamps, and some start the linear accrual at the cliff instead - check which convention your schedule's terms use. An educational model, not a live vesting contract. Not financial advice.");
+    });
+
+
+    var lendForm = document.getElementById("lend-calc");
+    if (lendForm) lendForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = lendingHealth(val("lend-amt"), val("lend-price"), val("lend-debt"), val("lend-liq"), val("lend-maxltv"));
+      if (res === null) {
+        document.getElementById("lend-hf-out").value = "Invalid";
+        document.getElementById("lend-liqprice-out").value = "Invalid";
+        setText("lend-result", "Check the inputs: the collateral amount and its price must be positive numbers with at most 9 decimals, the debt a number of 0 or more, the liquidation threshold a whole number of basis points from 1 to 10,000, and the max LTV a whole number of basis points from 0 up to the liquidation threshold.");
+        return;
+      }
+      document.getElementById("lend-hf-out").value = res.healthFactor === null ? "No debt" : res.healthFactor.toFixed(6);
+      document.getElementById("lend-liqprice-out").value = res.liquidationPrice;
+      var where = res.status === "no-debt"
+        ? "There is no debt, so the position cannot be liquidated: its full borrowing power of " + res.maxBorrowTotal + " is still available at the max LTV entered."
+        : res.status === "liquidatable"
+          ? "The health factor is below 1, so a market using these thresholds could liquidate this position now: the collateral price is already past the liquidation price of " + res.liquidationPrice + "."
+          : res.status === "at-threshold"
+            ? "The health factor is exactly 1: the position sits exactly on its liquidation threshold at this price, and any price drop or interest accrual pushes it below."
+            : "The position is above its liquidation threshold: the collateral price can fall about " + res.priceDropPct.toFixed(4) + "% - to " + res.liquidationPrice + " - before the health factor reaches 1." + (res.overMaxBorrow ? " Note the debt is already above the max borrow total at the max LTV entered, even though it is not liquidatable yet - that gap is the safety buffer between the two percentages." : "");
+      setText("lend-result", "Model output: collateral worth " + res.collateralValue + " against debt of " + res.debt + " is an LTV of " + res.ltvPct.toFixed(4) + "% and a health factor of " + (res.healthFactor === null ? "none (no debt)" : res.healthFactor.toFixed(6)) + ". At the max LTV of " + (res.maxLtvBps / 100) + "% the most this collateral can borrow in total is " + res.maxBorrowTotal + ", so the additional borrowing power is " + res.additionalBorrow + ". " + where + " Single collateral and single debt, no interest accrual and no liquidation bonus or fee modelled; real markets weight several assets, accrue interest continuously and set their own thresholds - read the market's own risk parameters before borrowing. An educational model, not a live lending quote. Not financial advice.");
     });
 
     /* catalogue filter */

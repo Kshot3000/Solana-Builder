@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -699,6 +699,44 @@
         <p class="result" id="vest-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>20. Lending health &amp; liquidation calculator</h3>
+      <p>Solana lending markets (Kamino, Marginfi, Drift and peers) judge a borrow position by its <strong>health factor</strong>: <code>health = (collateral value x liquidation threshold) / debt</code>, where the collateral value is amount x price and the loan-to-value is debt / value. Below a health factor of 1 a market may liquidate - the price where health equals exactly 1 is the <strong>liquidation price</strong>, <code>debt / (amount x threshold)</code>. Borrowing power is set by the lower <strong>max LTV</strong>, not the threshold: the gap between the two percentages is the market's safety buffer. Headline: 10 tokens at a price of 100 against 500 of debt at an 80% liquidation threshold and a 75% max LTV is worth 1,000 - an LTV of 50%, a health factor of 1.6, a max borrow total of 750 (250 still available), and a liquidation price of 62.5, a fall of about 37.5%. Single collateral and single debt, no interest accrual and no liquidation bonus or fee modelled - real markets weight several assets and accrue interest continuously, so a real health factor drifts even at a flat price. An educational model, not a live lending quote. Not financial advice.</p>
+      <form id="lend-calc">
+        <div class="grid">
+          <div>
+            <label for="lend-amt">Collateral amount (tokens)</label>
+            <input id="lend-amt" name="lend-amt" inputmode="decimal" value="10">
+          </div>
+          <div>
+            <label for="lend-price">Collateral price (quote per token)</label>
+            <input id="lend-price" name="lend-price" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="lend-debt">Debt (quote value)</label>
+            <input id="lend-debt" name="lend-debt" inputmode="decimal" value="500">
+          </div>
+          <div>
+            <label for="lend-liq">Liquidation threshold (basis points)</label>
+            <input id="lend-liq" name="lend-liq" inputmode="numeric" value="8000">
+          </div>
+          <div>
+            <label for="lend-maxltv">Max LTV (basis points)</label>
+            <input id="lend-maxltv" name="lend-maxltv" inputmode="numeric" value="7500">
+          </div>
+          <div>
+            <label for="lend-hf-out">Health factor (model)</label>
+            <input id="lend-hf-out" name="lend-hf-out" readonly>
+          </div>
+          <div>
+            <label for="lend-liqprice-out">Liquidation price (model)</label>
+            <input id="lend-liqprice-out" name="lend-liqprice-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Check the position health</button>
+        <p class="result" id="lend-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -799,6 +837,7 @@
       <li><strong>Size a concentrated position from its liquidity, not from token amounts</strong> (Tool 17 above): a CLMM position is L plus a tick range, and the amounts follow — inside the range it holds both assets in the proportion the current tick sets, below the range only token0, above it only token1, sliding continuously as the price crosses. At tick 0 over −600…600, L = 1,000,000 holds about 29,553 of each. The amounts are principal only: earned fees accrue separately, and every price move re-splits the position toward the asset being sold — that drift is the exposure behind impermanent loss.</li>
       <li><strong>Deposit into a pool at its ratio, not yours</strong> (Tool 18 above): a constant-product pool mints LP tokens from the smaller side's contribution — <code>supply × min(depositA ÷ reserveA, depositB ÷ reserveB)</code> — and only the ratio-matching part of a deposit is used, so an off-ratio deposit wastes the excess unless the interface returns it. The first deposit is the exception: into an empty pool it sets the starting price and mints <code>sqrt(depositA × depositB)</code>. Your share afterwards is minted ÷ new supply, and burning it later returns that share of whatever the pool holds then — not what you put in.</li>
       <li><strong>Read a vesting schedule by its cliff, not its accrual</strong> (Tool 19 above): an allocation can accrue linearly from day one yet be claimable for exactly 0 until the cliff month, when the whole accrued share releases at once - a 1,000,000-token allocation on a 12-month cliff over 48 months shows 125,000 accrued and 0 claimable at month 6, then 250,000 released at the cliff. Schedules differ: some start the linear accrual at the cliff instead of gating it, and real contracts run on timestamps, not whole months - read the terms before valuing any locked allocation.</li>
+      <li><strong>Judge a borrow by its health factor, not its LTV alone</strong> (Tool 20 above): a lending position is liquidatable when (collateral value x liquidation threshold) / debt falls below 1 - 10 tokens at 100 against 500 of debt at an 80% threshold has a health factor of 1.6 and a liquidation price of 62.5. The max LTV is the borrowing limit, the threshold is the liquidation line, and the gap between them is the safety buffer; interest accrual moves a real health factor even at a flat price.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -825,6 +864,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>
