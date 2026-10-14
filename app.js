@@ -426,6 +426,39 @@ function clmmRange(lower, upper, current, spacing) {
   };
 }
 
+/* ---------- Tool 11: slippage tolerance bounds ---------- */
+/* Every DEX interface asks for a slippage tolerance — how far the price may
+   move against the trader between quote and landing — and turns it into a
+   signed bound the on-chain program enforces: minimumReceived =
+   expectedOut * (10000 - bps) / 10000 for an exact-in swap, maximumInput =
+   expectedIn * (10000 + bps) / 10000 for an exact-out swap. Both divisions
+   FLOOR in exact scaled-BigInt (never round), so the bound is never looser
+   than the tolerance picked: an expected 4 at 50 bps protects at 3.98, not
+   4. A dust expected output can floor the minimum to exactly 0 — returned
+   as 0 here because that IS the bound the maths gives, and the handler
+   warns about it plainly rather than dressing it up as protection. */
+var MAX_SLIPPAGE_BPS = 9999;
+
+function slippageAmounts(expectedOutStr, expectedInStr, toleranceBps) {
+  var eOut = parseScaled(expectedOutStr);
+  var eIn = parseScaled(expectedInStr);
+  var bps = Number(toleranceBps);
+  if (eOut === null || eIn === null) return null;
+  if (eOut <= 0n || eIn <= 0n) return null;
+  if (!Number.isInteger(bps) || bps < 0 || bps > MAX_SLIPPAGE_BPS) return null;
+  var minReceived = (eOut * BigInt(10000 - bps)) / 10000n;
+  var maxInput = (eIn * BigInt(10000 + bps)) / 10000n;
+  return {
+    expectedOut: formatScaled(eOut),
+    expectedIn: formatScaled(eIn),
+    toleranceBps: bps,
+    tolerancePct: bps / 100,
+    minimumReceived: formatScaled(minReceived),
+    maximumInput: formatScaled(maxInput),
+    minimumIsZero: minReceived === 0n
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -448,6 +481,7 @@ if (typeof module !== "undefined" && module.exports) {
     base58Decode, base58Encode, checkAddress, stakingRewards,
     buildSolanaPayUrl, parseSolanaPayUrl, validPayAmount, KNOWN_MINT_DECIMALS,
     tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
+    slippageAmounts, MAX_SLIPPAGE_BPS,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
     SLOTS_PER_EPOCH, EPOCHS_PER_YEAR, MAX_STAKING_EPOCHS,
     BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS,
@@ -672,6 +706,19 @@ if (typeof document !== "undefined") {
       document.getElementById("range-out").value = res.inRange ? "In range — active" : "Out of range — inactive";
       function fmtPrice(p) { return p < 0.001 || p >= 1e15 ? p.toExponential(6) : String(Number(p.toPrecision(10))); }
       setText("range-result", "Model output: ticks " + res.tickLower + " to " + res.tickUpper + " are prices " + fmtPrice(res.priceLower) + " to " + fmtPrice(res.priceUpper) + " — a range " + res.widthPct.toFixed(2) + "% wide (upper/lower ratio " + res.widthRatio.toFixed(4) + "). The current tick " + res.tickCurrent + " (price " + fmtPrice(res.priceCurrent) + ") is " + (res.inRange ? "inside the range, so the position is active and earning swap fees at this price." : "outside the range, so the position holds only one asset and earns no swap fees until the price returns.") + " Prices are in raw token units — a UI price also depends on the two mints' decimals. An educational model, not a live pool quote. Not financial advice.");
+    });
+
+    var slipForm = document.getElementById("slip-calc");
+    if (slipForm) slipForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = slippageAmounts(val("slip-expout"), val("slip-expin"), val("slip-bps"));
+      if (res === null) {
+        setText("slip-result", "Check the inputs: expected amounts must be positive numbers with at most 9 decimals, and the tolerance a whole number of basis points from 0 to 9,999.");
+        return;
+      }
+      document.getElementById("slip-min-out").value = res.minimumReceived;
+      document.getElementById("slip-max-out").value = res.maximumInput;
+      setText("slip-result", "Model bounds at a " + res.toleranceBps + " bps (" + res.tolerancePct + "%) tolerance: an exact-in swap quoting " + res.expectedOut + " out must land at least " + res.minimumReceived + ", and an exact-out swap quoting " + res.expectedIn + " in may cost at most " + res.maximumInput + " — past either bound the program aborts the swap instead of filling. Both bounds floored in exact integer math, never rounded in your favour." + (res.minimumIsZero ? " Warning: at this tolerance the minimum received floors to exactly 0 — the amount is dust at this precision, so this bound protects nothing." : "") + (res.toleranceBps >= 1000 ? " Caution: a tolerance of 10% or more lets a very bad fill — including a sandwich attack — still pass; most swappers stay at 0.1–1%." : "") + " An educational model of the bound, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

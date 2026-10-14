@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -366,6 +366,36 @@
         <p class="result" id="range-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>11. Slippage tolerance &amp; minimum-received calculator</h3>
+      <p>Every DEX interface on Solana — Jupiter, Raydium, Orca — asks for a slippage tolerance before it sends your swap. The tolerance is the most the price may move against you between the quote and the transaction landing: the wallet computes a <strong>minimum received</strong> (expected out × (1 − tolerance)) for an exact-in swap, or a <strong>maximum input</strong> (expected in × (1 + tolerance)) for an exact-out swap, and the on-chain program aborts the swap instead of filling past that bound. Both bounds are rounded <em>against</em> you on purpose — minimum received floors, maximum input floors — so the bound you sign is never looser than the tolerance you picked: an expected 4 at 0.5% protects at 3.98, never rounded back up to 4. Too tight a tolerance and ordinary price movement (or another trade landing first) fails your swap and costs the fee anyway; too loose and a worse fill — including a sandwich attack — still passes. Enter an expected output, an expected input, and a tolerance in basis points (25 bps = 0.25%, 50 bps = 0.5%, 100 bps = 1%). An educational model of the bound, not a live quote.</p>
+      <form id="slip-calc">
+        <div class="grid">
+          <div>
+            <label for="slip-expout">Expected amount out (quote)</label>
+            <input id="slip-expout" name="slip-expout" inputmode="decimal" value="9876.48209114">
+          </div>
+          <div>
+            <label for="slip-expin">Expected amount in (quote)</label>
+            <input id="slip-expin" name="slip-expin" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="slip-bps">Slippage tolerance (basis points)</label>
+            <input id="slip-bps" name="slip-bps" inputmode="numeric" value="50">
+          </div>
+          <div>
+            <label for="slip-min-out">Minimum received (model bound)</label>
+            <input id="slip-min-out" name="slip-min-out" readonly>
+          </div>
+          <div>
+            <label for="slip-max-out">Maximum input (model bound)</label>
+            <input id="slip-max-out" name="slip-max-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Compute the bounds</button>
+        <p class="result" id="slip-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -457,6 +487,7 @@
       <li><strong>Model staking before you delegate</strong> (Tool 8 above): rewards arrive once per epoch (about 2 days), commission comes off the reward — not the stake — and credited rewards compound. Compare validators on commission and reliability, never on a headline yield alone; the yield you model is an assumption, not a promise.</li>
       <li><strong>Read a payment link before you pay it</strong> (Tool 9 above): a Solana Pay URL names the recipient, the amount in user units and the asset — an empty amount means the wallet asks, a memo is public on-chain forever, and a well-formed link can still point at the wrong recipient, so inspect it and compare the recipient in full.</li>
       <li><strong>Place concentrated liquidity by ticks, not vibes</strong> (Tool 10 above): on Raydium CLMM and Orca Whirlpools a price is a tick — <code>price = 1.0001^tick</code> — a position earns only while the current tick is inside its range, and its endpoints must align to the pool's tick spacing. A narrow range earns more per unit while it lasts and goes inactive sooner; check both before you open one.</li>
+      <li><strong>Set slippage deliberately on every swap</strong> (Tool 11 above): the tolerance becomes a signed bound — minimum received = expected out × (1 − tolerance), floored, or maximum input = expected in × (1 + tolerance) — and the program aborts rather than fill past it. Too tight and normal price movement fails the swap (you still pay the fee); too loose and a bad fill, or a sandwich, passes. Basis points are the unit: 50 bps = 0.5%.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -483,6 +514,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

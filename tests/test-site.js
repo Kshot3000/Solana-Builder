@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=7"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=8"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("twelve tool forms (ten tools, Tools 9 and 10 each have two)", (html.match(/<form id=/g) || []).length === 12);
+check("thirteen tool forms (eleven tools, Tools 9 and 10 each have two)", (html.match(/<form id=/g) || []).length === 13);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -253,6 +253,23 @@ check("clmm range: zero spacing rejected", app.clmmRange(-600, 600, 0, 0) === nu
 check("clmm range: out-of-bounds tick rejected", app.clmmRange(-443640, 600, 0, 60) === null);
 check("guide teaches CLMM ticks (Tool 10)", guide.includes("Tool 10") && guide.includes("1.0001^tick"));
 check("clmm tool labelled raw-units / not-live in index.html", html.includes("raw token units") && html.includes("not a live pool quote"));
+
+/* Tool 11 — slippage bounds: min = out*(10000-bps)/10000 floored, max = in*(10000+bps)/10000 floored.
+   Vectors prototype-verified in a clean foreground run before pinning. */
+const sl1 = app.slippageAmounts("10000", "10000", 25);
+check("slip: 10000 at 25 bps -> min 9975 / max 10025", sl1 && sl1.minimumReceived === "9975" && sl1.maximumInput === "10025" && sl1.tolerancePct === 0.25);
+const sl2 = app.slippageAmounts("9876.48209114", "10000", 50);
+check("slip: Tool 2 headline out at 50 bps -> min 9827.099680684", sl2 && sl2.minimumReceived === "9827.099680684" && sl2.maximumInput === "10050");
+check("slip: expected 4 at 0.5% protects at 3.98, never rounded back to 4", app.slippageAmounts("4", "199", 50).minimumReceived === "3.98");
+check("slip: max input floors too (199 at 0.5% -> 199.995, not 200)", app.slippageAmounts("4", "199", 50).maximumInput === "199.995");
+check("slip: zero tolerance returns the quotes unchanged", (() => { const r = app.slippageAmounts("100", "100", 0); return r.minimumReceived === "100" && r.maximumInput === "100" && r.minimumIsZero === false; })());
+check("slip: dust minimum floors to exactly 0 and is flagged", (() => { const r = app.slippageAmounts("0.000000001", "0.000000001", 1); return r.minimumReceived === "0" && r.minimumIsZero === true && r.maximumInput === "0.000000001"; })());
+check("slip: minimum never exceeds the quote, maximum never below it (sweep)", [1, 10, 50, 100, 500, 5000, 9999].every((b) => { const r = app.slippageAmounts("12345.6789", "12345.6789", b); return Number(r.minimumReceived) <= 12345.6789 && Number(r.maximumInput) >= 12345.6789; }));
+check("slip: rejects tolerance at/over 10000 bps and negative/fractional", app.slippageAmounts("100", "100", 10000) === null && app.slippageAmounts("100", "100", -1) === null && app.slippageAmounts("100", "100", 2.5) === null);
+check("slip: rejects zero/junk amounts and >9dp", app.slippageAmounts("0", "100", 25) === null && app.slippageAmounts("abc", "100", 25) === null && app.slippageAmounts("0.0000000001", "100", 25) === null);
+check("slip: exposes the bps cap", app.MAX_SLIPPAGE_BPS === 9999);
+check("guide teaches slippage (Tool 11)", guide.includes("Tool 11") && guide.includes("3.98"));
+check("slip tool labelled model / not-live in index.html", html.includes("An educational model of the bound, not a live quote"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
