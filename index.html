@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1016,6 +1016,61 @@
         <p class="result" id="warm-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>25. CLMM uncollected fees calculator — fee growth since the last touch</h3>
+      <p>A concentrated-liquidity position (Raydium CLMM, Orca Whirlpools) never stores a running "fees earned" total. The pool keeps <strong>fee-growth counters</strong>: fees accrued per unit of liquidity, in X64 fixed point (scaled by 2<sup>64</sup>) and stored as u128 integers — a global counter per token, an "outside" counter per tick, and in each position the <strong>fee growth inside its range at its last touch</strong>. The growth inside is global − below the lower tick − above the upper tick (the SDK computes it for you), and what the position has earned since that touch is <strong>floor((inside now − inside last) × liquidity ÷ 2<sup>64</sup>)</strong>, plus whatever an earlier touch already settled into its tokens-owed balance. The subtraction <strong>wraps modulo 2<sup>128</sup></strong>, exactly like the on-chain u128 arithmetic: a counter that has passed its stored value on the way around is not an error, and its delta is still the true small increment. That is also why the counters are integers far beyond float range — this calculator takes them as whole integers and does exact BigInt math, never a float. Headline: liquidity 1,000,000 with token A's growth up exactly 2<sup>64</sup> (1.0 per unit of liquidity) accrues exactly 1,000,000 raw units. The growth counters are inputs here, as an explorer or the SDK reports them — this tool reads no live position. An educational model of CLMM fee accounting, not a live position quote. Not financial advice.</p>
+      <form id="fgro-calc">
+        <div class="grid">
+          <div>
+            <label for="fgro-liq">Position liquidity (integer)</label>
+            <input id="fgro-liq" name="fgro-liq" inputmode="numeric" value="1000000">
+          </div>
+          <div>
+            <label for="fgro-now-a">Fee growth inside now — token A (X64 integer)</label>
+            <input id="fgro-now-a" name="fgro-now-a" inputmode="numeric" value="18446744073709551616">
+          </div>
+          <div>
+            <label for="fgro-last-a">Fee growth inside at last touch — token A (X64 integer)</label>
+            <input id="fgro-last-a" name="fgro-last-a" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="fgro-owed-a">Already owed — token A (raw units)</label>
+            <input id="fgro-owed-a" name="fgro-owed-a" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="fgro-dec-a">Token A decimals</label>
+            <input id="fgro-dec-a" name="fgro-dec-a" inputmode="numeric" value="6">
+          </div>
+          <div>
+            <label for="fgro-now-b">Fee growth inside now — token B (X64 integer)</label>
+            <input id="fgro-now-b" name="fgro-now-b" inputmode="numeric" value="9223372036854775808">
+          </div>
+          <div>
+            <label for="fgro-last-b">Fee growth inside at last touch — token B (X64 integer)</label>
+            <input id="fgro-last-b" name="fgro-last-b" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="fgro-owed-b">Already owed — token B (raw units)</label>
+            <input id="fgro-owed-b" name="fgro-owed-b" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="fgro-dec-b">Token B decimals</label>
+            <input id="fgro-dec-b" name="fgro-dec-b" inputmode="numeric" value="6">
+          </div>
+          <div>
+            <label for="fgro-totala-out">Total collectable — token A (model)</label>
+            <input id="fgro-totala-out" name="fgro-totala-out" readonly>
+          </div>
+          <div>
+            <label for="fgro-totalb-out">Total collectable — token B (model)</label>
+            <input id="fgro-totalb-out" name="fgro-totalb-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Compute uncollected fees</button>
+        <p class="result" id="fgro-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1120,6 +1175,7 @@
       <li><strong>Budget a transaction's bytes like its fees</strong> (Tool 21 above): a transaction must fit one 1,232-byte packet - a plain SOL transfer is exactly 215 bytes (65 of signatures, 97 of static keys, 32 of blockhash, the rest header and instruction). Lookup tables shrink big transactions because a table account costs a 1-byte index instead of a 32-byte key, but the table reference costs 32-plus bytes first: loading one account through a table makes a transaction bigger, loading many makes it much smaller.</li>
       <li><strong>Size every account before you allocate it</strong> (Tool 22 above): an Anchor account is 8 discriminator bytes plus its Borsh field bytes, packed with no padding — Pubkey 32, u64 8, bool 1, a String 4 plus its maximum length — and the total is exactly the rent-exempt deposit it locks: a vault struct of Pubkey + u64 + bool + String(32) is 85 bytes and 1,482,480 lamports. Over-allocate and the waste is permanent; under-allocate and the first write that outgrows the space fails.</li>
       <li><strong>Time a stake's warmup or cooldown by the queue, not the calendar</strong> (Tool 24 above): stake changes state only at epoch boundaries, and per epoch at most 9% of the cluster's effective stake may activate or deactivate in total (900 bps; it was 25% before the rate reduction), shared pro-rata by everything moving — your epoch change is your portion ÷ the total moving × that cap, floored, with a 1-lamport minimum. A stake small against the cluster is fully effective after one epoch; whale-sized moves and crowded exits take several, which is why an unstake can still be draining after the epoch rolls.</li>
+      <li><strong>Read a CLMM position's fees from its counters, not a balance</strong> (Tool 25 above): uncollected fees are floor((fee growth inside now − at last touch) × liquidity ÷ 2<sup>64</sup>) plus what an earlier touch already settled as owed — and the subtraction wraps modulo 2<sup>128</sup>, so a counter lower than its stored value is the u128 wrapping, not negative fees. Touching a position settles and re-stores the counter, which is why "since the last touch" is the only span the growth delta ever describes.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1146,6 +1202,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

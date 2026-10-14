@@ -883,6 +883,88 @@ function stakeWarmup(stakeStr, clusterStr, movingStr, rateBps, direction) {
   };
 }
 
+/* ---------- Tool 25: CLMM uncollected fees (fee growth) ---------- */
+/* A concentrated-liquidity position does not store "fees earned" as a
+   running total. The pool keeps fee-growth counters - fees accrued per
+   unit of liquidity, in X64 fixed point (scaled by 2^64) and stored as
+   u128 - globally and per tick (this is Raydium CLMM's layout: the
+   position account stores feeGrowthInsideLastX64A/B, the pool stores
+   feeGrowthGlobalX64A/B and each tick feeGrowthOutsideX64A/B). The
+   growth inside a position's range is global - below(lower) - above
+   (upper), the SDK's getfeeGrowthInside. What a position has earned
+   SINCE ITS LAST TOUCH is then, per token (PositionUtils'
+   getTokenFeesAmount in raydium-sdk-V2):
+     accrued = floor( wrappingSubU128(insideNow, insideLast)
+                      x liquidity / 2^64 )
+     total owed = tokensFeesOwed (already settled) + accrued
+   The subtraction WRAPS modulo 2^128, exactly like the on-chain u128
+   arithmetic: when the counter passes last on its way around, now <
+   last is not an error, it is the wrap - the delta is still the small
+   true increment. Touching a position (add/remove liquidity, collect)
+   settles the accrued fees into tokensFeesOwed and re-stores
+   insideLast, which is why this tool starts from the last-touch
+   counters: fees from before the last touch live in the owed figure,
+   not in the growth delta. All arithmetic here is exact BigInt on the
+   raw integer counters - the X64 values are far beyond float range. */
+var FEE_GROWTH_Q64 = 1n << 64n;
+var FEE_GROWTH_MODULUS = 1n << 128n;
+
+function parseU128Counter(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var v = BigInt(s);
+  return v < FEE_GROWTH_MODULUS ? v : null;
+}
+
+function formatRawUi(raw, decimals) {
+  var base = 10n ** BigInt(decimals);
+  var whole = raw / base;
+  if (decimals === 0) return whole.toString();
+  var frac = (raw % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return whole.toString() + (frac ? "." + frac : "");
+}
+
+function clmmFeesOwed(liqStr, nowAStr, lastAStr, nowBStr, lastBStr, owedAStr, owedBStr, decA, decB) {
+  var liq = parseU128Counter(liqStr);
+  var nowA = parseU128Counter(nowAStr);
+  var lastA = parseU128Counter(lastAStr);
+  var nowB = parseU128Counter(nowBStr);
+  var lastB = parseU128Counter(lastBStr);
+  var owedA = parseU128Counter(owedAStr);
+  var owedB = parseU128Counter(owedBStr);
+  var dA = validDecimals(decA);
+  var dB = validDecimals(decB);
+  if (liq === null || nowA === null || lastA === null || nowB === null || lastB === null ||
+      owedA === null || owedB === null || dA === null || dB === null) return null;
+  function side(now, last, owed) {
+    var delta = (now - last + FEE_GROWTH_MODULUS) % FEE_GROWTH_MODULUS;
+    var accrued = (delta * liq) / FEE_GROWTH_Q64;
+    return { delta: delta, accrued: accrued, total: owed + accrued, wrapped: now < last };
+  }
+  var a = side(nowA, lastA, owedA);
+  var b = side(nowB, lastB, owedB);
+  return {
+    liquidity: liq.toString(),
+    deltaA: a.delta.toString(),
+    deltaB: b.delta.toString(),
+    accruedA: a.accrued.toString(),
+    accruedB: b.accrued.toString(),
+    owedA: owedA.toString(),
+    owedB: owedB.toString(),
+    totalA: a.total.toString(),
+    totalB: b.total.toString(),
+    totalAUi: formatRawUi(a.total, dA),
+    totalBUi: formatRawUi(b.total, dB),
+    accruedAUi: formatRawUi(a.accrued, dA),
+    accruedBUi: formatRawUi(b.accrued, dB),
+    decimalsA: dA,
+    decimalsB: dB,
+    wrappedA: a.wrapped,
+    wrappedB: b.wrapped
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1374,6 +1456,7 @@ if (typeof module !== "undefined" && module.exports) {
     anchorSpace, anchorFieldSize, ANCHOR_DISCRIMINATOR_BYTES, MAX_FIELD_PARAM,
     saleSplit,
     stakeWarmup, CURRENT_WARMUP_COOLDOWN_BPS, LEGACY_WARMUP_COOLDOWN_BPS,
+    clmmFeesOwed, FEE_GROWTH_Q64, FEE_GROWTH_MODULUS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1892,6 +1975,24 @@ if (typeof document !== "undefined") {
         ? " At these figures the cluster cap floors to zero, so progress is the program's minimum of 1 lamport per epoch - the epoch count is your stake in lamports."
         : "";
       setText("warm-result", "Model output: " + res.stake + " SOL moving against a cluster effective stake of " + res.clusterEffective + " SOL, with " + res.movingTotal + " SOL moving the same way, at " + res.rateBps + " bps per epoch - the cluster-wide cap is " + res.capPerEpoch + " SOL per epoch, shared by share. Schedule (effective stake after each epoch): " + rows + ". Your stake takes " + res.epochsNeeded + (res.estimated ? " epochs (estimated - the per-epoch change is effectively constant in this regime)" : " epoch(s)") + " to fully " + verb + "; in the first epoch " + res.firstEpochMoved + " SOL changes state (" + pct + "% of the stake), leaving " + res.firstEpochEffective + " SOL effective." + clampNote + " The cluster's effective stake is held constant here - on-chain it is the previous epoch's stake-history figure and drifts as stake moves - and other movers are assumed to drain at the same fractional pace. An educational model of stake warmup and cooldown, not a live staking quote. Not financial advice.");
+    });
+
+    var fgroForm = document.getElementById("fgro-calc");
+    if (fgroForm) fgroForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = clmmFeesOwed(val("fgro-liq"), val("fgro-now-a"), val("fgro-last-a"), val("fgro-now-b"), val("fgro-last-b"), val("fgro-owed-a"), val("fgro-owed-b"), val("fgro-dec-a"), val("fgro-dec-b"));
+      if (res === null) {
+        document.getElementById("fgro-totala-out").value = "Invalid";
+        document.getElementById("fgro-totalb-out").value = "Invalid";
+        setText("fgro-result", "Check the inputs: the liquidity, the fee-growth counters and the already-owed amounts are whole raw integers from 0 up to 2^128 - 1 (no signs, no decimal points - the X64 counters are integers on-chain), and each token's decimals are a whole number from 0 to 18.");
+        return;
+      }
+      document.getElementById("fgro-totala-out").value = res.totalAUi;
+      document.getElementById("fgro-totalb-out").value = res.totalBUi;
+      var wrapNote = (res.wrappedA || res.wrappedB)
+        ? " One counter is lower than its last-touch value: that is the u128 counter wrapping, not an error - the subtraction is done modulo 2^128 exactly as on-chain, so the delta is still the true small increment."
+        : "";
+      setText("fgro-result", "Model output: at liquidity " + res.liquidity + ", token A accrued " + res.accruedA + " raw units since the last touch (" + res.accruedAUi + " at " + res.decimalsA + " decimals) on a fee-growth delta of " + res.deltaA + ", and token B accrued " + res.accruedB + " raw units (" + res.accruedBUi + " at " + res.decimalsB + " decimals) on a delta of " + res.deltaB + ". Added to what was already settled as owed (" + res.owedA + " A / " + res.owedB + " B raw), the position can collect " + res.totalA + " raw A (" + res.totalAUi + ") and " + res.totalB + " raw B (" + res.totalBUi + ")." + wrapNote + " The growth counters are inputs here, as an explorer or the SDK reports them - this tool does not read a live position. An educational model of CLMM fee accounting, not a live position quote. Not financial advice.");
     });
 
     /* catalogue filter */
