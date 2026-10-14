@@ -785,6 +785,104 @@ function saleSplit(priceStr, platformBps, royaltyBps) {
   };
 }
 
+/* ---------- Tool 24: stake activation & cooldown timing ---------- */
+/* Delegated stake does not switch on or off at once: at each epoch boundary
+   only a rate-limited share of the cluster may change state. The stake
+   program's rule (SIMD-0391 integer form): in one epoch an account's allowed
+   change = its portion / the total portion moving the same way x the
+   cluster's previous-epoch effective stake x the warmup/cooldown rate,
+   floored, clamped to the account's own portion, with a minimum progress of
+   1 lamport per epoch whenever the portion is positive. The rate is 900 bps
+   (9%) on the current network - it was 2,500 bps (25%) before the
+   reduce_stake_warmup_cooldown feature - so the cluster-wide cap per epoch
+   is 9% of the cluster's effective stake, shared pro-rata by everything
+   activating or deactivating that epoch. This model holds the cluster's
+   effective stake constant at the user's figure (in reality it is last
+   epoch's stake-history entry and drifts as stake moves), runs the formula
+   epoch by epoch in exact scaled BigInt (the scaled unit IS the lamport),
+   and reports the epoch schedule. A solo mover's portion is the whole
+   moving total, so its per-epoch change is the full cluster cap; a crowd
+   moving the same way divides the cap by share. */
+var CURRENT_WARMUP_COOLDOWN_BPS = 900;
+var LEGACY_WARMUP_COOLDOWN_BPS = 2500;
+var MAX_WARMUP_SCHEDULE_ROWS = 12;
+
+function stakeWarmup(stakeStr, clusterStr, movingStr, rateBps, direction) {
+  var stake = parseScaled(stakeStr);
+  var cluster = parseScaled(clusterStr);
+  var moving = parseScaled(movingStr);
+  var bps = Number(rateBps);
+  if (stake === null || cluster === null || moving === null) return null;
+  if (stake <= 0n || cluster <= 0n || moving <= 0n) return null;
+  if (moving < stake) return null;
+  if (!Number.isInteger(bps) || bps < 1 || bps > 10000) return null;
+  if (direction !== "activate" && direction !== "deactivate") return null;
+  var bpsB = BigInt(bps);
+  var capPerEpoch = (cluster * bpsB) / 10000n; /* cluster-wide, before the min clamp */
+  function epochChange(portion, crowd) {
+    if (portion === 0n || crowd === 0n || cluster === 0n) return 0n;
+    var change = (portion * cluster * bpsB) / (crowd * 10000n);
+    if (change > portion) change = portion;
+    if (change === 0n) change = 1n; /* minimum progress: 1 lamport per epoch */
+    return change;
+  }
+  var remaining = stake;
+  var crowd = moving;
+  var epochs = 0n;
+  var estimated = false;
+  var firstChange = null;
+  var firstEpochEffective = null;
+  var firstEpochMoved = null;
+  var schedule = [];
+  var ITERATION_CAP = 1000000;
+  var iterations = 0;
+  while (remaining > 0n) {
+    if (iterations >= ITERATION_CAP) {
+      /* change is at least 1 lamport and effectively constant in any regime
+         that reaches here; finish by division and say the count is estimated */
+      var step = epochChange(remaining, crowd);
+      epochs += (remaining + step - 1n) / step;
+      remaining = 0n;
+      estimated = true;
+      break;
+    }
+    iterations++;
+    var crowdChange = epochChange(crowd, crowd);
+    var change = epochChange(remaining, crowd);
+    remaining -= change;
+    crowd -= crowdChange;
+    if (crowd < 0n) crowd = 0n;
+    epochs += 1n;
+    var movedTotal = stake - remaining;
+    var effective = direction === "activate" ? movedTotal : remaining;
+    if (firstChange === null) {
+      firstChange = change;
+      firstEpochEffective = effective;
+      firstEpochMoved = movedTotal;
+    }
+    if (epochs <= BigInt(MAX_WARMUP_SCHEDULE_ROWS) || remaining === 0n) {
+      schedule.push({ epoch: epochs.toString(), effective: formatScaled(effective) });
+    }
+  }
+  var firstPctBps = Number((firstEpochMoved * 10000n) / stake);
+  return {
+    stake: formatScaled(stake),
+    clusterEffective: formatScaled(cluster),
+    movingTotal: formatScaled(moving),
+    rateBps: bps,
+    direction: direction,
+    capPerEpoch: formatScaled(capPerEpoch),
+    firstChange: formatScaled(firstChange),
+    firstEpochEffective: formatScaled(firstEpochEffective),
+    firstEpochMoved: formatScaled(firstEpochMoved),
+    firstEpochPctBps: firstPctBps,
+    epochsNeeded: epochs.toString(),
+    estimated: estimated,
+    minClamped: capPerEpoch === 0n,
+    schedule: schedule
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1275,6 +1373,7 @@ if (typeof module !== "undefined" && module.exports) {
     txSize, shortvecLen, PACKET_DATA_SIZE,
     anchorSpace, anchorFieldSize, ANCHOR_DISCRIMINATOR_BYTES, MAX_FIELD_PARAM,
     saleSplit,
+    stakeWarmup, CURRENT_WARMUP_COOLDOWN_BPS, LEGACY_WARMUP_COOLDOWN_BPS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1772,6 +1871,27 @@ if (typeof document !== "undefined") {
         ? " The two cuts take the entire price at these rates, so the seller receives exactly 0 - that is the arithmetic of a combined 100% take, stated plainly rather than rounded away."
         : "";
       setText("split-result", "Model output: a sale at " + res.price + " splits into a platform fee of " + res.platformFee + " (" + res.platformBps + " bps), a creator royalty of " + res.royalty + " (" + res.royaltyBps + " bps) and " + res.seller + " to the seller. Both cuts floor at the smallest unit and the seller takes the remainder, so the three parts sum to the price exactly - the seller also keeps any flooring dust." + zeroNote + " Both cuts come out of the price in this model; a venue that charges the buyer on top splits differently, and creator royalties on classic Solana NFTs are a marketplace convention (programmable NFTs can enforce them on-chain). An educational model of a sale split, not a live marketplace quote. Not financial advice.");
+    });
+
+    var warmForm = document.getElementById("warm-calc");
+    if (warmForm) warmForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = stakeWarmup(val("warm-amount"), val("warm-cluster"), val("warm-moving"), val("warm-rate"), val("warm-direction"));
+      if (res === null) {
+        document.getElementById("warm-epochs-out").value = "Invalid";
+        document.getElementById("warm-first-out").value = "Invalid";
+        setText("warm-result", "Check the inputs: the stake, the cluster's effective stake and the total moving the same way must be above zero with at most 9 decimal places, the total moving must be at least your stake (your stake is part of it), and the rate is a whole number of basis points from 1 to 10,000.");
+        return;
+      }
+      document.getElementById("warm-epochs-out").value = res.epochsNeeded + (res.estimated ? " (estimated)" : "");
+      document.getElementById("warm-first-out").value = res.firstEpochEffective;
+      var pct = (res.firstEpochPctBps / 100).toFixed(2);
+      var rows = res.schedule.map(function (r) { return "epoch " + r.epoch + ": " + r.effective + " effective"; }).join("; ");
+      var verb = res.direction === "activate" ? "become effective" : "cool down to inactive";
+      var clampNote = res.minClamped
+        ? " At these figures the cluster cap floors to zero, so progress is the program's minimum of 1 lamport per epoch - the epoch count is your stake in lamports."
+        : "";
+      setText("warm-result", "Model output: " + res.stake + " SOL moving against a cluster effective stake of " + res.clusterEffective + " SOL, with " + res.movingTotal + " SOL moving the same way, at " + res.rateBps + " bps per epoch - the cluster-wide cap is " + res.capPerEpoch + " SOL per epoch, shared by share. Schedule (effective stake after each epoch): " + rows + ". Your stake takes " + res.epochsNeeded + (res.estimated ? " epochs (estimated - the per-epoch change is effectively constant in this regime)" : " epoch(s)") + " to fully " + verb + "; in the first epoch " + res.firstEpochMoved + " SOL changes state (" + pct + "% of the stake), leaving " + res.firstEpochEffective + " SOL effective." + clampNote + " The cluster's effective stake is held constant here - on-chain it is the previous epoch's stake-history figure and drifts as stake moves - and other movers are assumed to drain at the same fractional pace. An educational model of stake warmup and cooldown, not a live staking quote. Not financial advice.");
     });
 
     /* catalogue filter */

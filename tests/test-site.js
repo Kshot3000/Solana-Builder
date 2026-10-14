@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=20"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=21"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out", "lpdep-ra", "lpdep-rb", "lpdep-supply", "lpdep-da", "lpdep-db", "lpdep-minted-out", "lpdep-share-out", "vest-total", "vest-cliff", "vest-duration", "vest-elapsed", "vest-claim-out", "vest-cliff-out", "lend-amt", "lend-price", "lend-debt", "lend-liq", "lend-maxltv", "lend-hf-out", "lend-liqprice-out", "txsz-sigs", "txsz-keys", "txsz-lw", "txsz-lr", "txsz-accts", "txsz-data", "txsz-out", "txsz-head-out", "sp-f1-type", "sp-f1-n", "sp-f1-elem", "sp-f2-type", "sp-f2-n", "sp-f2-elem", "sp-f3-type", "sp-f3-n", "sp-f3-elem", "sp-f4-type", "sp-f4-n", "sp-f4-elem", "sp-total-out", "sp-rent-out", "split-price", "split-platform", "split-royalty", "split-fee-out", "split-royalty-out", "split-seller-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out", "lpdep-ra", "lpdep-rb", "lpdep-supply", "lpdep-da", "lpdep-db", "lpdep-minted-out", "lpdep-share-out", "vest-total", "vest-cliff", "vest-duration", "vest-elapsed", "vest-claim-out", "vest-cliff-out", "lend-amt", "lend-price", "lend-debt", "lend-liq", "lend-maxltv", "lend-hf-out", "lend-liqprice-out", "txsz-sigs", "txsz-keys", "txsz-lw", "txsz-lr", "txsz-accts", "txsz-data", "txsz-out", "txsz-head-out", "sp-f1-type", "sp-f1-n", "sp-f1-elem", "sp-f2-type", "sp-f2-n", "sp-f2-elem", "sp-f3-type", "sp-f3-n", "sp-f3-elem", "sp-f4-type", "sp-f4-n", "sp-f4-elem", "sp-total-out", "sp-rent-out", "split-price", "split-platform", "split-royalty", "split-fee-out", "split-royalty-out", "split-seller-out", "warm-amount", "warm-cluster", "warm-moving", "warm-rate", "warm-direction", "warm-epochs-out", "warm-first-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "lpdep-calc", "lpdep-result", "vest-calc", "vest-result", "lend-calc", "lend-result", "txsz-calc", "txsz-result", "sp-calc", "sp-result", "split-calc", "split-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "lpdep-calc", "lpdep-result", "vest-calc", "vest-result", "lend-calc", "lend-result", "txsz-calc", "txsz-result", "sp-calc", "sp-result", "split-calc", "split-result", "warm-calc", "warm-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("twenty-seven tool forms (twenty-three tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 27);
+check("twenty-eight tool forms (twenty-four tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 28);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -400,7 +400,7 @@ check("clmmpos: value split at price 1 in the symmetric headline is 50/50 in tok
 check("clmmpos: rejects zero / negative / over-precise liquidity", app.clmmPosition("0", -600, 600, 0) === null && app.clmmPosition("-5", -600, 600, 0) === null && app.clmmPosition("1.0000000001", -600, 600, 0) === null);
 check("clmmpos: rejects empty range, inverted range and out-of-bounds ticks", app.clmmPosition("1000", 600, 600, 0) === null && app.clmmPosition("1000", 600, -600, 0) === null && app.clmmPosition("1000", -443637, 600, 0) === null && app.clmmPosition("1000", -600, 443637, 0) === null && app.clmmPosition("1000", -600, 600, 443637) === null);
 check("clmmpos: rejects non-integer ticks", app.clmmPosition("1000", -600.5, 600, 0) === null && app.clmmPosition("1000", -600, 600, 0.5) === null);
-check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("twenty-two mechanics"));
+check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("twenty-three mechanics"));
 check("clmmpos tool labelled principal-only / model in index.html", html.includes("fees a position earns accrue separately") && html.includes("cross-verified against a reference SDK"));
 
 /* Tool 18 — LP deposit & pool share: the mint rule verified against the
@@ -419,7 +419,7 @@ check("lpdep: doubling an exact-ratio deposit doubles the mint", (() => { const 
 check("lpdep: rejects a half-empty pool (mixed zero state)", app.lpDeposit("0", "4000000", "2000000", "1", "1") === null && app.lpDeposit("1000000", "0", "2000000", "1", "1") === null && app.lpDeposit("1000000", "4000000", "0", "1", "1") === null);
 check("lpdep: rejects zero / negative / over-precise deposits", app.lpDeposit("1", "1", "1", "0", "1") === null && app.lpDeposit("1", "1", "1", "1", "0") === null && app.lpDeposit("1", "1", "1", "-1", "1") === null && app.lpDeposit("1", "1", "1", "1.0000000001", "1") === null);
 check("lpdep: rejects a dust deposit that would mint zero LP tokens", app.lpDeposit("1000000000", "1000000000", "1", "0.000000001", "0.000000001") === null);
-check("guide teaches LP deposits (Tool 18)", guide.includes("Tool 18") && guide.includes("0.990099%") && guide.includes("twenty-two mechanics"));
+check("guide teaches LP deposits (Tool 18)", guide.includes("Tool 18") && guide.includes("0.990099%") && guide.includes("twenty-three mechanics"));
 check("lpdep tool labelled model / first-mint lock not modelled in index.html", html.includes("buys no extra LP tokens") && html.includes("An educational model, not a live pool quote"));
 
 
@@ -438,7 +438,7 @@ check("vest: claimable is non-decreasing and gated across a full schedule", (() 
 check("vest: cliff equal to duration releases everything at the end", (() => { const r = app.vestingSchedule("500", 12, 12, 11); return r.claimable === "0" && app.vestingSchedule("500", 12, 12, 12).claimable === "500"; })());
 check("vest: rejects cliff beyond duration, zero duration and fractional months", app.vestingSchedule("100", 13, 12, 0) === null && app.vestingSchedule("100", 0, 0, 0) === null && app.vestingSchedule("100", 0, 12, 1.5) === null && app.vestingSchedule("100", 0.5, 12, 0) === null && app.vestingSchedule("100", 0, 12, -1) === null);
 check("vest: rejects zero / negative / over-precise totals", app.vestingSchedule("0", 0, 12, 0) === null && app.vestingSchedule("-5", 0, 12, 0) === null && app.vestingSchedule("1.0000000001", 0, 12, 0) === null);
-check("guide teaches vesting (Tool 19)", guide.includes("Tool 19") && guide.includes("375,000 claimable") && guide.includes("twenty-two mechanics"));
+check("guide teaches vesting (Tool 19)", guide.includes("Tool 19") && guide.includes("375,000 claimable") && guide.includes("twenty-three mechanics"));
 check("vest tool labelled model / conventions stated in index.html", html.includes("a minority start the linear accrual at the cliff") && html.includes("An educational model, not a live vesting contract"));
 
 
@@ -454,7 +454,7 @@ check("lend: at the liquidation price the threshold value returns the debt (swee
 check("lend: borrowing power is set by max LTV, never the threshold", (() => { const r = app.lendingHealth("10", "100", "0", 8000, 5000); return r.maxBorrowTotal === "500" && app.lendingHealth("10", "100", "0", 8000, 8000).maxBorrowTotal === "800"; })());
 check("lend: rejects max LTV above threshold, zero threshold and fractional bps", app.lendingHealth("10", "100", "500", 8000, 8001) === null && app.lendingHealth("10", "100", "500", 0, 0) === null && app.lendingHealth("10", "100", "500", 8000.5, 7500) === null && app.lendingHealth("10", "100", "500", 8000, -1) === null);
 check("lend: rejects zero amount / price and negative or over-precise debt", app.lendingHealth("0", "100", "500", 8000, 7500) === null && app.lendingHealth("10", "0", "500", 8000, 7500) === null && app.lendingHealth("10", "100", "-5", 8000, 7500) === null && app.lendingHealth("10", "100", "1.0000000001", 8000, 7500) === null);
-check("guide teaches lending health (Tool 20)", guide.includes("Tool 20") && guide.includes("liquidation price of 62.5") && guide.includes("twenty-two mechanics"));
+check("guide teaches lending health (Tool 20)", guide.includes("Tool 20") && guide.includes("liquidation price of 62.5") && guide.includes("twenty-three mechanics"));
 check("lend tool labelled model / scope stated in index.html", html.includes("no interest accrual and no liquidation bonus or fee modelled") && html.includes("An educational model, not a live lending quote"));
 
 /* Tool 21 - transaction size & packet limit: verified against the wire
@@ -470,7 +470,7 @@ check("txsz: a second signature costs 64 bytes plus its static key", app.txSize(
 check("txsz: rejects zero signatures and fewer static keys than signatures", app.txSize(0, 3, 0, 0, 2, 12) === null && app.txSize(2, 1, 0, 0, 1, 12) === null);
 check("txsz: rejects instruction referencing more accounts than the transaction carries", app.txSize(1, 3, 0, 0, 4, 12) === null && app.txSize(1, 3, 1, 1, 6, 12) === null);
 check("txsz: rejects fractional counts and over-256 lookup totals", app.txSize(1, 3, 0, 0, 2, 12.5) === null && app.txSize(1, 3, 200, 100, 2, 12) === null && app.txSize(1, 3, -1, 0, 2, 12) === null);
-check("guide teaches transaction size (Tool 21)", guide.includes("Tool 21") && guide.includes("exactly 215 bytes") && guide.includes("twenty-two mechanics"));
+check("guide teaches transaction size (Tool 21)", guide.includes("Tool 21") && guide.includes("exactly 215 bytes") && guide.includes("twenty-three mechanics"));
 check("txsz tool labelled model / scope stated in index.html", html.includes("One instruction modelled") && html.includes("An educational model of the wire format, not a live transaction"));
 
 /* Tool 22 - Anchor account space planner: verified in a clean foreground
@@ -489,7 +489,7 @@ check("space: field sizes match the Borsh table", app.anchorFieldSize("bool", ""
 check("space: rejects a Vec with no element type and an Option with a count", app.anchorSpace([["vec", "10", "none"], N22, N22, N22]) === null && app.anchorSpace([["option", "3", "u64"], N22, N22, N22]) === null);
 check("space: rejects stray counts on fixed types and fractional or negative lengths", app.anchorSpace([["u64", "5", "none"], N22, N22, N22]) === null && app.anchorSpace([["array", "2.5", "u8"], N22, N22, N22]) === null && app.anchorSpace([["string", "-1", "none"], N22, N22, N22]) === null);
 check("space: rejects no fields at all and over-cap lengths", app.anchorSpace([N22, N22, N22, N22]) === null && app.anchorSpace([["string", "1000001", "none"], N22, N22, N22]) === null && app.anchorSpace([["vec", "3", "u64"]]) === null);
-check("guide teaches account space (Tool 22)", guide.includes("Tool 22") && guide.includes("85 bytes") && guide.includes("twenty-two mechanics"));
+check("guide teaches account space (Tool 22)", guide.includes("Tool 22") && guide.includes("85 bytes") && guide.includes("twenty-three mechanics"));
 check("space tool labelled model / scope stated in index.html", html.includes("enums are not modelled") && html.includes("An educational model of the serialization format, not a live account"));
 
 /* Tool 23 - sale split: verified in a clean foreground prototype BEFORE
@@ -506,7 +506,7 @@ check("split: parts sum to the price exactly across a sweep", (() => { const cas
 check("split: rejects rates summing past 10000 bps", app.saleSplit("100", 6000, 4001) === null && app.saleSplit("100", 10000, 1) === null);
 check("split: rejects a single rate past 10000, fractional or negative bps", app.saleSplit("100", 10001, 0) === null && app.saleSplit("100", 2.5, 0) === null && app.saleSplit("100", -1, 0) === null);
 check("split: rejects a zero or over-precise price", app.saleSplit("0", 200, 500) === null && app.saleSplit("1.0000000001", 200, 500) === null && app.saleSplit("abc", 200, 500) === null);
-check("guide teaches sale splits (Tool 23)", guide.includes("Tool 23") && guide.includes("pays 2 to the platform, 5 to the creator and 93 to the seller") && guide.includes("twenty-two mechanics"));
+check("guide teaches sale splits (Tool 23)", guide.includes("Tool 23") && guide.includes("pays 2 to the platform, 5 to the creator and 93 to the seller") && guide.includes("twenty-three mechanics"));
 check("split tool labelled model / scope stated in index.html", html.includes("royalties on classic Solana NFTs are a marketplace convention") && html.includes("An educational model of a sale split, not a live marketplace quote"));
 
 /* catalogue filter logic */
@@ -514,6 +514,27 @@ check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
 check("filter matches a category token", app.catalogueMatch("mine payments", "payments") === true);
 check("filter rejects other categories", app.catalogueMatch("mine payments", "dex") === false);
 check("filter does not substring-match", app.catalogueMatch("core", "cor") === false);
+
+/* Tool 24 - stake warmup/cooldown: formula grounded in SIMD-0391 (the stake
+   program's integer warmup form) and prototype-verified BEFORE the hub code
+   was written: solo closed form == epoch simulation on 3,000 random cases,
+   crowd pace constant under proportional drain, dust min-clamp, portion
+   clamp. */
+check("warm: headline 40M solo vs 400M cluster at 900 bps moves 36M in epoch 1, done in 2", (() => { const r = app.stakeWarmup("40000000", "400000000", "40000000", 900, "activate"); return r !== null && r.capPerEpoch === "36000000" && r.firstChange === "36000000" && r.firstEpochEffective === "36000000" && r.firstEpochPctBps === 9000 && r.epochsNeeded === "2" && r.estimated === false && r.schedule.length === 2 && r.schedule[1].effective === "40000000"; })());
+check("warm: ordinary stake far below the cap is fully effective in 1 epoch", (() => { const r = app.stakeWarmup("100", "400000000", "100", 900, "activate"); return r.epochsNeeded === "1" && r.firstEpochEffective === "100" && r.firstEpochPctBps === 10000; })());
+check("warm: a 10x crowd stretches a 10M move from 1 epoch to 3 at a constant 3.6M pace", (() => { const solo = app.stakeWarmup("10000000", "400000000", "10000000", 900, "activate"); const crowd = app.stakeWarmup("10000000", "400000000", "100000000", 900, "activate"); return solo.epochsNeeded === "1" && crowd.firstChange === "3600000" && crowd.epochsNeeded === "3" && crowd.schedule[1].effective === "7200000" && crowd.schedule[2].effective === "10000000"; })());
+check("warm: legacy 2500 bps rate moves the headline stake in 1 epoch (cap 100M)", (() => { const r = app.stakeWarmup("40000000", "400000000", "40000000", app.LEGACY_WARMUP_COOLDOWN_BPS, "activate"); return r.capPerEpoch === "100000000" && r.epochsNeeded === "1"; })());
+check("warm: cooldown mirrors activation (effective drains 40M -> 4M -> 0)", (() => { const r = app.stakeWarmup("40000000", "400000000", "40000000", 900, "deactivate"); return r.epochsNeeded === "2" && r.firstEpochEffective === "4000000" && r.firstEpochMoved === "36000000" && r.schedule[1].effective === "0"; })());
+check("warm: dust cluster floors the cap to zero, so progress is the 1-lamport minimum", (() => { const r = app.stakeWarmup("0.000000003", "0.000000005", "0.000000003", 900, "activate"); return r.minClamped === true && r.capPerEpoch === "0" && r.firstChange === "0.000000001" && r.epochsNeeded === "3"; })());
+check("warm: change clamps to the portion (never moves more than remains)", (() => { const r = app.stakeWarmup("0.0000001", "1000000", "0.0000001", 900, "activate"); return r.epochsNeeded === "1" && r.firstChange === "0.0000001"; })());
+check("warm: schedule is monotone and lands exactly on the stake across a sweep", (() => { const cases = [["123456.789", "400000000", "123456.789", 900], ["999999999", "400000000", "999999999", 2500], ["5", "3", "5", 37], ["1000000", "400000000", "50000000", 900], ["0.5", "400000000", "0.5", 1]]; return cases.every(([a, c, m, b]) => { const r = app.stakeWarmup(a, c, m, b, "activate"); if (r === null) return false; const effs = r.schedule.map(x => app.parseScaled(x.effective)); for (let i = 1; i < effs.length; i++) if (effs[i] < effs[i - 1]) return false; return effs[effs.length - 1] === app.parseScaled(a) && Number(r.epochsNeeded) >= r.schedule.length; }); })());
+check("warm: rate constants are the current 900 and legacy 2500 bps", app.CURRENT_WARMUP_COOLDOWN_BPS === 900 && app.LEGACY_WARMUP_COOLDOWN_BPS === 2500);
+check("warm: rejects a moving total below the stake", app.stakeWarmup("100", "400000000", "99", 900, "activate") === null);
+check("warm: rejects zero/negative amounts, bad rates, bad direction, over-precision", app.stakeWarmup("0", "400000000", "100", 900, "activate") === null && app.stakeWarmup("100", "0", "100", 900, "activate") === null && app.stakeWarmup("100", "400000000", "100", 0, "activate") === null && app.stakeWarmup("100", "400000000", "100", 10001, "activate") === null && app.stakeWarmup("100", "400000000", "100", 900.5, "activate") === null && app.stakeWarmup("100", "400000000", "100", 900, "sideways") === null && app.stakeWarmup("1.0000000001", "400000000", "100", 900, "activate") === null);
+check("guide teaches stake warmup/cooldown (Tool 24)", guide.includes("Tool 24") && guide.includes("36,000,000 in epoch 1") && guide.includes("twenty-three mechanics"));
+check("warm tool labelled model / scope stated in index.html", html.includes("reduce_stake_warmup_cooldown") && html.includes("An educational model of stake warmup and cooldown, not a live staking quote"));
+check("README documents Tool 24", readme.includes("Stake activation & cooldown timer") && readme.includes("900 bps"));
+
 
 console.log(failures === 0 ? "ALL TESTS PASS" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);
