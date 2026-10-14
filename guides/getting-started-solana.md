@@ -23,7 +23,7 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the ten mechanics that decide your costs
+## 3. Learn the eleven mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
@@ -40,6 +40,8 @@ Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 9. **CLMM ticks (concentrated liquidity).** On Raydium CLMM and Orca Whirlpools, prices live on ticks: `price(tick) = 1.0001^tick` — one tick is one basis point, and the on-chain range is −443,636 to 443,636. A position's endpoints must be aligned to the pool's tick spacing (`tick % spacing == 0`), and it is in range — active and earning fees — only while `tickLower ≤ tickCurrent < tickUpper`; at or above the upper tick it holds only one asset and earns nothing. Price-to-tick is a floor: the largest tick whose price is at or below the price you mean. The hub's converter and range checker (Tool 10) work both directions locally; prices there are in raw token units, so a UI price also needs the two mints' decimals.
 
 10. **Slippage tolerance.** Every swap you sign carries a bound derived from a tolerance you pick: minimum received = expected out × (1 − tolerance) for an exact-in swap, maximum input = expected in × (1 + tolerance) for an exact-out swap, both floored in exact integer math so the bound is never looser than the tolerance — an expected 4 at 0.5% protects at 3.98, never rounded back up to 4. The program aborts rather than fill past the bound. Too tight (a few bps on a volatile pair) and ordinary movement fails the swap while the fee is still paid; too loose and a bad fill — or a sandwich attack — passes. The hub's calculator (Tool 11) works both bounds; a dust quote whose minimum floors to exactly 0 is flagged there as protecting nothing, because at that precision it doesn't.
+
+11. **The epoch schedule (warmup is real).** An epoch is 432,000 slots only after the warmup: epoch 0 holds 32 slots and each early epoch doubles (32, 64, 128, …, 262,144 for epoch 13), so the first normal epoch is 14 and it starts at slot 524,256. The correct conversion past the warmup is `epoch = 14 + (slot − 524,256) ÷ 432,000`; the textbook `slot ÷ 432,000` calls slot 524,256 "epoch 1" and stays a dozen-plus epochs behind forever. Anything keyed to epoch boundaries — staking rewards, stake activation and cooldown, leader schedules — is mis-timed by code that divides naively. The hub's converter (Tool 12) implements the runtime's EpochSchedule in both directions. And never turn slots into wall-clock time with a fixed slot duration: the target was 400 ms for years and was cut in stages during 2026, and skipped slots stretch real epochs further — for an actual timestamp use `getBlockTime` or an explorer.
 
 ## 4. Scaffold and test
 

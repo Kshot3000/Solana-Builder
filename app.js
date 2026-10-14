@@ -459,6 +459,67 @@ function slippageAmounts(expectedOutStr, expectedInStr, toleranceBps) {
   };
 }
 
+/* ---------- Tool 12: epoch schedule (slot <-> epoch, with warmup) ---------- */
+/* Solana's EpochSchedule is NOT "epoch = floor(slot / 432000)". The chain
+   warms up: epoch 0 has 32 slots and each warmup epoch doubles, so epoch e
+   (0..13) has 32 * 2^e slots and starts at (32 * 2^e) - 32. The first normal
+   epoch is 14, starting at slot 524,256; only from there does an epoch hold
+   a constant 432,000 slots, and the correct formula carries the warmup
+   offset: epoch = 14 + floor((slot - 524256) / 432000). The naive division
+   calls slot 524,256 "epoch 1" — it is epoch 14, and the naive epoch stays
+   13 behind forever. Constants are the runtime's own EpochSchedule
+   { slots_per_epoch: 432000, warmup: true, first_normal_epoch: 14,
+   first_normal_slot: 524256 }, matching the SDK's get_epoch /
+   get_first_slot_in_epoch / get_slots_in_epoch. This is schedule math in
+   slots only: it deliberately does NOT convert to wall-clock time, because
+   the target slot duration has changed repeatedly (400 ms for years, cut in
+   stages during 2026) and skipped slots stretch real epochs further — for
+   a slot's actual time use getBlockTime or an explorer. */
+var MIN_SLOTS_PER_EPOCH = 32;
+var FIRST_NORMAL_EPOCH = 14;
+var FIRST_NORMAL_SLOT = 524256;
+
+function epochIndex(v) {
+  var n = Number(typeof v === "string" ? v.trim() : v);
+  if (!Number.isSafeInteger(n) || n < 0) return null;
+  return n;
+}
+function slotsInEpoch(epoch) {
+  var e = epochIndex(epoch);
+  if (e === null) return null;
+  return e < FIRST_NORMAL_EPOCH ? MIN_SLOTS_PER_EPOCH * Math.pow(2, e) : SLOTS_PER_EPOCH;
+}
+function firstSlotInEpoch(epoch) {
+  var e = epochIndex(epoch);
+  if (e === null) return null;
+  if (e <= FIRST_NORMAL_EPOCH) return MIN_SLOTS_PER_EPOCH * Math.pow(2, e) - MIN_SLOTS_PER_EPOCH;
+  return FIRST_NORMAL_SLOT + (e - FIRST_NORMAL_EPOCH) * SLOTS_PER_EPOCH;
+}
+function epochRange(epoch) {
+  var e = epochIndex(epoch);
+  if (e === null) return null;
+  var first = firstSlotInEpoch(e), len = slotsInEpoch(e);
+  return { epoch: e, firstSlot: first, lastSlot: first + len - 1, slotsInEpoch: len, warmup: e < FIRST_NORMAL_EPOCH };
+}
+function epochForSlot(slot) {
+  var s = epochIndex(slot);
+  if (s === null) return null;
+  var e, first;
+  if (s < FIRST_NORMAL_SLOT) {
+    e = 0; first = 0;
+    while (s >= first + slotsInEpoch(e)) { first += slotsInEpoch(e); e++; }
+  } else {
+    e = FIRST_NORMAL_EPOCH + Math.floor((s - FIRST_NORMAL_SLOT) / SLOTS_PER_EPOCH);
+    first = firstSlotInEpoch(e);
+  }
+  var len = slotsInEpoch(e);
+  return {
+    slot: s, epoch: e, slotIndex: s - first, slotsInEpoch: len,
+    firstSlot: first, lastSlot: first + len - 1, warmup: e < FIRST_NORMAL_EPOCH,
+    progressPct: ((s - first) / len) * 100
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -482,6 +543,8 @@ if (typeof module !== "undefined" && module.exports) {
     buildSolanaPayUrl, parseSolanaPayUrl, validPayAmount, KNOWN_MINT_DECIMALS,
     tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
     slippageAmounts, MAX_SLIPPAGE_BPS,
+    epochForSlot, epochRange, slotsInEpoch, firstSlotInEpoch,
+    MIN_SLOTS_PER_EPOCH, FIRST_NORMAL_EPOCH, FIRST_NORMAL_SLOT,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
     SLOTS_PER_EPOCH, EPOCHS_PER_YEAR, MAX_STAKING_EPOCHS,
     BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS,
@@ -719,6 +782,32 @@ if (typeof document !== "undefined") {
       document.getElementById("slip-min-out").value = res.minimumReceived;
       document.getElementById("slip-max-out").value = res.maximumInput;
       setText("slip-result", "Model bounds at a " + res.toleranceBps + " bps (" + res.tolerancePct + "%) tolerance: an exact-in swap quoting " + res.expectedOut + " out must land at least " + res.minimumReceived + ", and an exact-out swap quoting " + res.expectedIn + " in may cost at most " + res.maximumInput + " — past either bound the program aborts the swap instead of filling. Both bounds floored in exact integer math, never rounded in your favour." + (res.minimumIsZero ? " Warning: at this tolerance the minimum received floors to exactly 0 — the amount is dust at this precision, so this bound protects nothing." : "") + (res.toleranceBps >= 1000 ? " Caution: a tolerance of 10% or more lets a very bad fill — including a sandwich attack — still pass; most swappers stay at 0.1–1%." : "") + " An educational model of the bound, not a live quote. Not financial advice.");
+    });
+
+    var epochForm = document.getElementById("epoch-calc");
+    if (epochForm) epochForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = epochForSlot(val("epoch-slot-in"));
+      if (res === null) {
+        document.getElementById("epoch-out").value = "Invalid slot";
+        setText("epoch-result", "Enter a slot as a whole number, 0 or more.");
+        return;
+      }
+      document.getElementById("epoch-out").value = "Epoch " + res.epoch;
+      setText("epoch-result", "Slot " + res.slot + " is in epoch " + res.epoch + " — slot " + res.slotIndex + " of " + res.slotsInEpoch + " in that epoch (" + res.progressPct.toFixed(2) + "% through it), which runs from slot " + res.firstSlot + " to slot " + res.lastSlot + "." + (res.warmup ? " That is a warmup epoch: early epochs doubled in length from 32 slots, so the textbook slot ÷ 432,000 formula does not apply there." : " Past the warmup, an epoch is a constant 432,000 slots — but note the offset: plain slot ÷ 432,000 would call this epoch " + Math.floor(res.slot / 432000) + " instead, because it ignores the warmup slots entirely.") + " Schedule math in slots only — this tool does not convert to dates or times, because the target slot duration has changed repeatedly and skipped slots stretch real time further; for a slot's actual timestamp use getBlockTime or an explorer.");
+    });
+
+    var epochRangeForm = document.getElementById("epochrange-calc");
+    if (epochRangeForm) epochRangeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = epochRange(val("epochrange-in"));
+      if (res === null) {
+        document.getElementById("epochrange-out").value = "Invalid epoch";
+        setText("epochrange-result", "Enter an epoch as a whole number, 0 or more.");
+        return;
+      }
+      document.getElementById("epochrange-out").value = "Slots " + res.firstSlot + " – " + res.lastSlot;
+      setText("epochrange-result", "Epoch " + res.epoch + " runs from slot " + res.firstSlot + " to slot " + res.lastSlot + " — " + res.slotsInEpoch + " slots." + (res.warmup ? " A warmup epoch: lengths doubled from 32 slots until the first normal epoch, 14, which starts at slot 524,256." : " A normal epoch: every epoch from 14 on holds exactly 432,000 slots.") + " Staking rewards, stake activation and leader schedules all key off these boundaries — which is why the warmup offset matters to any code that computes an epoch from a slot.");
     });
 
     /* catalogue filter */

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -396,6 +396,39 @@
         <p class="result" id="slip-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>12. Epoch schedule converter — slot ⇄ epoch, warmup included</h3>
+      <p>Almost every Solana explainer says an epoch is 432,000 slots — and then code quietly computes <code>epoch = slot ÷ 432,000</code>. That formula is wrong, and it has been wrong since genesis: the chain <strong>warms up</strong>. Epoch 0 holds 32 slots and each warmup epoch doubles (32, 64, 128, …), so the first normal epoch is <strong>epoch 14, starting at slot 524,256</strong> — at that slot the naive division says "epoch 1". Only from there is an epoch a constant 432,000 slots, and the correct formula carries the offset: <code>epoch = 14 + (slot − 524,256) ÷ 432,000</code>. Epoch boundaries are when staking rewards land, stake activates and cools down, and leader schedules rotate, so an epoch computed the naive way mis-times all of them. Convert a slot to its epoch, or an epoch to its slot range — both run locally. This is schedule math in slots only: it deliberately does not convert to dates or times, because the target slot duration has changed repeatedly (400 ms for years, cut in stages during 2026) and skipped slots stretch real time further; for a slot's actual timestamp, use <code>getBlockTime</code> or an explorer. An educational model of the runtime's EpochSchedule, not live chain data.</p>
+      <form id="epoch-calc">
+        <div class="grid">
+          <div>
+            <label for="epoch-slot-in">Slot</label>
+            <input id="epoch-slot-in" name="epoch-slot-in" inputmode="numeric" value="350000000">
+          </div>
+          <div>
+            <label for="epoch-out">Epoch (result)</label>
+            <input id="epoch-out" name="epoch-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Find the epoch</button>
+        <p class="result" id="epoch-result" aria-live="polite"></p>
+      </form>
+      <form id="epochrange-calc">
+        <div class="grid">
+          <div>
+            <label for="epochrange-in">Epoch</label>
+            <input id="epochrange-in" name="epochrange-in" inputmode="numeric" value="14">
+          </div>
+          <div>
+            <label for="epochrange-out">Slot range (result)</label>
+            <input id="epochrange-out" name="epochrange-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Find the slot range</button>
+        <p class="result" id="epochrange-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -488,6 +521,7 @@
       <li><strong>Read a payment link before you pay it</strong> (Tool 9 above): a Solana Pay URL names the recipient, the amount in user units and the asset — an empty amount means the wallet asks, a memo is public on-chain forever, and a well-formed link can still point at the wrong recipient, so inspect it and compare the recipient in full.</li>
       <li><strong>Place concentrated liquidity by ticks, not vibes</strong> (Tool 10 above): on Raydium CLMM and Orca Whirlpools a price is a tick — <code>price = 1.0001^tick</code> — a position earns only while the current tick is inside its range, and its endpoints must align to the pool's tick spacing. A narrow range earns more per unit while it lasts and goes inactive sooner; check both before you open one.</li>
       <li><strong>Set slippage deliberately on every swap</strong> (Tool 11 above): the tolerance becomes a signed bound — minimum received = expected out × (1 − tolerance), floored, or maximum input = expected in × (1 + tolerance) — and the program aborts rather than fill past it. Too tight and normal price movement fails the swap (you still pay the fee); too loose and a bad fill, or a sandwich, passes. Basis points are the unit: 50 bps = 0.5%.</li>
+      <li><strong>Never compute an epoch as slot ÷ 432,000</strong> (Tool 12 above): the chain warmed up — epochs doubled from 32 slots until the first normal epoch, 14, at slot 524,256 — so the naive division is a dozen-plus epochs behind, forever. Epoch boundaries are when staking rewards land and leader schedules rotate; use the runtime's EpochSchedule (or this converter), and never convert slots to wall-clock time with a fixed slot duration — the target has changed repeatedly.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -514,6 +548,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

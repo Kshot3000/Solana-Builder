@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=8"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=9"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("thirteen tool forms (eleven tools, Tools 9 and 10 each have two)", (html.match(/<form id=/g) || []).length === 13);
+check("fifteen tool forms (twelve tools, Tools 9, 10 and 12 each have two)", (html.match(/<form id=/g) || []).length === 15);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -270,6 +270,26 @@ check("slip: rejects zero/junk amounts and >9dp", app.slippageAmounts("0", "100"
 check("slip: exposes the bps cap", app.MAX_SLIPPAGE_BPS === 9999);
 check("guide teaches slippage (Tool 11)", guide.includes("Tool 11") && guide.includes("3.98"));
 check("slip tool labelled model / not-live in index.html", html.includes("An educational model of the bound, not a live quote"));
+
+/* Tool 12 — epoch schedule WITH warmup: epochs 0..13 hold 32*2^e slots,
+   first normal epoch 14 starts at slot 524256, then 432000 slots/epoch.
+   Vectors prototype-verified in a clean foreground run before pinning. */
+check("epoch: constants exposed", app.MIN_SLOTS_PER_EPOCH === 32 && app.FIRST_NORMAL_EPOCH === 14 && app.FIRST_NORMAL_SLOT === 524256 && app.SLOTS_PER_EPOCH === 432000);
+check("epoch: slot 0 is epoch 0, 32 slots, warmup", (() => { const r = app.epochForSlot(0); return r.epoch === 0 && r.slotIndex === 0 && r.slotsInEpoch === 32 && r.firstSlot === 0 && r.lastSlot === 31 && r.warmup === true; })());
+check("epoch: slot 31 closes epoch 0, slot 32 opens epoch 1 (64 slots)", app.epochForSlot(31).epoch === 0 && (() => { const r = app.epochForSlot(32); return r.epoch === 1 && r.firstSlot === 32 && r.lastSlot === 95 && r.slotsInEpoch === 64; })());
+check("epoch: warmup lengths double (epoch 2 = 128, epoch 13 = 262144)", app.slotsInEpoch(2) === 128 && app.slotsInEpoch(13) === 262144 && app.slotsInEpoch(14) === 432000);
+check("epoch: last warmup slot 524255 is epoch 13", (() => { const r = app.epochForSlot(524255); return r.epoch === 13 && r.slotIndex === 262143 && r.warmup === true; })());
+check("epoch: slot 524256 is epoch 14, NOT the naive epoch 1", (() => { const r = app.epochForSlot(524256); return r.epoch === 14 && r.slotIndex === 0 && r.warmup === false && Math.floor(524256 / 432000) === 1; })());
+check("epoch: epoch 14 runs 524256..956255, epoch 15 starts 956256", (() => { const a = app.epochRange(14); const b = app.epochForSlot(956256); return a.firstSlot === 524256 && a.lastSlot === 956255 && a.slotsInEpoch === 432000 && b.epoch === 15 && b.firstSlot === 956256; })());
+check("epoch: modern slot 350,000,000 is epoch 822, index 419,744", (() => { const r = app.epochForSlot(350000000); return r.epoch === 822 && r.slotIndex === 419744 && r.firstSlot === 349580256 && r.lastSlot === 350012255; })());
+check("epoch: slot ranges are contiguous and invert for epochs 0..30", (() => { for (let e = 0; e <= 30; e++) { const rg = app.epochRange(e); if (app.epochForSlot(rg.firstSlot).epoch !== e || app.epochForSlot(rg.lastSlot).epoch !== e) return false; if (e > 0 && rg.firstSlot !== app.epochRange(e - 1).lastSlot + 1) return false; } return true; })());
+check("epoch: firstSlot + slotIndex returns the slot (sweep)", [0, 1, 31, 32, 1000, 524255, 524256, 524257, 1000000, 123456789, 350000000].every((s) => { const r = app.epochForSlot(s); return r.firstSlot + r.slotIndex === s; }));
+check("epoch: naive division never recovers the real epoch past warmup", [524256, 1000000, 10000000, 350000000].every((s) => app.epochForSlot(s).epoch - Math.floor(s / 432000) >= 12));
+check("epoch: epoch 0 range is slots 0..31", (() => { const r = app.epochRange(0); return r.firstSlot === 0 && r.lastSlot === 31 && r.warmup === true; })());
+check("epoch: rejects negative / fractional / junk / unsafe", app.epochForSlot(-1) === null && app.epochForSlot(1.5) === null && app.epochForSlot("abc") === null && app.epochForSlot(Math.pow(2, 60)) === null && app.epochRange(-1) === null && app.slotsInEpoch("x") === null);
+check("epoch: string inputs accepted like the other tools", app.epochForSlot("524256").epoch === 14 && app.epochRange("14").firstSlot === 524256);
+check("guide teaches the epoch schedule (Tool 12)", guide.includes("Tool 12") && guide.includes("524,256"));
+check("epoch tool labelled slots-only / not-live in index.html", html.includes("does not convert to dates or times") || html.includes("it deliberately does not convert to dates or times"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
