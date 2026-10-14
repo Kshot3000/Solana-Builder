@@ -780,6 +780,165 @@
         <p class="result" id="txsz-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>22. Anchor account space planner</h3>
+      <p>Every account an Anchor program creates starts with an <strong>8-byte discriminator</strong>, then its fields serialized by Borsh at fixed sizes — no padding, no alignment: bool and u8 take 1 byte, u16 takes 2, u32 takes 4, u64 takes 8, u128 takes 16 and a Pubkey takes 32. Variable types are sized by the maximum the program declares: a String or a byte vector costs a 4-byte length prefix plus its capacity, a Vec costs 4 plus count × element size, an array costs count × element size, and an Option costs 1 tag byte plus its inner type. Headline: a vault struct of Pubkey + u64 + bool + a 32-character String is 8 + 32 + 8 + 1 + 36 = <strong>85 bytes</strong>, locking 1,482,480 lamports as its rent-exempt deposit — space is the deposit, so over-allocating wastes SOL permanently and under-allocating fails the first write that outgrows it. Four fields modelled (structs with more add linearly); enums are not modelled — add 1 byte plus the largest variant per enum by hand. An educational model of the serialization format, not a live account. Not financial advice.</p>
+      <form id="sp-calc">
+        <div class="grid">
+          <div>
+            <label for="sp-f1-type">Field 1 type</label>
+            <select id="sp-f1-type" name="sp-f1-type">
+              <option value="none">No field</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey" selected>Pubkey — 32 bytes</option>
+              <option value="string">String — 4 + max length</option>
+              <option value="bytes">Vec&lt;u8&gt; (bytes) — 4 + length</option>
+              <option value="vec">Vec of element type — 4 + count × element</option>
+              <option value="array">Array [T; N] — count × element</option>
+              <option value="option">Option of element type — 1 + element</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f1-n">Field 1 max length / count</label>
+            <input id="sp-f1-n" name="sp-f1-n" inputmode="numeric" value="">
+          </div>
+          <div>
+            <label for="sp-f1-elem">Field 1 element type</label>
+            <select id="sp-f1-elem" name="sp-f1-elem">
+              <option value="none" selected>No element type</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f2-type">Field 2 type</label>
+            <select id="sp-f2-type" name="sp-f2-type">
+              <option value="none">No field</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64" selected>u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+              <option value="string">String — 4 + max length</option>
+              <option value="bytes">Vec&lt;u8&gt; (bytes) — 4 + length</option>
+              <option value="vec">Vec of element type — 4 + count × element</option>
+              <option value="array">Array [T; N] — count × element</option>
+              <option value="option">Option of element type — 1 + element</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f2-n">Field 2 max length / count</label>
+            <input id="sp-f2-n" name="sp-f2-n" inputmode="numeric" value="">
+          </div>
+          <div>
+            <label for="sp-f2-elem">Field 2 element type</label>
+            <select id="sp-f2-elem" name="sp-f2-elem">
+              <option value="none" selected>No element type</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f3-type">Field 3 type</label>
+            <select id="sp-f3-type" name="sp-f3-type">
+              <option value="none">No field</option>
+              <option value="bool" selected>bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+              <option value="string">String — 4 + max length</option>
+              <option value="bytes">Vec&lt;u8&gt; (bytes) — 4 + length</option>
+              <option value="vec">Vec of element type — 4 + count × element</option>
+              <option value="array">Array [T; N] — count × element</option>
+              <option value="option">Option of element type — 1 + element</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f3-n">Field 3 max length / count</label>
+            <input id="sp-f3-n" name="sp-f3-n" inputmode="numeric" value="">
+          </div>
+          <div>
+            <label for="sp-f3-elem">Field 3 element type</label>
+            <select id="sp-f3-elem" name="sp-f3-elem">
+              <option value="none" selected>No element type</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f4-type">Field 4 type</label>
+            <select id="sp-f4-type" name="sp-f4-type">
+              <option value="none">No field</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+              <option value="string" selected>String — 4 + max length</option>
+              <option value="bytes">Vec&lt;u8&gt; (bytes) — 4 + length</option>
+              <option value="vec">Vec of element type — 4 + count × element</option>
+              <option value="array">Array [T; N] — count × element</option>
+              <option value="option">Option of element type — 1 + element</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-f4-n">Field 4 max length / count</label>
+            <input id="sp-f4-n" name="sp-f4-n" inputmode="numeric" value="32">
+          </div>
+          <div>
+            <label for="sp-f4-elem">Field 4 element type</label>
+            <select id="sp-f4-elem" name="sp-f4-elem">
+              <option value="none" selected>No element type</option>
+              <option value="bool">bool — 1 byte</option>
+              <option value="u8">u8 / i8 — 1 byte</option>
+              <option value="u16">u16 / i16 — 2 bytes</option>
+              <option value="u32">u32 / i32 / f32 — 4 bytes</option>
+              <option value="u64">u64 / i64 / f64 — 8 bytes</option>
+              <option value="u128">u128 / i128 — 16 bytes</option>
+              <option value="pubkey">Pubkey — 32 bytes</option>
+            </select>
+          </div>
+          <div>
+            <label for="sp-total-out">Account space (model)</label>
+            <input id="sp-total-out" name="sp-total-out" readonly>
+          </div>
+          <div>
+            <label for="sp-rent-out">Rent-exempt deposit (model)</label>
+            <input id="sp-rent-out" name="sp-rent-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the account space</button>
+        <p class="result" id="sp-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -882,6 +1041,7 @@
       <li><strong>Read a vesting schedule by its cliff, not its accrual</strong> (Tool 19 above): an allocation can accrue linearly from day one yet be claimable for exactly 0 until the cliff month, when the whole accrued share releases at once - a 1,000,000-token allocation on a 12-month cliff over 48 months shows 125,000 accrued and 0 claimable at month 6, then 250,000 released at the cliff. Schedules differ: some start the linear accrual at the cliff instead of gating it, and real contracts run on timestamps, not whole months - read the terms before valuing any locked allocation.</li>
       <li><strong>Judge a borrow by its health factor, not its LTV alone</strong> (Tool 20 above): a lending position is liquidatable when (collateral value x liquidation threshold) / debt falls below 1 - 10 tokens at 100 against 500 of debt at an 80% threshold has a health factor of 1.6 and a liquidation price of 62.5. The max LTV is the borrowing limit, the threshold is the liquidation line, and the gap between them is the safety buffer; interest accrual moves a real health factor even at a flat price.</li>
       <li><strong>Budget a transaction's bytes like its fees</strong> (Tool 21 above): a transaction must fit one 1,232-byte packet - a plain SOL transfer is exactly 215 bytes (65 of signatures, 97 of static keys, 32 of blockhash, the rest header and instruction). Lookup tables shrink big transactions because a table account costs a 1-byte index instead of a 32-byte key, but the table reference costs 32-plus bytes first: loading one account through a table makes a transaction bigger, loading many makes it much smaller.</li>
+      <li><strong>Size every account before you allocate it</strong> (Tool 22 above): an Anchor account is 8 discriminator bytes plus its Borsh field bytes, packed with no padding — Pubkey 32, u64 8, bool 1, a String 4 plus its maximum length — and the total is exactly the rent-exempt deposit it locks: a vault struct of Pubkey + u64 + bool + String(32) is 85 bytes and 1,482,480 lamports. Over-allocate and the waste is permanent; under-allocate and the first write that outgrows the space fails.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -908,6 +1068,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>

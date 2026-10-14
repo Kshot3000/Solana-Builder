@@ -682,6 +682,67 @@ function txSize(signatures, staticKeys, lookupWritable, lookupReadonly, ixAccoun
   };
 }
 
+/* ---------- Tool 22: Anchor account space planner ---------- */
+/* Every Anchor account starts with an 8-byte discriminator, then its
+   fields serialized by Borsh at FIXED sizes - there is no padding or
+   alignment on Solana, fields pack back to back: bool 1, u8/i8 1,
+   u16/i16 2, u32/i32/f32 4, u64/i64/f64 8, u128/i128 16, Pubkey 32.
+   Variable types are sized by the maximum the program declares:
+   String and Vec<u8> cost a 4-byte length prefix plus their capacity,
+   Vec<T> costs 4 plus count x size(T), [T; N] costs N x size(T), and
+   Option<T> costs 1 (the Some/None tag) plus size(T) - an enum costs
+   1 plus its largest variant and is NOT modelled here, so a struct
+   with enums needs that much again by hand. The planner sizes up to
+   four fields (structs with more add linearly) and prices the total
+   with Tool 3's rent formula, because space IS the deposit: a vault
+   struct of Pubkey + u64 + bool + String(32) is 8 + 32 + 8 + 1 + 36
+   = 85 bytes, locking 1,482,480 lamports rent-exempt. Over-allocating
+   wastes that deposit permanently; under-allocating fails the first
+   write that outgrows it. Exact integer math throughout. */
+var ANCHOR_DISCRIMINATOR_BYTES = 8;
+var MAX_FIELD_PARAM = 1000000;
+var ANCHOR_FIXED_SIZES = { bool: 1, u8: 1, u16: 2, u32: 4, u64: 8, u128: 16, pubkey: 32 };
+
+function anchorFieldSize(type, param, elem) {
+  if (type === "none") return 0;
+  var p = (param === undefined || param === null) ? "" : String(param).trim();
+  var e = (elem === undefined || elem === null) ? "none" : elem;
+  if (ANCHOR_FIXED_SIZES[type] !== undefined) {
+    return (p === "" && e === "none") ? ANCHOR_FIXED_SIZES[type] : null;
+  }
+  var es = ANCHOR_FIXED_SIZES[e];
+  if (type === "option") {
+    return (p === "" && es !== undefined) ? 1 + es : null;
+  }
+  if (p === "") return null;
+  var n = Number(p);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_FIELD_PARAM) return null;
+  if (type === "string" || type === "bytes") return e === "none" ? 4 + n : null;
+  if (type === "vec") return es !== undefined ? 4 + n * es : null;
+  if (type === "array") return es !== undefined ? n * es : null;
+  return null;
+}
+
+function anchorSpace(fields) {
+  if (!fields || fields.length !== 4) return null;
+  var sizes = [], dataBytes = 0, used = 0;
+  for (var i = 0; i < 4; i++) {
+    var f = fields[i] || ["none", "", "none"];
+    var s = anchorFieldSize(f[0], f[1], f[2]);
+    if (s === null) return null;
+    if (f[0] !== "none") { used++; dataBytes += s; sizes.push({ type: f[0], bytes: s }); }
+  }
+  if (used === 0) return null;
+  var total = ANCHOR_DISCRIMINATOR_BYTES + dataBytes;
+  var rent = rentExempt(total);
+  if (rent === null) return null;
+  return {
+    fields: sizes, fieldCount: used, dataBytes: dataBytes,
+    discriminatorBytes: ANCHOR_DISCRIMINATOR_BYTES, totalBytes: total,
+    rentLamports: rent.rentExemptLamports, rentSol: rent.rentExemptSol
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1170,6 +1231,7 @@ if (typeof module !== "undefined" && module.exports) {
     sandwichAttack, liquidStaking,
     clmmPosition, lpDeposit, isqrtBigInt, vestingSchedule, MAX_VESTING_MONTHS, lendingHealth,
     txSize, shortvecLen, PACKET_DATA_SIZE,
+    anchorSpace, anchorFieldSize, ANCHOR_DISCRIMINATOR_BYTES, MAX_FIELD_PARAM,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1626,6 +1688,27 @@ if (typeof document !== "undefined") {
         ? "It fits the 1,232-byte packet limit with " + res.headroom + " bytes to spare."
         : "It does NOT fit the 1,232-byte packet limit - it is " + (-res.headroom) + " bytes over, and no validator will accept it: shrink the data, load accounts through lookup tables, or split the work across transactions.";
       setText("txsz-result", "Model output: a " + res.version + " transaction with " + res.signatures + " signature(s), " + res.totalKeys + " account keys in total and one instruction carrying " + res.dataBytes + " data bytes serializes to " + res.total + " bytes - signatures " + res.signaturesBytes + ", header " + res.headerBytes + ", static keys " + res.staticKeysBytes + ", blockhash " + res.blockhashBytes + ", instruction " + res.instructionBytes + (res.lookupBytes ? ", lookup table " + res.lookupBytes : "") + ". " + fit + " " + alt + " One instruction modelled; each extra instruction adds its own program-index byte, two shortvec counts, account indices and data. An educational model of the wire format, not a live transaction. Not financial advice.");
+    });
+
+    var spForm = document.getElementById("sp-calc");
+    if (spForm) spForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var typeNames = { bool: "bool", u8: "u8 / i8", u16: "u16 / i16", u32: "u32 / i32 / f32", u64: "u64 / i64 / f64", u128: "u128 / i128", pubkey: "Pubkey", string: "String", bytes: "Vec<u8>", vec: "Vec", array: "array", option: "Option" };
+      var fields = [];
+      for (var i = 1; i <= 4; i++) {
+        fields.push([val("sp-f" + i + "-type"), val("sp-f" + i + "-n"), val("sp-f" + i + "-elem")]);
+      }
+      var res = anchorSpace(fields);
+      if (res === null) {
+        document.getElementById("sp-total-out").value = "Invalid";
+        document.getElementById("sp-rent-out").value = "Invalid";
+        setText("sp-result", "Check the fields: pick at least one field type; a length or count goes only with String, Vec<u8>, Vec and array types (a whole number, 1,000,000 at most); an element type goes only with Vec, array and Option - and an Option takes no count.");
+        return;
+      }
+      document.getElementById("sp-total-out").value = res.totalBytes + " bytes";
+      document.getElementById("sp-rent-out").value = res.rentLamports.toLocaleString("en-US") + " lamports";
+      var parts = res.fields.map(function (f, idx) { return "field " + (idx + 1) + " (" + typeNames[f.type] + ") " + f.bytes + (f.bytes === 1 ? " byte" : " bytes"); }).join(", ");
+      setText("sp-result", "Model output: " + parts + " - " + res.dataBytes + " bytes of field data plus the 8-byte Anchor discriminator is " + res.totalBytes + " bytes of account space, which locks " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL) as its rent-exempt deposit at the network's current rent parameters. Borsh packs fields back to back with no padding; enums are not modelled (add 1 byte plus the largest variant per enum by hand), and a struct with more than four fields adds linearly. An educational model of the serialization format, not a live account. Not financial advice.");
     });
 
     /* catalogue filter */

@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=18"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=19"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out", "lpdep-ra", "lpdep-rb", "lpdep-supply", "lpdep-da", "lpdep-db", "lpdep-minted-out", "lpdep-share-out", "vest-total", "vest-cliff", "vest-duration", "vest-elapsed", "vest-claim-out", "vest-cliff-out", "lend-amt", "lend-price", "lend-debt", "lend-liq", "lend-maxltv", "lend-hf-out", "lend-liqprice-out", "txsz-sigs", "txsz-keys", "txsz-lw", "txsz-lr", "txsz-accts", "txsz-data", "txsz-out", "txsz-head-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out", "lpdep-ra", "lpdep-rb", "lpdep-supply", "lpdep-da", "lpdep-db", "lpdep-minted-out", "lpdep-share-out", "vest-total", "vest-cliff", "vest-duration", "vest-elapsed", "vest-claim-out", "vest-cliff-out", "lend-amt", "lend-price", "lend-debt", "lend-liq", "lend-maxltv", "lend-hf-out", "lend-liqprice-out", "txsz-sigs", "txsz-keys", "txsz-lw", "txsz-lr", "txsz-accts", "txsz-data", "txsz-out", "txsz-head-out", "sp-f1-type", "sp-f1-n", "sp-f1-elem", "sp-f2-type", "sp-f2-n", "sp-f2-elem", "sp-f3-type", "sp-f3-n", "sp-f3-elem", "sp-f4-type", "sp-f4-n", "sp-f4-elem", "sp-total-out", "sp-rent-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "lpdep-calc", "lpdep-result", "vest-calc", "vest-result", "lend-calc", "lend-result", "txsz-calc", "txsz-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "lpdep-calc", "lpdep-result", "vest-calc", "vest-result", "lend-calc", "lend-result", "txsz-calc", "txsz-result", "sp-calc", "sp-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("twenty-five tool forms (twenty-one tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 25);
+check("twenty-six tool forms (twenty-two tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 26);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -400,7 +400,7 @@ check("clmmpos: value split at price 1 in the symmetric headline is 50/50 in tok
 check("clmmpos: rejects zero / negative / over-precise liquidity", app.clmmPosition("0", -600, 600, 0) === null && app.clmmPosition("-5", -600, 600, 0) === null && app.clmmPosition("1.0000000001", -600, 600, 0) === null);
 check("clmmpos: rejects empty range, inverted range and out-of-bounds ticks", app.clmmPosition("1000", 600, 600, 0) === null && app.clmmPosition("1000", 600, -600, 0) === null && app.clmmPosition("1000", -443637, 600, 0) === null && app.clmmPosition("1000", -600, 443637, 0) === null && app.clmmPosition("1000", -600, 600, 443637) === null);
 check("clmmpos: rejects non-integer ticks", app.clmmPosition("1000", -600.5, 600, 0) === null && app.clmmPosition("1000", -600, 600, 0.5) === null);
-check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("twenty mechanics"));
+check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("twenty-one mechanics"));
 check("clmmpos tool labelled principal-only / model in index.html", html.includes("fees a position earns accrue separately") && html.includes("cross-verified against a reference SDK"));
 
 /* Tool 18 — LP deposit & pool share: the mint rule verified against the
@@ -419,7 +419,7 @@ check("lpdep: doubling an exact-ratio deposit doubles the mint", (() => { const 
 check("lpdep: rejects a half-empty pool (mixed zero state)", app.lpDeposit("0", "4000000", "2000000", "1", "1") === null && app.lpDeposit("1000000", "0", "2000000", "1", "1") === null && app.lpDeposit("1000000", "4000000", "0", "1", "1") === null);
 check("lpdep: rejects zero / negative / over-precise deposits", app.lpDeposit("1", "1", "1", "0", "1") === null && app.lpDeposit("1", "1", "1", "1", "0") === null && app.lpDeposit("1", "1", "1", "-1", "1") === null && app.lpDeposit("1", "1", "1", "1.0000000001", "1") === null);
 check("lpdep: rejects a dust deposit that would mint zero LP tokens", app.lpDeposit("1000000000", "1000000000", "1", "0.000000001", "0.000000001") === null);
-check("guide teaches LP deposits (Tool 18)", guide.includes("Tool 18") && guide.includes("0.990099%") && guide.includes("twenty mechanics"));
+check("guide teaches LP deposits (Tool 18)", guide.includes("Tool 18") && guide.includes("0.990099%") && guide.includes("twenty-one mechanics"));
 check("lpdep tool labelled model / first-mint lock not modelled in index.html", html.includes("buys no extra LP tokens") && html.includes("An educational model, not a live pool quote"));
 
 
@@ -438,7 +438,7 @@ check("vest: claimable is non-decreasing and gated across a full schedule", (() 
 check("vest: cliff equal to duration releases everything at the end", (() => { const r = app.vestingSchedule("500", 12, 12, 11); return r.claimable === "0" && app.vestingSchedule("500", 12, 12, 12).claimable === "500"; })());
 check("vest: rejects cliff beyond duration, zero duration and fractional months", app.vestingSchedule("100", 13, 12, 0) === null && app.vestingSchedule("100", 0, 0, 0) === null && app.vestingSchedule("100", 0, 12, 1.5) === null && app.vestingSchedule("100", 0.5, 12, 0) === null && app.vestingSchedule("100", 0, 12, -1) === null);
 check("vest: rejects zero / negative / over-precise totals", app.vestingSchedule("0", 0, 12, 0) === null && app.vestingSchedule("-5", 0, 12, 0) === null && app.vestingSchedule("1.0000000001", 0, 12, 0) === null);
-check("guide teaches vesting (Tool 19)", guide.includes("Tool 19") && guide.includes("375,000 claimable") && guide.includes("twenty mechanics"));
+check("guide teaches vesting (Tool 19)", guide.includes("Tool 19") && guide.includes("375,000 claimable") && guide.includes("twenty-one mechanics"));
 check("vest tool labelled model / conventions stated in index.html", html.includes("a minority start the linear accrual at the cliff") && html.includes("An educational model, not a live vesting contract"));
 
 
@@ -454,7 +454,7 @@ check("lend: at the liquidation price the threshold value returns the debt (swee
 check("lend: borrowing power is set by max LTV, never the threshold", (() => { const r = app.lendingHealth("10", "100", "0", 8000, 5000); return r.maxBorrowTotal === "500" && app.lendingHealth("10", "100", "0", 8000, 8000).maxBorrowTotal === "800"; })());
 check("lend: rejects max LTV above threshold, zero threshold and fractional bps", app.lendingHealth("10", "100", "500", 8000, 8001) === null && app.lendingHealth("10", "100", "500", 0, 0) === null && app.lendingHealth("10", "100", "500", 8000.5, 7500) === null && app.lendingHealth("10", "100", "500", 8000, -1) === null);
 check("lend: rejects zero amount / price and negative or over-precise debt", app.lendingHealth("0", "100", "500", 8000, 7500) === null && app.lendingHealth("10", "0", "500", 8000, 7500) === null && app.lendingHealth("10", "100", "-5", 8000, 7500) === null && app.lendingHealth("10", "100", "1.0000000001", 8000, 7500) === null);
-check("guide teaches lending health (Tool 20)", guide.includes("Tool 20") && guide.includes("liquidation price of 62.5") && guide.includes("twenty mechanics"));
+check("guide teaches lending health (Tool 20)", guide.includes("Tool 20") && guide.includes("liquidation price of 62.5") && guide.includes("twenty-one mechanics"));
 check("lend tool labelled model / scope stated in index.html", html.includes("no interest accrual and no liquidation bonus or fee modelled") && html.includes("An educational model, not a live lending quote"));
 
 /* Tool 21 - transaction size & packet limit: verified against the wire
@@ -470,8 +470,27 @@ check("txsz: a second signature costs 64 bytes plus its static key", app.txSize(
 check("txsz: rejects zero signatures and fewer static keys than signatures", app.txSize(0, 3, 0, 0, 2, 12) === null && app.txSize(2, 1, 0, 0, 1, 12) === null);
 check("txsz: rejects instruction referencing more accounts than the transaction carries", app.txSize(1, 3, 0, 0, 4, 12) === null && app.txSize(1, 3, 1, 1, 6, 12) === null);
 check("txsz: rejects fractional counts and over-256 lookup totals", app.txSize(1, 3, 0, 0, 2, 12.5) === null && app.txSize(1, 3, 200, 100, 2, 12) === null && app.txSize(1, 3, -1, 0, 2, 12) === null);
-check("guide teaches transaction size (Tool 21)", guide.includes("Tool 21") && guide.includes("exactly 215 bytes") && guide.includes("twenty mechanics"));
+check("guide teaches transaction size (Tool 21)", guide.includes("Tool 21") && guide.includes("exactly 215 bytes") && guide.includes("twenty-one mechanics"));
 check("txsz tool labelled model / scope stated in index.html", html.includes("One instruction modelled") && html.includes("An educational model of the wire format, not a live transaction"));
+
+/* Tool 22 - Anchor account space planner: verified in a clean foreground
+   prototype BEFORE shipping - headline vault struct Pubkey + u64 + bool +
+   String(32) = 8 + 32 + 8 + 1 + 36 = 85 bytes, rent (128 + 85) x 6,960 =
+   1,482,480 lamports; the prototype caught an uncapped String length,
+   fixed before the model was written. */
+const N22 = ["none", "", "none"];
+check("space: headline vault struct is 85 bytes locking 1,482,480 lamports", (() => { const r = app.anchorSpace([["pubkey", "", "none"], ["u64", "", "none"], ["bool", "", "none"], ["string", "32", "none"]]); return r !== null && r.dataBytes === 77 && r.totalBytes === 85 && r.rentLamports === 1482480 && r.fieldCount === 4 && r.fields.map(f => f.bytes).join(",") === "32,8,1,36"; })());
+check("space: a single u8 field is 9 bytes total (discriminator dominates)", (() => { const r = app.anchorSpace([["u8", "", "none"], N22, N22, N22]); return r.totalBytes === 9 && r.rentLamports === 953520; })());
+check("space: Vec of 10 Pubkeys is 4 + 320 = 324 field bytes", (() => { const r = app.anchorSpace([["vec", "10", "pubkey"], N22, N22, N22]); return r.fields[0].bytes === 324 && r.totalBytes === 332 && r.rentLamports === 3201600; })());
+check("space: array, Option and bytes compose exactly", (() => { const r = app.anchorSpace([["array", "4", "u128"], ["option", "", "u64"], ["bytes", "165", "none"], N22]); return r.fields.map(f => f.bytes).join(",") === "64,9,169" && r.dataBytes === 242 && r.totalBytes === 250 && r.rentLamports === 2630880; })());
+check("space: a zero-length String still costs its 4-byte prefix", (() => { const r = app.anchorSpace([["string", "0", "none"], N22, N22, N22]); return r.fields[0].bytes === 4 && r.totalBytes === 12; })());
+check("space: rent agrees with Tool 3's formula on the same total", (() => { const r = app.anchorSpace([["pubkey", "", "none"], ["u64", "", "none"], ["bool", "", "none"], ["string", "32", "none"]]); return app.rentExempt(r.totalBytes).rentExemptLamports === r.rentLamports && r.rentSol === "0.00148248"; })());
+check("space: field sizes match the Borsh table", app.anchorFieldSize("bool", "", "none") === 1 && app.anchorFieldSize("u16", "", "none") === 2 && app.anchorFieldSize("u32", "", "none") === 4 && app.anchorFieldSize("u128", "", "none") === 16 && app.anchorFieldSize("pubkey", "", "none") === 32 && app.anchorFieldSize("option", "", "pubkey") === 33 && app.anchorFieldSize("none", "", "none") === 0);
+check("space: rejects a Vec with no element type and an Option with a count", app.anchorSpace([["vec", "10", "none"], N22, N22, N22]) === null && app.anchorSpace([["option", "3", "u64"], N22, N22, N22]) === null);
+check("space: rejects stray counts on fixed types and fractional or negative lengths", app.anchorSpace([["u64", "5", "none"], N22, N22, N22]) === null && app.anchorSpace([["array", "2.5", "u8"], N22, N22, N22]) === null && app.anchorSpace([["string", "-1", "none"], N22, N22, N22]) === null);
+check("space: rejects no fields at all and over-cap lengths", app.anchorSpace([N22, N22, N22, N22]) === null && app.anchorSpace([["string", "1000001", "none"], N22, N22, N22]) === null && app.anchorSpace([["vec", "3", "u64"]]) === null);
+check("guide teaches account space (Tool 22)", guide.includes("Tool 22") && guide.includes("85 bytes") && guide.includes("twenty-one mechanics"));
+check("space tool labelled model / scope stated in index.html", html.includes("enums are not modelled") && html.includes("An educational model of the serialization format, not a live account"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
