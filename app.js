@@ -600,6 +600,71 @@ function transferFeeGrossUp(netStr, feeBps, maximumFeeStr) {
   };
 }
 
+/* ---------- Tool 14: sandwich attack (MEV) model ---------- */
+/* A sandwich is the canonical MEV extraction on an AMM: the attacker sees
+   a victim's pending swap, buys the same direction FIRST (front-run —
+   pushing the pool price against the victim), lets the victim execute at
+   the worse price, then sells everything back (back-run) into the price
+   the victim's own trade moved. All three legs here are Tool 2's own
+   cpSwap run verbatim against the reserves each leg leaves behind, so
+   the model can never drift from the hub's swap math: reserves gain the
+   FULL input of each leg (the fee portion stays in the pool) and lose
+   that leg's output. The victim's defence is the Tool 11 bound: if the
+   sandwiched output falls below minimumReceived = baselineOut x
+   (10000 - slippageBps) / 10000 (floored), the victim's transaction
+   ABORTS instead of filling — the victim loses no tokens to the pool
+   (the network fee is still paid), and the attacker must unwind against
+   the post-front-run reserves alone, which costs the round-trip fees
+   and price impact, so the attack loses money. Attacker profit is
+   signed: at loose tolerances it is positive and comes out of the
+   victim's loss plus the pool fees' price effect; it is NOT created
+   value. This is a single-pool, single-block educational model: real
+   sandwiches route through bundles, tips and multiple pools, and
+   private transaction routing exists precisely to keep a swap out of
+   the public flow this attack reads. */
+function sandwichAttack(reserveAStr, reserveBStr, victimInStr, attackerInStr, feeBps, slippageBps) {
+  var slip = Number(slippageBps);
+  if (!Number.isInteger(slip) || slip < 0 || slip > MAX_SLIPPAGE_BPS) return null;
+  var baseline = cpSwap(reserveAStr, reserveBStr, victimInStr, feeBps);
+  var front = cpSwap(reserveAStr, reserveBStr, attackerInStr, feeBps);
+  if (baseline === null || front === null) return null;
+  var rA = parseScaled(reserveAStr), rB = parseScaled(reserveBStr);
+  var vIn = parseScaled(victimInStr), aIn = parseScaled(attackerInStr);
+  var frontOut = parseScaled(front.amountOut);
+  var rA1 = rA + aIn, rB1 = rB - frontOut; /* reserves after the front-run */
+  var victimLeg = cpSwap(formatScaled(rA1), formatScaled(rB1), victimInStr, feeBps);
+  var attemptedOut = victimLeg === null ? 0n : parseScaled(victimLeg.amountOut);
+  var baselineOut = parseScaled(baseline.amountOut);
+  var minimum = (baselineOut * BigInt(10000 - slip)) / 10000n; /* floored, Tool 11's rule */
+  var protected_ = attemptedOut < minimum;
+  var back;
+  if (protected_) {
+    back = cpSwap(formatScaled(rB1), formatScaled(rA1), front.amountOut, feeBps);
+  } else {
+    var rA2 = rA1 + vIn, rB2 = rB1 - attemptedOut; /* reserves after the victim fills */
+    back = cpSwap(formatScaled(rB2), formatScaled(rA2), front.amountOut, feeBps);
+  }
+  var backOut = back === null ? 0n : parseScaled(back.amountOut);
+  var profit = backOut - aIn;
+  var loss = protected_ ? 0n : baselineOut - attemptedOut;
+  return {
+    reserveA: formatScaled(rA), reserveB: formatScaled(rB),
+    victimIn: formatScaled(vIn), attackerIn: formatScaled(aIn),
+    feeBps: Number(feeBps), slippageBps: slip,
+    baselineOut: baseline.amountOut,
+    frontOut: front.amountOut,
+    attemptedVictimOut: formatScaled(attemptedOut),
+    minimumReceived: formatScaled(minimum),
+    victimProtected: protected_,
+    victimOut: protected_ ? "0" : formatScaled(attemptedOut),
+    backOut: formatScaled(backOut),
+    attackerProfit: formatScaled(profit),
+    attackerProfitPct: Number(profit) / Number(aIn) * 100,
+    victimLoss: formatScaled(loss),
+    victimLossPct: baselineOut === 0n ? 0 : Number(loss) / Number(baselineOut) * 100
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -624,6 +689,7 @@ if (typeof module !== "undefined" && module.exports) {
     tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
+    sandwichAttack,
     epochForSlot, epochRange, slotsInEpoch, firstSlotInEpoch,
     MIN_SLOTS_PER_EPOCH, FIRST_NORMAL_EPOCH, FIRST_NORMAL_SLOT,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
@@ -916,6 +982,23 @@ if (typeof document !== "undefined") {
       }
       document.getElementById("tgross-out").value = res.grossAmount;
       setText("tgross-result", "Model output: to have the recipient credited exactly " + res.netReceived + " raw units at " + res.feeBps + " bps, send " + res.grossAmount + " raw units — its fee is " + res.fee + (res.capped ? " (capped at the mint's maximum fee of " + res.maximumFee + ")" : "") + ", and " + res.grossAmount + " − " + res.fee + " = " + res.netReceived + ". One raw unit less would deliver less, because the withheld fee is computed on the amount sent, with the ceiling applied. An educational model — confirm the mint's live fee configuration before a real transfer. Not financial advice.");
+    });
+
+    var sandForm = document.getElementById("sand-calc");
+    if (sandForm) sandForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = sandwichAttack(val("sand-rin"), val("sand-rout"), val("sand-victim"), val("sand-attacker"), val("sand-fee"), val("sand-slip"));
+      if (res === null) {
+        document.getElementById("sand-victim-out").value = "Invalid";
+        document.getElementById("sand-attacker-out").value = "Invalid";
+        setText("sand-result", "Check the inputs: reserves and both swap amounts must be positive numbers with at most 9 decimals, the pool fee a whole number of basis points under 10,000, and the victim's slippage tolerance a whole number of basis points from 0 to 9,999.");
+        return;
+      }
+      document.getElementById("sand-victim-out").value = res.victimProtected ? "Aborted — protected" : res.victimOut;
+      document.getElementById("sand-attacker-out").value = res.attackerProfit;
+      setText("sand-result", res.victimProtected
+        ? "Model output: unattacked, the victim's " + res.victimIn + " A would buy " + res.baselineOut + " B. The attacker's front-run of " + res.attackerIn + " A takes " + res.frontOut + " B and pushes the victim's fill down to " + res.attemptedVictimOut + " B — below the victim's minimum received of " + res.minimumReceived + " B at a " + res.slippageBps + " bps tolerance, so the victim's transaction aborts instead of filling (the network fee is still paid). The attacker must unwind alone and gets back " + res.backOut + " A — a loss of " + res.attackerProfit.replace("-", "") + " A (" + Math.abs(res.attackerProfitPct).toFixed(4) + "%). Tight slippage is the defence: the trade fails, but the sandwich makes nothing. An educational model of a sandwich attack on a single constant-product pool, not live MEV data. Not financial advice."
+        : "Model output: unattacked, the victim's " + res.victimIn + " A would buy " + res.baselineOut + " B. The attacker front-runs with " + res.attackerIn + " A (taking " + res.frontOut + " B), the victim fills at only " + res.victimOut + " B — a loss of " + res.victimLoss + " B (" + res.victimLossPct.toFixed(4) + "% of the unattacked fill), still above the minimum received of " + res.minimumReceived + " B at a " + res.slippageBps + " bps tolerance, so the trade passes its own protection — and the attacker back-runs for " + res.backOut + " A" + (res.attackerProfit.charAt(0) === "-" ? ", which is LESS than the " + res.attackerIn + " A put in: this victim trade was too small to cover the round-trip fees and price impact, so the attack loses " + res.attackerProfit.replace("-", "") + " A even though the victim filled worse." : ", a profit of " + res.attackerProfit + " A. That profit is extracted from the victim's worse price, not created.") + " A looser tolerance is what lets it through; private routing avoids the public flow entirely. An educational model of a sandwich attack on a single constant-product pool, not live MEV data. Not financial advice.");
     });
 
     /* catalogue filter */

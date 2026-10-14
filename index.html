@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -482,6 +482,49 @@
         <p class="result" id="tgross-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>14. Sandwich attack (MEV) model — what a loose tolerance lets through</h3>
+      <p>A <strong>sandwich attack</strong> is the canonical MEV extraction on an AMM: an attacker who can see a pending swap buys the same direction <em>first</em> (the front-run pushes the pool price against the victim), lets the victim fill at the worse price, then sells everything back into the price the victim's own trade moved (the back-run). This model runs all three legs through the hub's own constant-product swap (Tool 2) against the reserves each leg leaves behind. The victim's defence is the slippage bound (Tool 11): if the sandwiched fill falls below the minimum received at the victim's tolerance, the victim's transaction <strong>aborts</strong> — the sandwich makes nothing and the attacker loses the round-trip costs unwinding alone. At a loose tolerance the fill passes its own protection and the attacker's profit comes straight out of the victim's worse price; it is extracted, not created. Defences in the real ecosystem include tight tolerances and private transaction routing that keeps a swap out of the public flow. An educational model of a sandwich on a single pool, not live MEV data.</p>
+      <form id="sand-calc">
+        <div class="grid">
+          <div>
+            <label for="sand-rin">Pool reserve A</label>
+            <input id="sand-rin" name="sand-rin" inputmode="decimal" value="1000">
+          </div>
+          <div>
+            <label for="sand-rout">Pool reserve B</label>
+            <input id="sand-rout" name="sand-rout" inputmode="decimal" value="1000">
+          </div>
+          <div>
+            <label for="sand-victim">Victim swap in (A)</label>
+            <input id="sand-victim" name="sand-victim" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="sand-attacker">Attacker front-run in (A)</label>
+            <input id="sand-attacker" name="sand-attacker" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="sand-fee">Pool fee (basis points)</label>
+            <input id="sand-fee" name="sand-fee" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="sand-slip">Victim slippage tolerance (basis points)</label>
+            <input id="sand-slip" name="sand-slip" inputmode="numeric" value="2000">
+          </div>
+          <div>
+            <label for="sand-victim-out">Victim receives B (model)</label>
+            <input id="sand-victim-out" name="sand-victim-out" readonly>
+          </div>
+          <div>
+            <label for="sand-attacker-out">Attacker profit in A (model, signed)</label>
+            <input id="sand-attacker-out" name="sand-attacker-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the sandwich</button>
+        <p class="result" id="sand-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -576,6 +619,7 @@
       <li><strong>Set slippage deliberately on every swap</strong> (Tool 11 above): the tolerance becomes a signed bound — minimum received = expected out × (1 − tolerance), floored, or maximum input = expected in × (1 + tolerance) — and the program aborts rather than fill past it. Too tight and normal price movement fails the swap (you still pay the fee); too loose and a bad fill, or a sandwich, passes. Basis points are the unit: 50 bps = 0.5%.</li>
       <li><strong>Never compute an epoch as slot ÷ 432,000</strong> (Tool 12 above): the chain warmed up — epochs doubled from 32 slots until the first normal epoch, 14, at slot 524,256 — so the naive division is a dozen-plus epochs behind, forever. Epoch boundaries are when staking rewards land and leader schedules rotate; use the runtime's EpochSchedule (or this converter), and never convert slots to wall-clock time with a fixed slot duration — the target has changed repeatedly.</li>
       <li><strong>Check whether a token withholds a transfer fee</strong> (Tool 13 above): a Token-2022 mint can carry a transfer fee — the sender is debited in full, the recipient is credited the amount minus ceil(amount × rate ÷ 10,000), capped at the mint's maximum fee, and the withheld fee sits in the recipient's token account until harvested. A quote or invoice in such a token that ignores the fee under-delivers on every payment; gross up when an exact received amount matters, and remember the classic SPL Token program has no transfer fees at all.</li>
+      <li><strong>Understand what a sandwich does to a loose tolerance</strong> (Tool 14 above): an attacker front-runs a visible swap, lets it fill worse, and back-runs into the price move — the profit is the victim's loss. The slippage bound is the defence: tight enough and the victim's transaction aborts instead of filling (the attacker then loses the round-trip unwinding alone); loose enough and the bad fill passes its own protection. Private routing keeps a swap out of the public flow the attack reads.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -602,6 +646,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
