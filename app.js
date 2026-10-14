@@ -1030,6 +1030,49 @@ function inflationSchedule(yearsStr, supplyStr, disinflationBps) {
   };
 }
 
+/* ---------- Tool 27: associated token account (ATA) address ---------- */
+/* Almost every token balance on Solana lives in an associated token
+   account: one canonical token account per (owner, mint) pair, whose
+   address is not a keypair but a program-derived address under the
+   Associated Token Account program (ATokenGPvb...), derived from the
+   seeds [owner, token program, mint] in exactly that order:
+     ata = findProgramAddress([owner, tokenProgram, mint], ataProgram)
+   The token program seed is what keeps a classic SPL Token ATA and a
+   Token-2022 ATA for the same wallet and mint at different addresses -
+   they are different accounts on-chain too. The owner may itself be a
+   PDA (off-curve): the derivation never checks the owner for a curve
+   point, only the hash output, exactly like the on-chain helper. Only
+   the two real token programs are accepted - the ATA program serves
+   those two, and silently deriving for a mistyped program id would
+   hand back an address no wallet would ever use. Pure derivation: the
+   account may or may not exist on-chain yet; this tool reads nothing. */
+var ATA_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+var SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+var TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEB";
+
+function associatedTokenAddress(ownerStr, mintStr, tokenProgramStr) {
+  if (typeof ownerStr !== "string" || typeof mintStr !== "string" || typeof tokenProgramStr !== "string") return null;
+  var program = tokenProgramStr.trim();
+  if (program !== SPL_TOKEN_PROGRAM_ID && program !== TOKEN_2022_PROGRAM_ID) return null;
+  var owner = base58Decode(ownerStr.trim());
+  var mint = base58Decode(mintStr.trim());
+  var tokenProgram = base58Decode(program);
+  var ataProgram = base58Decode(ATA_PROGRAM_ID);
+  if (owner === null || owner.length !== 32) return null;
+  if (mint === null || mint.length !== 32) return null;
+  if (tokenProgram === null || tokenProgram.length !== 32 || ataProgram === null) return null;
+  var found = findProgramAddressBytes([owner, tokenProgram, mint], ataProgram);
+  if (found === null) return null;
+  return {
+    address: found.address,
+    bump: found.bump,
+    candidatesTried: found.candidatesTried,
+    tokenProgram: program === TOKEN_2022_PROGRAM_ID ? "Token-2022" : "SPL Token",
+    owner: base58Encode(owner),
+    mint: base58Encode(mint)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1523,6 +1566,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakeWarmup, CURRENT_WARMUP_COOLDOWN_BPS, LEGACY_WARMUP_COOLDOWN_BPS,
     clmmFeesOwed, FEE_GROWTH_Q64, FEE_GROWTH_MODULUS,
     inflationSchedule, INITIAL_INFLATION_PCT, TERMINAL_INFLATION_PCT,
+    associatedTokenAddress, ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2079,6 +2123,19 @@ if (typeof document !== "undefined") {
           ? " The raw schedule rate has fallen to or past the 1.5% terminal rate, so the rate is clamped at the floor - it first reached the floor at year " + res.firstWholeYearAtTerminal + "."
           : " At this disinflation rate the schedule reaches its 1.5% terminal floor in " + res.yearsToTerminal + " more years - the first whole year at the floor is year " + res.firstWholeYearAtTerminal + ".");
       setText("infl-result", "Model output: " + res.years + " year(s) after the inflation start, at a disinflation rate of " + res.disinflationBps + " bps per year, the inflation rate is " + res.ratePct + "% per year. On a total supply of " + res.supply + " SOL held constant, that issues " + res.annualIssuance + " new SOL over that year, paid as staking rewards." + termNote + " The supply is held at your figure for the year shown - on-chain the supply itself grows by the issuance - and the 30% disinflation adopted by governance in 2026 is not yet implemented in the validator, so 1,500 bps remains the shipped schedule; enter 3,000 bps to model it. An educational model of the inflation schedule, not live network data. Not financial advice.");
+    });
+
+    var ataForm = document.getElementById("ata-calc");
+    if (ataForm) ataForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = associatedTokenAddress(val("ata-owner"), val("ata-mint"), val("ata-program"));
+      if (res === null) {
+        document.getElementById("ata-out").value = "Invalid";
+        setText("ata-result", "Check the inputs: the owner and the mint must each be a base58 address that decodes to exactly 32 bytes, and the token program must be one of the two real token programs - the classic SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) or Token-2022 (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEB). A mistyped program id would derive an address no wallet would ever use, so it is rejected rather than derived.");
+        return;
+      }
+      document.getElementById("ata-out").value = res.address;
+      setText("ata-result", "Model output: the associated token account for owner " + res.owner + " and mint " + res.mint + " under the " + res.tokenProgram + " program is " + res.address + " - the PDA of the seeds [owner, token program, mint] under the Associated Token Account program, found at bump " + res.bump + " (" + res.candidatesTried + (res.candidatesTried === 1 ? " candidate" : " candidates") + " tried). The derivation is pure math on the three addresses - whether that account has been created on-chain yet is a separate question this tool does not read. An educational model of ATA derivation, not a live account lookup. Not financial advice.");
     });
 
     /* catalogue filter */
