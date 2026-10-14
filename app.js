@@ -117,6 +117,46 @@ function txFee(signatures, cuLimit, cuPriceMicro) {
   };
 }
 
+/* ---------- Tool 6: SPL token amount conversion (mint decimals) ---------- */
+/* Every SPL mint carries its own decimals count: token accounts store RAW integer
+   amounts in the mint's smallest unit, and wallets/explorers show the UI amount
+   raw / 10^decimals. SOL itself is the 9-decimal special case (Tool 1); USDC uses 6,
+   many mints use 9, some use 0. A UI amount with more fractional digits than the
+   mint's decimals cannot exist for that mint and is rejected, never rounded.
+   Decimals here is capped at 18 for sanity; conversion itself is exact BigInt. */
+var MAX_TOKEN_DECIMALS = 18;
+
+function validDecimals(decimals) {
+  var d = Number(decimals);
+  return Number.isInteger(d) && d >= 0 && d <= MAX_TOKEN_DECIMALS ? d : null;
+}
+
+function tokenToRaw(uiStr, decimals) {
+  var d = validDecimals(decimals);
+  if (d === null || typeof uiStr !== "string") return null;
+  var s = uiStr.trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  var parts = s.split(".");
+  var frac = parts[1] || "";
+  if (frac.length > d) return null;
+  var scale = 10n ** BigInt(d);
+  var padded = (frac + "0".repeat(d)).slice(0, d);
+  return (BigInt(parts[0]) * scale + (padded ? BigInt(padded) : 0n)).toString();
+}
+
+function rawToToken(rawStr, decimals) {
+  var d = validDecimals(decimals);
+  if (d === null || typeof rawStr !== "string") return null;
+  var s = rawStr.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var v = BigInt(s);
+  if (d === 0) return v.toString();
+  var scale = 10n ** BigInt(d);
+  var whole = v / scale;
+  var frac = (v % scale).toString().padStart(d, "0").replace(/0+$/, "");
+  return whole.toString() + (frac ? "." + frac : "");
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -135,9 +175,9 @@ function catalogueMatch(cat, filter) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     parseScaled, formatScaled, solToLamports, lamportsToSol, cpSwap,
-    rentExempt, impermanentLoss, txFee, catalogueMatch,
+    rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
-    BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT
+    BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS
   };
 }
 
@@ -223,6 +263,27 @@ if (typeof document !== "undefined") {
         " signature" + (res.signatures === 1 ? "" : "s") + " at 5,000 each) + priority fee " + res.priorityFeeLamports +
         " lamports = " + res.totalFeeLamports + " lamports total (" + res.totalFeeSol +
         " SOL). The priority fee is charged on the compute-unit limit you request, not the compute you actually use — simulate first and set the limit close to real usage. Base and priority rates are set by the network and can change; this is an educational model, not a live fee quote. Not financial advice.");
+    });
+
+    var tokForm = document.getElementById("tok-calc");
+    if (tokForm) tokForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var dec = val("tok-dec").trim(), ui = val("tok-ui").trim(), raw = val("tok-raw").trim();
+      if (ui) {
+        var r = tokenToRaw(ui, dec);
+        setText("tok-result", r === null
+          ? "Check the inputs: decimals must be a whole number from 0 to 18, and the UI amount may carry at most that many decimal places — a finer amount cannot exist for this mint and is never rounded here."
+          : ui + " (UI amount) at " + dec + " decimals = " + r + " raw units. Token accounts store the raw integer; wallets divide by 10^decimals to display the UI amount.");
+        if (r !== null) document.getElementById("tok-raw-out").value = r;
+      } else if (raw) {
+        var u = rawToToken(raw, dec);
+        setText("tok-result", u === null
+          ? "Check the inputs: decimals must be a whole number from 0 to 18, and the raw amount must be a whole number — raw units do not subdivide."
+          : raw + " raw units at " + dec + " decimals = " + u + " (UI amount). The decimals count comes from the mint itself — the same raw number means different UI amounts under different mints.");
+        if (u !== null) document.getElementById("tok-ui-out").value = u;
+      } else {
+        setText("tok-result", "Set the mint's decimals, fill in either the UI amount or the raw amount, then convert.");
+      }
     });
 
     /* catalogue filter */

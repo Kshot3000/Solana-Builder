@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -175,6 +175,37 @@
         <p class="result" id="fee-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>6. SPL token amount converter — UI amount ⇄ raw units</h3>
+      <p>SOL's 9 decimals (Tool 1) are just one mint's choice. Every SPL mint sets its own decimals — USDC uses 6, many mints use 9, some use 0 — and token accounts store raw integer amounts in the mint's smallest unit. Wallets show the UI amount: raw ÷ 10^decimals. Fill in one side, with the mint's decimals.</p>
+      <form id="tok-calc">
+        <div class="grid">
+          <div>
+            <label for="tok-dec">Mint decimals</label>
+            <input id="tok-dec" name="tok-dec" inputmode="numeric" value="6">
+          </div>
+          <div>
+            <label for="tok-ui">UI amount</label>
+            <input id="tok-ui" name="tok-ui" inputmode="decimal" placeholder="1.5">
+          </div>
+          <div>
+            <label for="tok-raw-out">Raw units (result)</label>
+            <input id="tok-raw-out" name="tok-raw-out" readonly>
+          </div>
+          <div>
+            <label for="tok-raw">Raw units</label>
+            <input id="tok-raw" name="tok-raw" inputmode="numeric" placeholder="1500000">
+          </div>
+          <div>
+            <label for="tok-ui-out">UI amount (result)</label>
+            <input id="tok-ui-out" name="tok-ui-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Convert</button>
+        <p class="result" id="tok-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -261,6 +292,7 @@
       <li><strong>Make a devnet wallet and fund it free:</strong> <code>solana-keygen new</code>, then <code>solana airdrop 2</code>. Devnet SOL has no value — it exists so you can break things safely.</li>
       <li><strong>Learn the account model first</strong> (Tool 3 above): every program you write allocates accounts, and rent-exempt minimums decide how much SOL each one locks up.</li>
       <li><strong>Price a transaction before you send it</strong> (Tool 5 above): 5,000 lamports per signature plus a priority fee charged on the compute-unit limit you request — simulate, then set the limit close to real usage instead of overpaying for headroom you never use.</li>
+      <li><strong>Convert token amounts with the mint's own decimals</strong> (Tool 6 above): token accounts store raw integers, and the same raw number is a different UI amount under every mint — read the decimals off the mint before you move an amount between code and UI.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -287,6 +319,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

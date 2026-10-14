@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=2"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=3"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("five tool forms", (html.match(/<form id=/g) || []).length === 5);
+check("six tool forms", (html.match(/<form id=/g) || []).length === 6);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -123,6 +123,25 @@ check("txFee rejects zero signatures", app.txFee(0, 200000, 1000) === null);
 check("txFee rejects negative price", app.txFee(1, 200000, -1) === null);
 check("txFee rejects fractional CU limit", app.txFee(1, 200000.5, 1000) === null);
 check("txFee exposes the base-fee and CU-limit constants", app.BASE_FEE_LAMPORTS_PER_SIGNATURE === 5000 && app.MAX_COMPUTE_UNIT_LIMIT === 1400000);
+
+/* Tool 6 — SPL token amounts: UI <-> raw by the mint's own decimals, exact BigInt */
+check("1.5 at 6 decimals (USDC-style) = 1500000 raw", app.tokenToRaw("1.5", 6) === "1500000");
+check("smallest USDC unit: 0.000001 = 1 raw", app.tokenToRaw("0.000001", 6) === "1");
+check("finer than the mint allows rejected, not rounded", app.tokenToRaw("0.0000001", 6) === null);
+check("at 9 decimals the token converter agrees with Tool 1", app.tokenToRaw("2", 9) === app.solToLamports("2"));
+check("zero-decimal mint: whole amounts only", app.tokenToRaw("5", 0) === "5" && app.tokenToRaw("5.1", 0) === null);
+check("large amount stays exact beyond u64/float precision", app.tokenToRaw("123456789.123456789", 9) === "123456789123456789");
+check("1500000 raw at 6 decimals = 1.5", app.rawToToken("1500000", 6) === "1.5");
+check("1 raw at 6 decimals = 0.000001", app.rawToToken("1", 6) === "0.000001");
+check("trailing zeros trimmed: 1000000 raw = 1", app.rawToToken("1000000", 6) === "1");
+check("0 raw = 0 at any decimals", app.rawToToken("0", 6) === "0" && app.rawToToken("0", 0) === "0");
+check("fractional raw rejected", app.rawToToken("1.5", 6) === null);
+check("negative amounts rejected both ways", app.tokenToRaw("-1", 6) === null && app.rawToToken("-1", 6) === null);
+check("decimals above the 18 cap rejected", app.tokenToRaw("1", 19) === null && app.rawToToken("1", 19) === null);
+check("negative or fractional decimals rejected", app.tokenToRaw("1", -1) === null && app.tokenToRaw("1", 2.5) === null);
+check("round trip 42.42 at 6 decimals", app.rawToToken(app.tokenToRaw("42.42", 6), 6) === "42.42");
+check("token converter exposes the decimals cap", app.MAX_TOKEN_DECIMALS === 18);
+check("guide teaches token decimals (Tool 6)", guide.includes("Tool 6") && guide.includes("10^decimals"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
