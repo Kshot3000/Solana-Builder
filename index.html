@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -737,6 +737,49 @@
         <p class="result" id="lend-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>21. Transaction size &amp; packet-limit calculator</h3>
+      <p>Every Solana transaction must fit a single network packet: <strong>1,232 bytes</strong> - and its serialized size is exact wire math, not an estimate. Signatures cost a shortvec count plus 64 bytes each, the message header 3 bytes, each static account key a shortvec count plus 32 bytes, the recent blockhash 32 bytes, and one instruction a count byte, a 1-byte program index, a shortvec count plus 1 byte per referenced account, and a shortvec length plus its data. A shortvec length costs 1 byte below 128, 2 below 16,384. Headline: a plain SOL transfer - 1 signature, 3 static keys, 2 instruction accounts, 12 data bytes - is exactly <strong>215 bytes</strong>. In a v0 transaction, accounts loaded through an address lookup table cost a 1-byte index each instead of 32 bytes - but the table reference itself costs 32 bytes plus two shortvec counts, so loading a single account through a table makes the transaction 4 bytes bigger; tables pay off from a handful of accounts up (the same transfer with its two non-payer keys in one table is 188 bytes, saving 27). One instruction modelled - each extra instruction adds its own program-index byte, two shortvec counts, account indices and data - and exactly one lookup table; durable-nonce transactions are not modelled. An educational model of the wire format, not a live transaction. Not financial advice.</p>
+      <form id="txsz-calc">
+        <div class="grid">
+          <div>
+            <label for="txsz-sigs">Signatures</label>
+            <input id="txsz-sigs" name="txsz-sigs" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label for="txsz-keys">Static account keys</label>
+            <input id="txsz-keys" name="txsz-keys" inputmode="numeric" value="3">
+          </div>
+          <div>
+            <label for="txsz-lw">Lookup accounts, writable (one table)</label>
+            <input id="txsz-lw" name="txsz-lw" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="txsz-lr">Lookup accounts, readonly (one table)</label>
+            <input id="txsz-lr" name="txsz-lr" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="txsz-accts">Accounts the instruction references</label>
+            <input id="txsz-accts" name="txsz-accts" inputmode="numeric" value="2">
+          </div>
+          <div>
+            <label for="txsz-data">Instruction data (bytes)</label>
+            <input id="txsz-data" name="txsz-data" inputmode="numeric" value="12">
+          </div>
+          <div>
+            <label for="txsz-out">Serialized size (model)</label>
+            <input id="txsz-out" name="txsz-out" readonly>
+          </div>
+          <div>
+            <label for="txsz-head-out">Packet headroom (model)</label>
+            <input id="txsz-head-out" name="txsz-head-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Measure the transaction</button>
+        <p class="result" id="txsz-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -838,6 +881,7 @@
       <li><strong>Deposit into a pool at its ratio, not yours</strong> (Tool 18 above): a constant-product pool mints LP tokens from the smaller side's contribution — <code>supply × min(depositA ÷ reserveA, depositB ÷ reserveB)</code> — and only the ratio-matching part of a deposit is used, so an off-ratio deposit wastes the excess unless the interface returns it. The first deposit is the exception: into an empty pool it sets the starting price and mints <code>sqrt(depositA × depositB)</code>. Your share afterwards is minted ÷ new supply, and burning it later returns that share of whatever the pool holds then — not what you put in.</li>
       <li><strong>Read a vesting schedule by its cliff, not its accrual</strong> (Tool 19 above): an allocation can accrue linearly from day one yet be claimable for exactly 0 until the cliff month, when the whole accrued share releases at once - a 1,000,000-token allocation on a 12-month cliff over 48 months shows 125,000 accrued and 0 claimable at month 6, then 250,000 released at the cliff. Schedules differ: some start the linear accrual at the cliff instead of gating it, and real contracts run on timestamps, not whole months - read the terms before valuing any locked allocation.</li>
       <li><strong>Judge a borrow by its health factor, not its LTV alone</strong> (Tool 20 above): a lending position is liquidatable when (collateral value x liquidation threshold) / debt falls below 1 - 10 tokens at 100 against 500 of debt at an 80% threshold has a health factor of 1.6 and a liquidation price of 62.5. The max LTV is the borrowing limit, the threshold is the liquidation line, and the gap between them is the safety buffer; interest accrual moves a real health factor even at a flat price.</li>
+      <li><strong>Budget a transaction's bytes like its fees</strong> (Tool 21 above): a transaction must fit one 1,232-byte packet - a plain SOL transfer is exactly 215 bytes (65 of signatures, 97 of static keys, 32 of blockhash, the rest header and instruction). Lookup tables shrink big transactions because a table account costs a 1-byte index instead of a 32-byte key, but the table reference costs 32-plus bytes first: loading one account through a table makes a transaction bigger, loading many makes it much smaller.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -864,6 +908,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

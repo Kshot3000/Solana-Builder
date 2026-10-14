@@ -23,7 +23,7 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the nineteen mechanics that decide your costs
+## 3. Learn the twenty mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
@@ -58,6 +58,8 @@ Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
 
 19. **Lending health.** A lending market (Kamino, Marginfi, Drift) tracks collateral value = amount x price, loan-to-value = debt / value, and a health factor = (value x liquidation threshold) / debt: below 1 the position may be liquidated. The price where health equals 1 is the liquidation price, debt / (amount x threshold) - 10 tokens at a price of 100 against 500 of debt at an 80% threshold gives a health factor of 1.6 and a liquidation price of 62.5. Borrowing power is set by the lower max LTV (75% there: a max borrow total of 750), and the gap between max LTV and threshold is the safety buffer. Interest accrues continuously in a real market, so a real health factor drifts even at a flat price - the hub's calculator (Tool 20) models the flat-price snapshot in exact integer math.
+
+20. **Transaction size.** A transaction must fit one network packet - 1,232 bytes - and its serialized size is exact: a shortvec count plus 64 bytes per signature, a 3-byte header, a shortvec plus 32 bytes per static account key, a 32-byte blockhash, and per instruction a program-index byte, two shortvec counts, one byte per referenced account and the data itself (a shortvec length is 1 byte below 128, 2 below 16,384). A plain SOL transfer - 1 signature, 3 keys, 2 instruction accounts, 12 data bytes - is exactly 215 bytes. Versioned (v0) transactions load accounts through address lookup tables at a 1-byte index each instead of 32 bytes, which is how complex DeFi transactions fit at all - but the table reference costs 32 bytes plus two shortvec counts first, so a table holding one referenced account makes a transaction 4 bytes bigger, while the same transfer with its two non-payer keys in one table is 188 bytes and saves 27. Legacy transactions reference at most 256 accounts (u8 indices); tables lift that ceiling by up to 256 addresses per table. The hub's calculator (Tool 21) measures one instruction with an optional single table in exact byte math.
 
 ## 4. Scaffold and test
 

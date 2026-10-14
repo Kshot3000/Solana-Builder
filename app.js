@@ -617,6 +617,71 @@ function lendingHealth(amountStr, priceStr, debtStr, liqThresholdBps, maxLtvBps)
   };
 }
 
+/* ---------- Tool 21: transaction size & packet limit ---------- */
+/* A serialized Solana transaction must fit one network packet:
+   PACKET_DATA_SIZE = 1,232 bytes (1,280-byte MTU minus IP/UDP headers).
+   Every section's cost is fixed by the wire format, so the size of a
+   single-instruction transaction is exact, not estimated:
+   signatures: shortvec count + 64 bytes each; message header: 3;
+   static account keys: shortvec count + 32 bytes each; recent
+   blockhash: 32; one instruction: shortvec count (1) + 1 program-index
+   byte + shortvec count + 1 byte per referenced account + shortvec
+   length + the data itself. A shortvec (compact-u16) length costs
+   1 byte below 128, 2 below 16,384, 3 below 2,097,152.
+   In a v0 transaction, accounts loaded through ONE address lookup
+   table cost 1 byte each (their index) instead of 32 - but the table
+   reference itself costs 32 bytes for the table address plus two
+   shortvec counts, so a table holding a single referenced account
+   makes the transaction BIGGER (saving is negative); tables pay off
+   from a handful of accounts up, and they raise the account ceiling:
+   legacy keys are u8-indexed (256 max), v0 adds up to 256 table
+   addresses per table on top. Multi-instruction transactions add, per
+   extra instruction, its own program-index byte, two shortvec counts,
+   its account indices and its data - this model prices one instruction
+   and states so. Durable-nonce and versioned extras are not modelled. */
+var PACKET_DATA_SIZE = 1232;
+
+function shortvecLen(n) {
+  var len = 1;
+  while (n >= 128) { n = Math.floor(n / 128); len++; }
+  return len;
+}
+
+function txSize(signatures, staticKeys, lookupWritable, lookupReadonly, ixAccounts, dataBytes) {
+  var S = Number(signatures), K = Number(staticKeys), W = Number(lookupWritable),
+      R = Number(lookupReadonly), A = Number(ixAccounts), D = Number(dataBytes);
+  var counts = [S, K, W, R, A, D];
+  for (var i = 0; i < counts.length; i++) {
+    if (!Number.isInteger(counts[i]) || counts[i] < 0) return null;
+  }
+  if (S < 1 || S > 256 || K < S || K > 256) return null;
+  if (W > 256 || R > 256 || W + R > 256) return null;
+  if (A > K + W + R || D > 1000000) return null;
+  var signaturesBytes = shortvecLen(S) + 64 * S;
+  var staticKeysBytes = shortvecLen(K) + 32 * K;
+  var instructionBytes = shortvecLen(1) + 1 + shortvecLen(A) + A + shortvecLen(D) + D;
+  var lookupBytes = (W + R === 0) ? 0
+    : shortvecLen(1) + 32 + shortvecLen(W) + W + shortvecLen(R) + R;
+  var headerBytes = 3, blockhashBytes = 32;
+  var total = signaturesBytes + headerBytes + staticKeysBytes + blockhashBytes
+    + instructionBytes + lookupBytes;
+  var legacyStaticBytes = shortvecLen(K + W + R) + 32 * (K + W + R);
+  var legacyTotal = signaturesBytes + headerBytes + legacyStaticBytes + blockhashBytes
+    + instructionBytes;
+  return {
+    signatures: S, staticKeys: K, lookupWritable: W, lookupReadonly: R,
+    ixAccounts: A, dataBytes: D,
+    version: (W + R === 0) ? "legacy" : "v0",
+    totalKeys: K + W + R,
+    signaturesBytes: signaturesBytes, staticKeysBytes: staticKeysBytes,
+    headerBytes: headerBytes, blockhashBytes: blockhashBytes,
+    instructionBytes: instructionBytes, lookupBytes: lookupBytes,
+    total: total, packetLimit: PACKET_DATA_SIZE,
+    fits: total <= PACKET_DATA_SIZE, headroom: PACKET_DATA_SIZE - total,
+    legacyTotal: legacyTotal, savedBytes: legacyTotal - total
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1104,6 +1169,7 @@ if (typeof module !== "undefined" && module.exports) {
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     sandwichAttack, liquidStaking,
     clmmPosition, lpDeposit, isqrtBigInt, vestingSchedule, MAX_VESTING_MONTHS, lendingHealth,
+    txSize, shortvecLen, PACKET_DATA_SIZE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1537,6 +1603,29 @@ if (typeof document !== "undefined") {
             ? "The health factor is exactly 1: the position sits exactly on its liquidation threshold at this price, and any price drop or interest accrual pushes it below."
             : "The position is above its liquidation threshold: the collateral price can fall about " + res.priceDropPct.toFixed(4) + "% - to " + res.liquidationPrice + " - before the health factor reaches 1." + (res.overMaxBorrow ? " Note the debt is already above the max borrow total at the max LTV entered, even though it is not liquidatable yet - that gap is the safety buffer between the two percentages." : "");
       setText("lend-result", "Model output: collateral worth " + res.collateralValue + " against debt of " + res.debt + " is an LTV of " + res.ltvPct.toFixed(4) + "% and a health factor of " + (res.healthFactor === null ? "none (no debt)" : res.healthFactor.toFixed(6)) + ". At the max LTV of " + (res.maxLtvBps / 100) + "% the most this collateral can borrow in total is " + res.maxBorrowTotal + ", so the additional borrowing power is " + res.additionalBorrow + ". " + where + " Single collateral and single debt, no interest accrual and no liquidation bonus or fee modelled; real markets weight several assets, accrue interest continuously and set their own thresholds - read the market's own risk parameters before borrowing. An educational model, not a live lending quote. Not financial advice.");
+    });
+
+    var txszForm = document.getElementById("txsz-calc");
+    if (txszForm) txszForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = txSize(val("txsz-sigs"), val("txsz-keys"), val("txsz-lw"), val("txsz-lr"), val("txsz-accts"), val("txsz-data"));
+      if (res === null) {
+        document.getElementById("txsz-out").value = "Invalid";
+        document.getElementById("txsz-head-out").value = "Invalid";
+        setText("txsz-result", "Check the inputs: every count is a whole number - at least 1 signature, at least as many static keys as signatures (256 at most), at most 256 lookup accounts in total across the one table, an instruction referencing no more accounts than the transaction carries in total, and at most 1,000,000 data bytes.");
+        return;
+      }
+      document.getElementById("txsz-out").value = res.total + " bytes";
+      document.getElementById("txsz-head-out").value = res.fits ? res.headroom + " bytes spare" : (-res.headroom) + " bytes over";
+      var alt = res.version === "legacy"
+        ? "With no lookup table this is a legacy transaction: every account key costs its full 32 bytes, and the transaction can reference at most 256 accounts."
+        : res.savedBytes > 0
+          ? "As a v0 transaction loading " + (res.lookupWritable + res.lookupReadonly) + " accounts through one lookup table it saves " + res.savedBytes + " bytes against the " + res.legacyTotal + "-byte legacy form of the same transaction - each table account costs a 1-byte index instead of a 32-byte key, minus the table reference."
+          : "As a v0 transaction it is " + (-res.savedBytes) + " bytes BIGGER than the " + res.legacyTotal + "-byte legacy form of the same transaction: a lookup table reference costs 32 bytes plus counts before its first 1-byte index saves anything, so a table pays off only from a handful of accounts up.";
+      var fit = res.fits
+        ? "It fits the 1,232-byte packet limit with " + res.headroom + " bytes to spare."
+        : "It does NOT fit the 1,232-byte packet limit - it is " + (-res.headroom) + " bytes over, and no validator will accept it: shrink the data, load accounts through lookup tables, or split the work across transactions.";
+      setText("txsz-result", "Model output: a " + res.version + " transaction with " + res.signatures + " signature(s), " + res.totalKeys + " account keys in total and one instruction carrying " + res.dataBytes + " data bytes serializes to " + res.total + " bytes - signatures " + res.signaturesBytes + ", header " + res.headerBytes + ", static keys " + res.staticKeysBytes + ", blockhash " + res.blockhashBytes + ", instruction " + res.instructionBytes + (res.lookupBytes ? ", lookup table " + res.lookupBytes : "") + ". " + fit + " " + alt + " One instruction modelled; each extra instruction adds its own program-index byte, two shortvec counts, account indices and data. An educational model of the wire format, not a live transaction. Not financial advice.");
     });
 
     /* catalogue filter */
