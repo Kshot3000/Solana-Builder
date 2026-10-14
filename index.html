@@ -626,6 +626,45 @@
         <p class="result" id="clmmpos-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>18. LP deposit &amp; pool share — what a deposit mints</h3>
+      <p>Adding liquidity to a constant-product pool (Tool 2) on Raydium CP, Orca or any x·y=k AMM mints LP tokens in proportion to the <strong>smaller</strong> side's contribution: <code>minted = supply × min(depositA ÷ reserveA, depositB ÷ reserveB)</code>, floored in exact integer math. Only the part of the deposit that matches the pool's ratio is used — the excess of the other token buys no extra LP tokens, so a good interface sizes the deposit to the ratio or returns the excess. The first deposit into an empty pool is different: it sets the starting price and mints the geometric mean, <code>sqrt(depositA × depositB)</code>. Headline: against reserves of 1,000,000 A / 4,000,000 B with 2,000,000 LP tokens outstanding, depositing 10,000 A / 50,000 B mints 20,000 LP tokens (0.990099% of the pool): token A limits the mint, only 40,000 of the B is used, and 10,000 B is excess. Amounts are in the tokens' own units — convert with each mint's decimals (Tool 6). An educational model, not a live pool quote. Not financial advice.</p>
+      <form id="lpdep-calc">
+        <div class="grid">
+          <div>
+            <label for="lpdep-ra">Pool reserve A</label>
+            <input id="lpdep-ra" name="lpdep-ra" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="lpdep-rb">Pool reserve B</label>
+            <input id="lpdep-rb" name="lpdep-rb" inputmode="decimal" value="4000000">
+          </div>
+          <div>
+            <label for="lpdep-supply">LP tokens outstanding</label>
+            <input id="lpdep-supply" name="lpdep-supply" inputmode="decimal" value="2000000">
+          </div>
+          <div>
+            <label for="lpdep-da">Your deposit A</label>
+            <input id="lpdep-da" name="lpdep-da" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="lpdep-db">Your deposit B</label>
+            <input id="lpdep-db" name="lpdep-db" inputmode="decimal" value="50000">
+          </div>
+          <div>
+            <label for="lpdep-minted-out">LP tokens minted (model)</label>
+            <input id="lpdep-minted-out" name="lpdep-minted-out" readonly>
+          </div>
+          <div>
+            <label for="lpdep-share-out">Your pool share after (model)</label>
+            <input id="lpdep-share-out" name="lpdep-share-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Compute what the deposit mints</button>
+        <p class="result" id="lpdep-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -724,6 +763,7 @@
       <li><strong>Price a liquid staking token by its rate, not its balance</strong> (Tool 15 above): an LST does not rebase — rewards grow the pool's total SOL while the supply stands still, so the SOL-per-token rate rises and the same token amount redeems for more SOL over time. A rate below 1, or a deposit that mints at a stale rate, is a red flag; and a dust deposit can floor to zero tokens, so never deposit an amount whose minted figure you have not checked.</li>
       <li><strong>Derive program addresses from seeds, never store a key for them</strong> (Tool 16 above): a PDA is <code>SHA-256(seeds ‖ bump ‖ program ID ‖ "ProgramDerivedAddress")</code> kept only when the hash lands off the ed25519 curve — a result on the curve could have a private key and is rejected, which is why derivation scans bump 255 downward for the first off-curve hash. At most 16 seeds, each at most 32 bytes; seeds are raw bytes (text means its UTF-8 encoding; a pubkey seed is its 32 bytes — an associated token account is exactly this derivation). A PDA has no private key: only its program can sign for it, with those seeds and that bump.</li>
       <li><strong>Size a concentrated position from its liquidity, not from token amounts</strong> (Tool 17 above): a CLMM position is L plus a tick range, and the amounts follow — inside the range it holds both assets in the proportion the current tick sets, below the range only token0, above it only token1, sliding continuously as the price crosses. At tick 0 over −600…600, L = 1,000,000 holds about 29,553 of each. The amounts are principal only: earned fees accrue separately, and every price move re-splits the position toward the asset being sold — that drift is the exposure behind impermanent loss.</li>
+      <li><strong>Deposit into a pool at its ratio, not yours</strong> (Tool 18 above): a constant-product pool mints LP tokens from the smaller side's contribution — <code>supply × min(depositA ÷ reserveA, depositB ÷ reserveB)</code> — and only the ratio-matching part of a deposit is used, so an off-ratio deposit wastes the excess unless the interface returns it. The first deposit is the exception: into an empty pool it sets the starting price and mints <code>sqrt(depositA × depositB)</code>. Your share afterwards is minted ÷ new supply, and burning it later returns that share of whatever the pool holds then — not what you put in.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -750,6 +790,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

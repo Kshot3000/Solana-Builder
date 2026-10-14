@@ -472,6 +472,66 @@ function clmmPosition(liquidityStr, lower, upper, current) {
   };
 }
 
+/* ---------- Tool 18: constant-product LP deposit & share ---------- */
+/* Adding liquidity to an existing constant-product pool (Raydium CP,
+   Orca, every x*y=k AMM) mints LP tokens in proportion to the SMALLER
+   side's contribution: fromA = depositA * supply / reserveA and
+   fromB = depositB * supply / reserveB, minted = min(fromA, fromB), each
+   division floored like on-chain integer math. Only the proportional
+   part of the deposit is used — usedA = minted * reserveA / supply and
+   usedB = minted * reserveB / supply (floored) — so the excess of the
+   non-limiting token buys nothing: interfaces return it or size the
+   deposit to the pool's ratio in the first place. Depositing out of
+   ratio never mints more; the limiting token alone decides. The FIRST
+   deposit into an empty pool has no ratio to match: it sets the price
+   and mints the geometric mean, minted = sqrt(depositA * depositB)
+   (exact integer square root on the scaled amounts, floored). Some
+   pools permanently lock a small minimum of that first mint as an
+   inflation-attack defence — that lock is pool-specific and is NOT
+   modelled here. The depositor's share of the pool afterwards is
+   minted / (supply + minted). */
+function isqrtBigInt(n) {
+  if (n < 0n) return null;
+  if (n < 2n) return n;
+  var x = n, y = (x + 1n) / 2n;
+  while (y < x) { x = y; y = (x + n / x) / 2n; }
+  return x;
+}
+
+function lpDeposit(reserveAStr, reserveBStr, supplyStr, depositAStr, depositBStr) {
+  var rA = parseScaled(reserveAStr), rB = parseScaled(reserveBStr), S = parseScaled(supplyStr);
+  var dA = parseScaled(depositAStr), dB = parseScaled(depositBStr);
+  if (rA === null || rB === null || S === null || dA === null || dB === null) return null;
+  if (dA <= 0n || dB <= 0n) return null;
+  var first = (rA === 0n && rB === 0n && S === 0n);
+  if (!first && (rA <= 0n || rB <= 0n || S <= 0n)) return null;
+  var minted, usedA, usedB, limiting;
+  if (first) {
+    minted = isqrtBigInt(dA * dB); /* scaled product, so the root is the scaled geometric mean */
+    if (minted <= 0n) return null;
+    usedA = dA; usedB = dB; limiting = "first";
+  } else {
+    var fromA = (dA * S) / rA, fromB = (dB * S) / rB;
+    minted = fromA < fromB ? fromA : fromB;
+    if (minted <= 0n) return null; /* dust deposit mints zero LP tokens */
+    limiting = fromA === fromB ? "both" : (fromA < fromB ? "A" : "B");
+    usedA = (minted * rA) / S; usedB = (minted * rB) / S;
+    if (usedA <= 0n || usedB <= 0n) return null;
+  }
+  var newSupply = S + minted;
+  return {
+    firstDeposit: first,
+    reserveA: formatScaled(rA), reserveB: formatScaled(rB), supply: formatScaled(S),
+    depositA: formatScaled(dA), depositB: formatScaled(dB),
+    minted: formatScaled(minted),
+    usedA: formatScaled(usedA), usedB: formatScaled(usedB),
+    excessA: formatScaled(dA - usedA), excessB: formatScaled(dB - usedB),
+    limiting: limiting,
+    sharePct: Number(minted * 100000000n / newSupply) / 1000000,
+    newSupply: formatScaled(newSupply)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -958,7 +1018,7 @@ if (typeof module !== "undefined" && module.exports) {
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     sandwichAttack, liquidStaking,
-    clmmPosition,
+    clmmPosition, lpDeposit, isqrtBigInt,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1331,6 +1391,23 @@ if (typeof document !== "undefined") {
           ? "at or below the lower tick, so the position holds only token0 and earns no fees until the price climbs back into the range"
           : "at or above the upper tick, so the position holds only token1 and earns no fees until the price falls back into the range";
       setText("clmmpos-result", "Model output: liquidity " + res.liquidity + " over ticks " + res.tickLower + " to " + res.tickUpper + " (prices " + fmtAmt(res.priceLower) + " to " + fmtAmt(res.priceUpper) + ") at the current tick " + res.tickCurrent + " (price " + fmtAmt(res.priceCurrent) + ") holds " + fmtAmt(res.amount0) + " token0 and " + fmtAmt(res.amount1) + " token1 in raw units — about " + pct0.toFixed(2) + "% of its value in token0, measured in token1 at the current price. The current tick is " + where + ". These amounts are the position's principal at this tick: fees it earns accrue separately, and the split drifts toward whichever asset the price moves away from — that drift is the position's price exposure (and the root of impermanent loss, Tool 4). Convert raw units with each mint's decimals before treating them as wallet amounts (Tool 6). An educational model, not a live pool quote. Not financial advice.");
+    });
+
+    var lpdepForm = document.getElementById("lpdep-calc");
+    if (lpdepForm) lpdepForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = lpDeposit(val("lpdep-ra"), val("lpdep-rb"), val("lpdep-supply"), val("lpdep-da"), val("lpdep-db"));
+      if (res === null) {
+        document.getElementById("lpdep-minted-out").value = "Invalid";
+        document.getElementById("lpdep-share-out").value = "Invalid";
+        setText("lpdep-result", "Check the inputs: deposits must be positive numbers with at most 9 decimals, and the pool must be either fully empty (all three pool figures 0 — a first deposit) or fully live (reserves and LP supply all positive). A deposit so small it would mint zero LP tokens is also rejected — on-chain it would hand over tokens for nothing.");
+        return;
+      }
+      document.getElementById("lpdep-minted-out").value = res.minted;
+      document.getElementById("lpdep-share-out").value = res.firstDeposit ? "100% (first deposit)" : res.sharePct.toFixed(6) + "% of the pool after deposit";
+      setText("lpdep-result", res.firstDeposit
+        ? "Model output: this is a FIRST deposit — the pool is empty, so the deposit itself sets the pool's price (" + res.depositA + " A against " + res.depositB + " B) and mints the geometric mean, sqrt(" + res.depositA + " × " + res.depositB + ") = " + res.minted + " LP tokens. The depositor holds the whole pool. Some pools permanently lock a small minimum of a first mint as an inflation-attack defence; that lock is pool-specific and is not modelled here. Choose this ratio carefully: the first price is the price every later trade starts from. An educational model, not a live pool quote. Not financial advice."
+        : "Model output: against reserves of " + res.reserveA + " A / " + res.reserveB + " B with " + res.supply + " LP tokens outstanding, a deposit of " + res.depositA + " A / " + res.depositB + " B mints " + res.minted + " LP tokens — " + res.sharePct.toFixed(6) + "% of the pool afterwards. The mint is set by " + (res.limiting === "both" ? "both sides equally: the deposit matches the pool's ratio exactly, so all of it is used" : "token " + res.limiting + ", the limiting side: only " + res.usedA + " A and " + res.usedB + " B are used at the pool's ratio" + (res.limiting === "A" ? (res.excessB !== "0" ? ", and the excess " + res.excessB + " B buys no extra LP tokens — a good interface returns it or sizes the deposit to the ratio first." : ".") : (res.excessA !== "0" ? ", and the excess " + res.excessA + " A buys no extra LP tokens — a good interface returns it or sizes the deposit to the ratio first." : "."))) + " Burning those LP tokens later returns that share of whatever reserves the pool holds then — which, after trades and fees, is a different amount and split than went in (see impermanent loss, Tool 4). An educational model, not a live pool quote. Not financial advice.");
     });
 
     /* catalogue filter */
