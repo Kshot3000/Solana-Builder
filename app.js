@@ -520,6 +520,86 @@ function epochForSlot(slot) {
   };
 }
 
+/* ---------- Tool 13: Token-2022 transfer fee (withheld on transfer) ---------- */
+/* The Token-2022 program (the SPL Token program's successor, program id
+   TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) lets a mint carry a
+   TransferFeeConfig: on every transfer the sender is debited the full
+   amount, the recipient is credited amount - fee, and the fee stays
+   WITHHELD inside the recipient's token account until it is harvested to
+   the mint and withdrawn by the withdraw-withheld authority. The classic
+   SPL Token program has no transfer fees at all. The program's own
+   calculate_fee is exact integer math on RAW amounts (Tool 6's units):
+   fee = ceil(amount * transferFeeBasisPoints / 10000), capped at the
+   mint's maximumFee, and 0 when the rate or the amount is 0. The ceiling
+   is the teaching point most quotes get wrong: any positive transfer at
+   any positive rate pays at least 1 raw unit of fee. A mint stores an
+   older and a newer fee and picks by epoch; this model takes the single
+   configuration you enter, as in effect for the transfer you are pricing.
+   The gross-up direction finds the smallest amount to SEND so the
+   recipient receives exactly a wanted net: fee(amount) never exceeds
+   maximumFee, so the answer lies in [net, net + maximumFee], and
+   amount - fee(amount) rises by 0 or 1 per unit (the fee itself rises by
+   at most 1 per unit at any rate up to 100%), so a binary search lands
+   on the exact amount; both directions are proven against brute force. */
+var MAX_FEE_BASIS_POINTS = 10000;
+
+function rawAmount(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  return BigInt(s);
+}
+function feeBpsValue(v) {
+  var n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_FEE_BASIS_POINTS ? n : null;
+}
+function transferFeeParts(amount, bps, maximumFee) { /* BigInt in, BigInt out */
+  if (bps === 0n || amount === 0n) return { rawFee: 0n, fee: 0n };
+  var rawFee = (amount * bps + 9999n) / 10000n; /* ceil division */
+  return { rawFee: rawFee, fee: rawFee > maximumFee ? maximumFee : rawFee };
+}
+function transferFee(amountStr, feeBps, maximumFeeStr) {
+  var amount = rawAmount(amountStr);
+  var maximumFee = rawAmount(maximumFeeStr);
+  var bps = feeBpsValue(feeBps);
+  if (amount === null || maximumFee === null || bps === null) return null;
+  var parts = transferFeeParts(amount, BigInt(bps), maximumFee);
+  return {
+    amount: amount.toString(),
+    feeBps: bps,
+    feePct: bps / 100,
+    maximumFee: maximumFee.toString(),
+    fee: parts.fee.toString(),
+    netReceived: (amount - parts.fee).toString(),
+    capped: parts.rawFee > maximumFee
+  };
+}
+function transferFeeGrossUp(netStr, feeBps, maximumFeeStr) {
+  var net = rawAmount(netStr);
+  var maximumFee = rawAmount(maximumFeeStr);
+  var bps = feeBpsValue(feeBps);
+  if (net === null || maximumFee === null || bps === null) return null;
+  var b = BigInt(bps);
+  function received(pre) {
+    return pre - transferFeeParts(pre, b, maximumFee).fee;
+  }
+  var lo = net, hi = net + maximumFee; /* received(hi) >= net: the fee there is at most maximumFee */
+  while (lo < hi) {
+    var mid = (lo + hi) / 2n;
+    if (received(mid) >= net) hi = mid; else lo = mid + 1n;
+  }
+  var parts = transferFeeParts(lo, b, maximumFee);
+  return {
+    netReceived: net.toString(),
+    feeBps: bps,
+    feePct: bps / 100,
+    maximumFee: maximumFee.toString(),
+    grossAmount: lo.toString(),
+    fee: parts.fee.toString(),
+    capped: parts.rawFee > maximumFee
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -543,6 +623,7 @@ if (typeof module !== "undefined" && module.exports) {
     buildSolanaPayUrl, parseSolanaPayUrl, validPayAmount, KNOWN_MINT_DECIMALS,
     tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
     slippageAmounts, MAX_SLIPPAGE_BPS,
+    transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     epochForSlot, epochRange, slotsInEpoch, firstSlotInEpoch,
     MIN_SLOTS_PER_EPOCH, FIRST_NORMAL_EPOCH, FIRST_NORMAL_SLOT,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
@@ -808,6 +889,33 @@ if (typeof document !== "undefined") {
       }
       document.getElementById("epochrange-out").value = "Slots " + res.firstSlot + " – " + res.lastSlot;
       setText("epochrange-result", "Epoch " + res.epoch + " runs from slot " + res.firstSlot + " to slot " + res.lastSlot + " — " + res.slotsInEpoch + " slots." + (res.warmup ? " A warmup epoch: lengths doubled from 32 slots until the first normal epoch, 14, which starts at slot 524,256." : " A normal epoch: every epoch from 14 on holds exactly 432,000 slots.") + " Staking rewards, stake activation and leader schedules all key off these boundaries — which is why the warmup offset matters to any code that computes an epoch from a slot.");
+    });
+
+    var tfeeForm = document.getElementById("tfee-calc");
+    if (tfeeForm) tfeeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = transferFee(val("tfee-amt"), val("tfee-bps"), val("tfee-max"));
+      if (res === null) {
+        document.getElementById("tfee-fee-out").value = "Invalid";
+        setText("tfee-result", "Check the inputs: the amount and the maximum fee are raw token amounts — whole numbers of the mint's smallest unit, 0 or more (use Tool 6 to convert a UI amount) — and the transfer fee rate is a whole number of basis points from 0 to 10,000 (100%).");
+        return;
+      }
+      document.getElementById("tfee-fee-out").value = res.fee;
+      document.getElementById("tfee-net-out").value = res.netReceived;
+      setText("tfee-result", "Model output: on a transfer of " + res.amount + " raw units at " + res.feeBps + " bps (" + res.feePct + "%), the fee is ceil(" + res.amount + " × " + res.feeBps + " ÷ 10,000), " + (res.capped ? "which comes out above the mint's maximum fee, so the fee is capped at " + res.maximumFee + " raw units" : "which is " + res.fee + " raw units") + " — the sender is debited the full " + res.amount + ", the recipient is credited " + res.netReceived + ", and the " + res.fee + " withheld stays in the recipient's token account until it is harvested and withdrawn. The ceiling means any positive transfer at a positive rate pays at least 1 raw unit. This models the single fee configuration entered, in effect for the transfer; a real mint stores an older and a newer fee chosen by epoch — read the mint's TransferFeeConfig before pricing a real transfer. Educational model of the Token-2022 program's fee math, not a live quote. Not financial advice.");
+    });
+
+    var tgrossForm = document.getElementById("tgross-calc");
+    if (tgrossForm) tgrossForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = transferFeeGrossUp(val("tgross-net"), val("tgross-bps"), val("tgross-max"));
+      if (res === null) {
+        document.getElementById("tgross-out").value = "Invalid";
+        setText("tgross-result", "Check the inputs: the amount the recipient must receive and the maximum fee are raw token amounts — whole numbers, 0 or more — and the transfer fee rate is a whole number of basis points from 0 to 10,000.");
+        return;
+      }
+      document.getElementById("tgross-out").value = res.grossAmount;
+      setText("tgross-result", "Model output: to have the recipient credited exactly " + res.netReceived + " raw units at " + res.feeBps + " bps, send " + res.grossAmount + " raw units — its fee is " + res.fee + (res.capped ? " (capped at the mint's maximum fee of " + res.maximumFee + ")" : "") + ", and " + res.grossAmount + " − " + res.fee + " = " + res.netReceived + ". One raw unit less would deliver less, because the withheld fee is computed on the amount sent, with the ceiling applied. An educational model — confirm the mint's live fee configuration before a real transfer. Not financial advice.");
     });
 
     /* catalogue filter */

@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=9"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=10"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("fifteen tool forms (twelve tools, Tools 9, 10 and 12 each have two)", (html.match(/<form id=/g) || []).length === 15);
+check("seventeen tool forms (thirteen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 17);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -290,6 +290,37 @@ check("epoch: rejects negative / fractional / junk / unsafe", app.epochForSlot(-
 check("epoch: string inputs accepted like the other tools", app.epochForSlot("524256").epoch === 14 && app.epochRange("14").firstSlot === 524256);
 check("guide teaches the epoch schedule (Tool 12)", guide.includes("Tool 12") && guide.includes("524,256"));
 check("epoch tool labelled slots-only / not-live in index.html", html.includes("does not convert to dates or times") || html.includes("it deliberately does not convert to dates or times"));
+
+/* Tool 13 — Token-2022 transfer fee: fee = ceil(amount * bps / 10000) capped
+   at maximumFee, on raw amounts; gross-up = smallest send whose net lands
+   exactly. Vectors prototype-verified before pinning: the fee direction
+   against a naive ceiling sweep, the gross-up against full enumeration on
+   12,060 small cases plus O(1) minimality on large ones — zero mismatches. */
+check("tfee: headline cap — 1,000,000 at 100 bps, max 5,000 -> fee 5,000 capped, net 995,000", (() => { const r = app.transferFee("1000000", 100, "5000"); return r.fee === "5000" && r.netReceived === "995000" && r.capped === true; })());
+check("tfee: 10,000 at 25 bps -> fee 25, net 9,975, not capped", (() => { const r = app.transferFee("10000", 25, "1000000"); return r.fee === "25" && r.netReceived === "9975" && r.capped === false; })());
+check("tfee: ceiling rounds up — 101 at 50 bps -> fee 1 (0.505 ceils), net 100", (() => { const r = app.transferFee("101", 50, "1000000"); return r.fee === "1" && r.netReceived === "100"; })());
+check("tfee: smallest transfer pays the 1-unit minimum — 1 at 1 bp -> fee 1, net 0", (() => { const r = app.transferFee("1", 1, "1000000"); return r.fee === "1" && r.netReceived === "0"; })());
+check("tfee: zero amount pays zero fee", (() => { const r = app.transferFee("0", 500, "100"); return r.fee === "0" && r.netReceived === "0" && r.capped === false; })());
+check("tfee: zero rate pays zero fee", (() => { const r = app.transferFee("1000000", 0, "5000"); return r.fee === "0" && r.netReceived === "1000000"; })());
+check("tfee: zero maximum fee caps every fee to zero", (() => { const r = app.transferFee("1000", 500, "0"); return r.fee === "0" && r.netReceived === "1000" && r.capped === true; })());
+check("tfee: raw fee exactly at the maximum is not capped past it", (() => { const r = app.transferFee("1000000", 50, "5000"); return r.fee === "5000" && r.capped === false; })());
+check("tfee: 100% rate with a cap — 1,000 at 10,000 bps, max 10 -> fee 10", (() => { const r = app.transferFee("1000", 10000, "10"); return r.fee === "10" && r.netReceived === "990" && r.capped === true; })());
+check("tfee: 100% rate uncapped delivers nothing", (() => { const r = app.transferFee("777", 10000, "999999999"); return r.fee === "777" && r.netReceived === "0"; })());
+check("tfee: huge raw amounts stay exact beyond float precision", (() => { const r = app.transferFee("123456789123456789", 33, "999999999999999999"); return r.fee === "407407404107408" && r.netReceived === "123049381719349381"; })());
+check("tfee: fee + net always reconstruct the amount (sweep)", [[1, 1, "0"], [7, 9999, "3"], [100, 50, "1000000"], [999983, 123, "456"], [500000, 10000, "0"]].every(([a, b, m]) => { const r = app.transferFee(String(a), b, m); return BigInt(r.fee) + BigInt(r.netReceived) === BigInt(a); }));
+check("tfee: rejects rate over 10000 bps, negative and fractional rates", app.transferFee("100", 10001, "10") === null && app.transferFee("100", -1, "10") === null && app.transferFee("100", 2.5, "10") === null);
+check("tfee: rejects fractional / junk / negative raw amounts and caps", app.transferFee("1.5", 50, "10") === null && app.transferFee("abc", 50, "10") === null && app.transferFee("-5", 50, "10") === null && app.transferFee("100", 50, "1.5") === null && app.transferFee("100", 50, "-1") === null);
+check("tfee: exposes the basis-point cap", app.MAX_FEE_BASIS_POINTS === 10000);
+check("tgross: headline — net 995,000 at 100 bps, max 5,000 -> send 1,000,000, fee 5,000 capped", (() => { const r = app.transferFeeGrossUp("995000", 100, "5000"); return r.grossAmount === "1000000" && r.fee === "5000" && r.capped === true; })());
+check("tgross: net 100 at 50 bps -> send 101, fee 1", (() => { const r = app.transferFeeGrossUp("100", 50, "1000000"); return r.grossAmount === "101" && r.fee === "1"; })());
+check("tgross: net 1 at 1 bp -> send 2 (the ceiling takes 1 from any positive send)", (() => { const r = app.transferFeeGrossUp("1", 1, "1000000"); return r.grossAmount === "2" && r.fee === "1"; })());
+check("tgross: net 0 -> send 0", (() => { const r = app.transferFeeGrossUp("0", 500, "100"); return r.grossAmount === "0" && r.fee === "0"; })());
+check("tgross: net 100 at 100% rate, max 10 -> send 110, fee 10", (() => { const r = app.transferFeeGrossUp("100", 10000, "10"); return r.grossAmount === "110" && r.fee === "10"; })());
+check("tgross: zero rate sends the net itself", (() => { const r = app.transferFeeGrossUp("12345", 0, "5000"); return r.grossAmount === "12345" && r.fee === "0"; })());
+check("tgross: gross-up lands exactly and one unit less under-delivers (sweep)", [["1", 1, "1000000"], ["100", 50, "1000000"], ["995000", 100, "5000"], ["999", 9999, "3"], ["123456789123456789", 33, "999999999999999999"], ["500", 10000, "0"]].every(([n, b, m]) => { const g = app.transferFeeGrossUp(n, b, m); if (app.transferFee(g.grossAmount, b, m).netReceived !== n) return false; if (g.grossAmount === "0") return true; return app.transferFee((BigInt(g.grossAmount) - 1n).toString(), b, m).netReceived !== n; }));
+check("tgross: rejects junk like the fee direction", app.transferFeeGrossUp("1.5", 50, "10") === null && app.transferFeeGrossUp("100", 10001, "10") === null && app.transferFeeGrossUp("100", 50, "-1") === null);
+check("guide teaches Token-2022 transfer fees (Tool 13)", guide.includes("Tool 13") && guide.includes("ceil(amount"));
+check("tfee tool labelled model / not-live in index.html", html.includes("An educational model of the program's fee math, not a live quote") && html.includes("classic SPL Token program has no transfer fees"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);
