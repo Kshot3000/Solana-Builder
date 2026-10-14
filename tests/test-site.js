@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=6"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=7"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("ten tool forms (nine tools, Tool 9 has build + inspect)", (html.match(/<form id=/g) || []).length === 10);
+check("twelve tool forms (ten tools, Tools 9 and 10 each have two)", (html.match(/<form id=/g) || []).length === 12);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -219,6 +219,40 @@ check("pay: bare recipient parses with the amount left to the wallet", (() => { 
 check("pay: hub donation address builds a link", app.buildSolanaPayUrl({ recipient: SOL, amount: "0.1", label: "Solana Ecosystem Builder" }) === "solana:" + SOL + "?amount=0.1&label=Solana%20Ecosystem%20Builder");
 check("guide teaches Solana Pay (Tool 9)", guide.includes("Tool 9") && guide.includes("associated token accounts must not be used"));
 check("pay tool labelled local / nothing sent in index.html", html.includes("nothing is sent and no wallet opens") && html.includes("associated token accounts must not be used"));
+
+/* Tool 10 — CLMM ticks: price(tick) = 1.0001^tick, range [-443636, 443636] */
+near("clmm: tick 0 is price 1", app.tickToPrice(0), 1, 1e-12);
+near("clmm: tick 1 is price 1.0001", app.tickToPrice(1), 1.0001, 1e-12);
+near("clmm: tick 100 is price ~1.01004966", app.tickToPrice(100), 1.0100496620928754, 1e-12);
+near("clmm: tick -100 is price ~0.99005033", app.tickToPrice(-100), 0.9900503287412106, 1e-12);
+near("clmm: tick 10000 is price ~2.71814593", app.tickToPrice(10000), 2.7181459268249255, 1e-9);
+check("clmm: tick bounds exposed", app.MIN_TICK === -443636 && app.MAX_TICK === 443636 && app.TICK_BASE === 1.0001);
+check("clmm: tick above max rejected", app.tickToPrice(443637) === null);
+check("clmm: tick below min rejected", app.tickToPrice(-443637) === null);
+check("clmm: fractional tick rejected", app.tickToPrice(1.5) === null);
+check("clmm: price 1 is tick 0", app.priceToTick("1") === 0);
+check("clmm: price 1.0001 is tick 1 (exact power round-trips)", app.priceToTick("1.0001") === 1);
+check("clmm: price 2 floors to tick 6931", app.priceToTick("2") === 6931);
+check("clmm: price 0.5 floors to tick -6932", app.priceToTick("0.5") === -6932);
+check("clmm: tick->price->tick round trip", [0, 1, -1, 100, -100, 10000, -20000, 443636, -443636].every((t) => app.priceToTick(String(app.tickToPrice(t))) === t));
+check("clmm: price above the tick range rejected", app.priceToTick("1e20") === null);
+check("clmm: price below the tick range rejected", app.priceToTick("1e-20") === null);
+check("clmm: zero / negative / junk price rejected", app.priceToTick("0") === null && app.priceToTick("-2") === null && app.priceToTick("abc") === null);
+const rng = app.clmmRange(-600, 600, 0, 60);
+check("clmm range: centred range is in range at tick 0", rng && rng.inRange === true);
+near("clmm range: width ratio for -600..600", rng && rng.widthRatio, 1.1274900870695084, 1e-9);
+near("clmm range: lower price", rng && rng.priceLower, Math.pow(1.0001, -600), 1e-12);
+check("clmm range: current == lower is IN range", app.clmmRange(-600, 600, -600, 60).inRange === true);
+check("clmm range: current == upper is OUT of range", app.clmmRange(-600, 600, 600, 60).inRange === false);
+check("clmm range: current below range is out", app.clmmRange(-600, 600, -660, 60).inRange === false);
+check("clmm range: misaligned endpoint rejected (spacing 60, tick 610)", app.clmmRange(-600, 610, 0, 60) === null);
+check("clmm range: negative misaligned endpoint rejected", app.clmmRange(-610, 600, 0, 60) === null);
+check("clmm range: spacing 1 aligns everything", app.clmmRange(-611, 613, 0, 1) !== null);
+check("clmm range: lower >= upper rejected", app.clmmRange(600, 600, 0, 60) === null && app.clmmRange(600, -600, 0, 60) === null);
+check("clmm range: zero spacing rejected", app.clmmRange(-600, 600, 0, 0) === null);
+check("clmm range: out-of-bounds tick rejected", app.clmmRange(-443640, 600, 0, 60) === null);
+check("guide teaches CLMM ticks (Tool 10)", guide.includes("Tool 10") && guide.includes("1.0001^tick"));
+check("clmm tool labelled raw-units / not-live in index.html", html.includes("raw token units") && html.includes("not a live pool quote"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);

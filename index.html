@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -313,6 +313,59 @@
         <p class="result" id="payparse-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>10. CLMM tick ⇄ price converter &amp; range checker — concentrated liquidity</h3>
+      <p>Concentrated-liquidity pools — Raydium CLMM and Orca Whirlpools — do not let liquidity sit at any price. Prices are discretised onto <strong>ticks</strong>: <code>price(tick) = 1.0001^tick</code>, so each tick is one basis point of price, and the on-chain tick range is −443,636 to 443,636. A position only earns fees while the current tick is inside its range (<code>tickLower ≤ tickCurrent &lt; tickUpper</code>); outside it, the position holds only one asset and earns nothing. Both endpoints must be aligned to the pool's <strong>tick spacing</strong> — set per pool and fee tier, so it is an input here, not a constant. Prices below are in raw token units: a UI price also depends on the two mints' decimals, which this local model does not look up. Convert a tick or a price, then check a range — both run locally. An educational model, not a live pool quote.</p>
+      <form id="tick-calc">
+        <div class="grid">
+          <div>
+            <label for="tick-in">Tick</label>
+            <input id="tick-in" name="tick-in" inputmode="numeric" placeholder="100">
+          </div>
+          <div>
+            <label for="tick-price-out">Price at that tick (result)</label>
+            <input id="tick-price-out" name="tick-price-out" readonly>
+          </div>
+          <div>
+            <label for="price-in">Price (raw token units)</label>
+            <input id="price-in" name="price-in" inputmode="decimal" placeholder="2">
+          </div>
+          <div>
+            <label for="price-tick-out">Tick at that price (result)</label>
+            <input id="price-tick-out" name="price-tick-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Convert</button>
+        <p class="result" id="tick-result" aria-live="polite"></p>
+      </form>
+      <form id="clmmrange-calc">
+        <div class="grid">
+          <div>
+            <label for="range-lower">Lower tick</label>
+            <input id="range-lower" name="range-lower" inputmode="numeric" value="-600">
+          </div>
+          <div>
+            <label for="range-upper">Upper tick</label>
+            <input id="range-upper" name="range-upper" inputmode="numeric" value="600">
+          </div>
+          <div>
+            <label for="range-current">Current tick</label>
+            <input id="range-current" name="range-current" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="range-spacing">Pool tick spacing</label>
+            <input id="range-spacing" name="range-spacing" inputmode="numeric" value="60">
+          </div>
+          <div>
+            <label for="range-out">Position status (result)</label>
+            <input id="range-out" name="range-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Check the range</button>
+        <p class="result" id="range-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -403,6 +456,7 @@
       <li><strong>Check every address before you trust it</strong> (Tool 7 above): an address is 32 bytes in base58 — a paste with stray or missing characters decodes to the wrong length. Format is only the first check; still compare the full address character-for-character with its source.</li>
       <li><strong>Model staking before you delegate</strong> (Tool 8 above): rewards arrive once per epoch (about 2 days), commission comes off the reward — not the stake — and credited rewards compound. Compare validators on commission and reliability, never on a headline yield alone; the yield you model is an assumption, not a promise.</li>
       <li><strong>Read a payment link before you pay it</strong> (Tool 9 above): a Solana Pay URL names the recipient, the amount in user units and the asset — an empty amount means the wallet asks, a memo is public on-chain forever, and a well-formed link can still point at the wrong recipient, so inspect it and compare the recipient in full.</li>
+      <li><strong>Place concentrated liquidity by ticks, not vibes</strong> (Tool 10 above): on Raydium CLMM and Orca Whirlpools a price is a tick — <code>price = 1.0001^tick</code> — a position earns only while the current tick is inside its range, and its endpoints must align to the pool's tick spacing. A narrow range earns more per unit while it lasts and goes inactive sooner; check both before you open one.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -429,6 +483,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

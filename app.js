@@ -373,6 +373,59 @@ function parseSolanaPayUrl(url) {
   return out;
 }
 
+/* ---------- Tool 10: CLMM tick <-> price + position range ---------- */
+/* Concentrated-liquidity pools (Raydium CLMM, Orca Whirlpools) do not let
+   liquidity sit at any price: prices are discretised onto ticks, where
+   price(tick) = 1.0001^tick — each tick is one basis point of price.
+   The on-chain tick range is [-443636, 443636], chosen so the stored
+   sqrt-price (Q64.64 fixed point) fits its field at both ends; prices here
+   are in raw token units (a UI price also needs the two mints' decimals,
+   which this local model does not look up). A position's endpoints must
+   be aligned to the pool's tick spacing (tick % spacing == 0) — the
+   spacing is set per pool/fee tier, so it is an input here, not a
+   constant. A position is in range (active, earning fees) while
+   tickLower <= tickCurrent < tickUpper; at or above the upper tick it
+   holds only one asset and earns nothing until price returns.
+   Price->tick returns the largest tick whose price is <= the entered
+   price (the floor convention pools use), with a small relative
+   correction so an exact tick price round-trips to its own tick. */
+var MIN_TICK = -443636;
+var MAX_TICK = 443636;
+var TICK_BASE = 1.0001;
+
+function tickToPrice(tick) {
+  var t = Number(tick);
+  if (!Number.isInteger(t) || t < MIN_TICK || t > MAX_TICK) return null;
+  return Math.pow(TICK_BASE, t);
+}
+
+function priceToTick(priceStr) {
+  var p = Number(priceStr);
+  if (!isFinite(p) || p <= 0) return null;
+  var t = Math.floor(Math.log(p) / Math.log(TICK_BASE));
+  while (t < MAX_TICK && tickToPrice(t + 1) <= p * (1 + 1e-12)) t++;
+  while (t > MIN_TICK && tickToPrice(t) > p * (1 + 1e-12)) t--;
+  if (t < MIN_TICK || t > MAX_TICK) return null;
+  return t;
+}
+
+function clmmRange(lower, upper, current, spacing) {
+  var lo = Number(lower), hi = Number(upper), cur = Number(current), sp = Number(spacing);
+  if (!Number.isInteger(lo) || !Number.isInteger(hi) || !Number.isInteger(cur) || !Number.isInteger(sp)) return null;
+  if (lo < MIN_TICK || hi > MAX_TICK || cur < MIN_TICK || cur > MAX_TICK) return null;
+  if (sp < 1) return null;
+  if (lo >= hi) return null;
+  if (lo % sp !== 0 || hi % sp !== 0) return null;
+  var priceLower = tickToPrice(lo), priceUpper = tickToPrice(hi), priceCurrent = tickToPrice(cur);
+  return {
+    tickLower: lo, tickUpper: hi, tickCurrent: cur, tickSpacing: sp,
+    priceLower: priceLower, priceUpper: priceUpper, priceCurrent: priceCurrent,
+    widthRatio: priceUpper / priceLower,
+    widthPct: (priceUpper / priceLower - 1) * 100,
+    inRange: lo <= cur && cur < hi
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -394,6 +447,7 @@ if (typeof module !== "undefined" && module.exports) {
     rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch,
     base58Decode, base58Encode, checkAddress, stakingRewards,
     buildSolanaPayUrl, parseSolanaPayUrl, validPayAmount, KNOWN_MINT_DECIMALS,
+    tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
     SLOTS_PER_EPOCH, EPOCHS_PER_YEAR, MAX_STAKING_EPOCHS,
     BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS,
@@ -582,6 +636,42 @@ if (typeof document !== "undefined") {
       if (res.message) parts.push("Message: " + res.message);
       if (res.memo) parts.push("Memo (public, on-chain): " + res.memo);
       setText("payparse-result", parts.join(" · ") + ". Checked locally only: well-formed says the URL follows the format, not that the recipient is who you meant — compare the recipient in full with the source you trust before paying.");
+    });
+
+    var tickForm = document.getElementById("tick-calc");
+    if (tickForm) tickForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var tick = val("tick-in").trim(), price = val("price-in").trim();
+      function fmtPrice(p) { return p < 0.001 || p >= 1e15 ? p.toExponential(6) : String(Number(p.toPrecision(10))); }
+      if (tick) {
+        var p = tickToPrice(tick);
+        setText("tick-result", p === null
+          ? "Enter a whole-number tick from -443,636 to 443,636 — the on-chain CLMM tick range."
+          : "Tick " + tick + " is price " + fmtPrice(p) + " (1.0001^" + tick + ") in raw token units. Each tick is one basis point of price: 100 ticks is about a 1% move.");
+        if (p !== null) document.getElementById("tick-price-out").value = fmtPrice(p);
+      } else if (price) {
+        var t = priceToTick(price);
+        setText("tick-result", t === null
+          ? "Enter a positive price inside the CLMM tick range (about 5.42e-20 to 1.84e19 in raw units)."
+          : "Price " + price + " sits at tick " + t + " — the largest tick whose price (1.0001^" + t + " = " + fmtPrice(tickToPrice(t)) + ") is at or below it, the floor convention pools use.");
+        if (t !== null) document.getElementById("price-tick-out").value = String(t);
+      } else {
+        setText("tick-result", "Fill in either a tick or a price, then convert.");
+      }
+    });
+
+    var rangeForm = document.getElementById("clmmrange-calc");
+    if (rangeForm) rangeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = clmmRange(val("range-lower"), val("range-upper"), val("range-current"), val("range-spacing"));
+      if (res === null) {
+        document.getElementById("range-out").value = "Invalid range";
+        setText("range-result", "Check the inputs: all ticks must be whole numbers in -443,636 to 443,636, the lower tick must be below the upper tick, the spacing must be a positive whole number, and both endpoints must be aligned to that spacing (endpoint % spacing = 0) — a pool rejects a misaligned position.");
+        return;
+      }
+      document.getElementById("range-out").value = res.inRange ? "In range — active" : "Out of range — inactive";
+      function fmtPrice(p) { return p < 0.001 || p >= 1e15 ? p.toExponential(6) : String(Number(p.toPrecision(10))); }
+      setText("range-result", "Model output: ticks " + res.tickLower + " to " + res.tickUpper + " are prices " + fmtPrice(res.priceLower) + " to " + fmtPrice(res.priceUpper) + " — a range " + res.widthPct.toFixed(2) + "% wide (upper/lower ratio " + res.widthRatio.toFixed(4) + "). The current tick " + res.tickCurrent + " (price " + fmtPrice(res.priceCurrent) + ") is " + (res.inRange ? "inside the range, so the position is active and earning swap fees at this price." : "outside the range, so the position holds only one asset and earns no swap fees until the price returns.") + " Prices are in raw token units — a UI price also depends on the two mints' decimals. An educational model, not a live pool quote. Not financial advice.");
     });
 
     /* catalogue filter */

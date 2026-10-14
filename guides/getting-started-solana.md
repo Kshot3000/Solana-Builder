@@ -23,7 +23,7 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the eight mechanics that decide your costs
+## 3. Learn the nine mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
@@ -36,6 +36,8 @@ Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 7. **Staking rewards.** Rewards are paid once per epoch — 432,000 slots, about 2 days at the target slot time, so about 182.5 epochs a year. A validator's commission is a percentage of the reward, not of the stake, and rewards credited to an active stake account compound from the next epoch on. Model it before you delegate (Tool 8): at an assumed 7.3% gross annual yield, one epoch pays 0.04% of the stake before commission. The yield is an assumption, never a live quote — real yield moves with inflation, total stake and validator performance, stake takes about an epoch to activate, and unstaking takes about an epoch to cool down.
 
 8. **Payment links (Solana Pay).** A transfer request is one URL: `solana:<recipient>?amount=…&spl-token=…&reference=…&label=…&message=…&memo=…`. The recipient is a native account — associated token accounts must not be used as the recipient, because the wallet derives the token account from the `spl-token` mint. The amount is in user units (SOL, not lamports; a token's UI amount, not raw units): 0 is valid, a missing amount means the wallet asks the payer, decimals below 1 need a leading 0, scientific notation is prohibited, and an amount finer than the asset's decimals (9 for SOL, the mint's own otherwise) is malformed. Label and message are display-only; a memo goes on-chain in an SPL Memo instruction and is public forever. Reference is the one repeatable field — wallets attach the keys to the transfer in order, which is how a merchant finds a payment afterwards. The hub's builder and inspector (Tool 9) work both directions locally: build a link, then paste it back and read what it actually says before you share or pay it.
+
+9. **CLMM ticks (concentrated liquidity).** On Raydium CLMM and Orca Whirlpools, prices live on ticks: `price(tick) = 1.0001^tick` — one tick is one basis point, and the on-chain range is −443,636 to 443,636. A position's endpoints must be aligned to the pool's tick spacing (`tick % spacing == 0`), and it is in range — active and earning fees — only while `tickLower ≤ tickCurrent < tickUpper`; at or above the upper tick it holds only one asset and earns nothing. Price-to-tick is a floor: the largest tick whose price is at or below the price you mean. The hub's converter and range checker (Tool 10) work both directions locally; prices there are in raw token units, so a UI price also needs the two mints' decimals.
 
 ## 4. Scaffold and test
 
