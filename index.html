@@ -525,6 +525,45 @@
         <p class="result" id="sand-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>15. Liquid staking (LST) exchange rate — why the rate rises, not your balance</h3>
+      <p>A <strong>liquid staking pool</strong> (the SPL Stake Pool program, Marinade, Jito and their peers) holds staked SOL and issues a pool token. That token does <em>not</em> rebase: when staking rewards land, your token balance stays exactly the same — instead the pool's total SOL grows with no new tokens minted, so the <strong>exchange rate</strong> (total staked SOL ÷ token supply, in SOL per token) rises. Depositing mints <code>deposit × supply ÷ total</code> tokens and redeeming returns <code>redeem × total ÷ supply</code> SOL, both floored like an on-chain division — a dust deposit can floor to zero tokens. This model adds a rewards amount you supply to the total so you can watch the same deposit mint fewer tokens afterwards and the same redemption return more SOL: that difference is the yield. It charges no deposit, withdrawal or epoch fees (real pools charge some — check the pool's own terms) and models no unstake delay: a withdrawal not covered by pool liquidity deactivates stake and waits out the epoch cooldown. An educational model of one pool's exchange rate, not a live pool's rate. Not financial advice.</p>
+      <form id="lst-calc">
+        <div class="grid">
+          <div>
+            <label for="lst-total">Pool total staked (SOL)</label>
+            <input id="lst-total" name="lst-total" inputmode="decimal" value="1100">
+          </div>
+          <div>
+            <label for="lst-supply">Pool token supply (LST)</label>
+            <input id="lst-supply" name="lst-supply" inputmode="decimal" value="1000">
+          </div>
+          <div>
+            <label for="lst-rewards">Rewards added to the pool (SOL)</label>
+            <input id="lst-rewards" name="lst-rewards" inputmode="decimal" value="55">
+          </div>
+          <div>
+            <label for="lst-deposit">Deposit to price (SOL)</label>
+            <input id="lst-deposit" name="lst-deposit" inputmode="decimal" value="110">
+          </div>
+          <div>
+            <label for="lst-redeem">Redemption to price (LST)</label>
+            <input id="lst-redeem" name="lst-redeem" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="lst-rate-out">Exchange rate after rewards (SOL per LST, model)</label>
+            <input id="lst-rate-out" name="lst-rate-out" readonly>
+          </div>
+          <div>
+            <label for="lst-redeem-out">Redemption after rewards (SOL, model)</label>
+            <input id="lst-redeem-out" name="lst-redeem-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the pool token</button>
+        <p class="result" id="lst-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -620,6 +659,7 @@
       <li><strong>Never compute an epoch as slot ÷ 432,000</strong> (Tool 12 above): the chain warmed up — epochs doubled from 32 slots until the first normal epoch, 14, at slot 524,256 — so the naive division is a dozen-plus epochs behind, forever. Epoch boundaries are when staking rewards land and leader schedules rotate; use the runtime's EpochSchedule (or this converter), and never convert slots to wall-clock time with a fixed slot duration — the target has changed repeatedly.</li>
       <li><strong>Check whether a token withholds a transfer fee</strong> (Tool 13 above): a Token-2022 mint can carry a transfer fee — the sender is debited in full, the recipient is credited the amount minus ceil(amount × rate ÷ 10,000), capped at the mint's maximum fee, and the withheld fee sits in the recipient's token account until harvested. A quote or invoice in such a token that ignores the fee under-delivers on every payment; gross up when an exact received amount matters, and remember the classic SPL Token program has no transfer fees at all.</li>
       <li><strong>Understand what a sandwich does to a loose tolerance</strong> (Tool 14 above): an attacker front-runs a visible swap, lets it fill worse, and back-runs into the price move — the profit is the victim's loss. The slippage bound is the defence: tight enough and the victim's transaction aborts instead of filling (the attacker then loses the round-trip unwinding alone); loose enough and the bad fill passes its own protection. Private routing keeps a swap out of the public flow the attack reads.</li>
+      <li><strong>Price a liquid staking token by its rate, not its balance</strong> (Tool 15 above): an LST does not rebase — rewards grow the pool's total SOL while the supply stands still, so the SOL-per-token rate rises and the same token amount redeems for more SOL over time. A rate below 1, or a deposit that mints at a stale rate, is a red flag; and a dust deposit can floor to zero tokens, so never deposit an amount whose minted figure you have not checked.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -646,6 +686,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

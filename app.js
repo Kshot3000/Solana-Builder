@@ -665,6 +665,51 @@ function sandwichAttack(reserveAStr, reserveBStr, victimInStr, attackerInStr, fe
   };
 }
 
+/* ---------- Tool 15: liquid staking (LST) exchange rate ---------- */
+/* A liquid staking pool (SPL Stake Pool, Marinade, Jito and peers) holds
+   staked SOL and issues a pool token. The token is NOT rebasing: the
+   holder's token balance never changes when rewards land — instead the
+   pool's total lamports grow with no new tokens minted, so the exchange
+   rate (SOL per token = total staked SOL / token supply) rises.
+   Deposit mints deposit * supply / total tokens and redemption returns
+   redeem * total / supply SOL, both floored in exact scaled BigInt like
+   an on-chain u64 division — a dust deposit can floor to zero tokens.
+   Rewards are a user-supplied amount added to the total: depositing
+   after they land mints fewer tokens per SOL, and redeeming the same
+   token amount returns more SOL — that difference IS the yield.
+   Model scope, stated in the UI: no deposit / withdrawal / epoch fees
+   (real pools charge some, check the pool's own terms), and no unstake
+   delay — a stake-pool withdrawal that is not covered by pool liquidity
+   deactivates stake and waits out the cooldown (Tool 12's epochs). */
+function liquidStaking(totalSolStr, supplyStr, rewardsStr, depositStr, redeemStr) {
+  var total = parseScaled(totalSolStr), supply = parseScaled(supplyStr);
+  var rewards = parseScaled(rewardsStr), deposit = parseScaled(depositStr);
+  var redeem = parseScaled(redeemStr);
+  if (total === null || supply === null || rewards === null || deposit === null || redeem === null) return null;
+  if (total <= 0n || supply <= 0n) return null;
+  if (deposit <= 0n) return null;
+  if (redeem <= 0n || redeem > supply) return null;
+  var totalAfter = total + rewards;
+  var minted = (deposit * supply) / total;
+  var mintedAfter = (deposit * supply) / totalAfter;
+  var redeemOut = (redeem * total) / supply;
+  var redeemAfter = (redeem * totalAfter) / supply;
+  return {
+    totalSol: formatScaled(total), supply: formatScaled(supply),
+    rewards: formatScaled(rewards), deposit: formatScaled(deposit),
+    redeem: formatScaled(redeem),
+    rate: Number(total) / Number(supply),
+    rateAfterRewards: Number(totalAfter) / Number(supply),
+    totalAfterRewards: formatScaled(totalAfter),
+    tokensMinted: formatScaled(minted),
+    tokensMintedAfterRewards: formatScaled(mintedAfter),
+    redeemOut: formatScaled(redeemOut),
+    redeemOutAfterRewards: formatScaled(redeemAfter),
+    redeemGain: formatScaled(redeemAfter - redeemOut),
+    mintedFloorsToZero: minted === 0n
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -689,7 +734,7 @@ if (typeof module !== "undefined" && module.exports) {
     tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
-    sandwichAttack,
+    sandwichAttack, liquidStaking,
     epochForSlot, epochRange, slotsInEpoch, firstSlotInEpoch,
     MIN_SLOTS_PER_EPOCH, FIRST_NORMAL_EPOCH, FIRST_NORMAL_SLOT,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
@@ -999,6 +1044,21 @@ if (typeof document !== "undefined") {
       setText("sand-result", res.victimProtected
         ? "Model output: unattacked, the victim's " + res.victimIn + " A would buy " + res.baselineOut + " B. The attacker's front-run of " + res.attackerIn + " A takes " + res.frontOut + " B and pushes the victim's fill down to " + res.attemptedVictimOut + " B — below the victim's minimum received of " + res.minimumReceived + " B at a " + res.slippageBps + " bps tolerance, so the victim's transaction aborts instead of filling (the network fee is still paid). The attacker must unwind alone and gets back " + res.backOut + " A — a loss of " + res.attackerProfit.replace("-", "") + " A (" + Math.abs(res.attackerProfitPct).toFixed(4) + "%). Tight slippage is the defence: the trade fails, but the sandwich makes nothing. An educational model of a sandwich attack on a single constant-product pool, not live MEV data. Not financial advice."
         : "Model output: unattacked, the victim's " + res.victimIn + " A would buy " + res.baselineOut + " B. The attacker front-runs with " + res.attackerIn + " A (taking " + res.frontOut + " B), the victim fills at only " + res.victimOut + " B — a loss of " + res.victimLoss + " B (" + res.victimLossPct.toFixed(4) + "% of the unattacked fill), still above the minimum received of " + res.minimumReceived + " B at a " + res.slippageBps + " bps tolerance, so the trade passes its own protection — and the attacker back-runs for " + res.backOut + " A" + (res.attackerProfit.charAt(0) === "-" ? ", which is LESS than the " + res.attackerIn + " A put in: this victim trade was too small to cover the round-trip fees and price impact, so the attack loses " + res.attackerProfit.replace("-", "") + " A even though the victim filled worse." : ", a profit of " + res.attackerProfit + " A. That profit is extracted from the victim's worse price, not created.") + " A looser tolerance is what lets it through; private routing avoids the public flow entirely. An educational model of a sandwich attack on a single constant-product pool, not live MEV data. Not financial advice.");
+    });
+
+    var lstForm = document.getElementById("lst-calc");
+    if (lstForm) lstForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = liquidStaking(val("lst-total"), val("lst-supply"), val("lst-rewards"), val("lst-deposit"), val("lst-redeem"));
+      if (res === null) {
+        document.getElementById("lst-rate-out").value = "Invalid";
+        document.getElementById("lst-redeem-out").value = "Invalid";
+        setText("lst-result", "Check the inputs: the pool total, token supply, deposit and redemption must be positive numbers with at most 9 decimals, the rewards 0 or more, and the redemption no more than the whole token supply — you cannot redeem tokens that do not exist.");
+        return;
+      }
+      document.getElementById("lst-rate-out").value = res.rateAfterRewards.toFixed(9);
+      document.getElementById("lst-redeem-out").value = res.redeemOutAfterRewards;
+      setText("lst-result", "Model output: the pool's exchange rate is " + res.rate.toFixed(9) + " SOL per token (" + res.totalSol + " SOL backing " + res.supply + " tokens). Depositing " + res.deposit + " SOL mints " + res.tokensMinted + " tokens" + (res.mintedFloorsToZero ? " — that deposit is dust at this rate: it floors to ZERO tokens, so on-chain it would stake SOL and mint nothing; deposit more or not at all" : "") + ", and redeeming " + res.redeem + " tokens returns " + res.redeemOut + " SOL. After " + res.rewards + " SOL of rewards land (total " + res.totalAfterRewards + " SOL, supply unchanged), the rate rises to " + res.rateAfterRewards.toFixed(9) + ": the same deposit then mints only " + res.tokensMintedAfterRewards + " tokens, while the same redemption returns " + res.redeemOutAfterRewards + " SOL — a gain of " + res.redeemGain + " SOL on an unchanged token balance. That rising rate, not a growing balance, is the yield. This model charges no pool fees and models no unstake delay; a real pool's terms differ. An educational model of one pool's exchange rate, not a live pool's rate. Not financial advice.");
     });
 
     /* catalogue filter */
