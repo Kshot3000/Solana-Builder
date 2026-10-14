@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -939,6 +939,41 @@
         <p class="result" id="sp-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>23. Sale split calculator — platform fee, creator royalty, seller remainder</h3>
+      <p>Every marketplace sale and escrow release on Solana splits one price three ways: the platform takes a fee in basis points, the creator takes a royalty in basis points, and the seller receives what is left. The two cuts <strong>floor</strong> at the smallest unit, like on-chain integer math, and the seller is the <strong>remainder</strong> — price minus the two floored cuts, never a third independently rounded percentage — so the three parts always sum to the price exactly and no unit is created or destroyed by rounding. The seller keeps the flooring dust too: a 3-unit price split 50/50 pays 1 unit to each cut and 1 unit to the seller. Headline: a sale at 100 with a 200 bps platform fee and a 500 bps royalty pays 2 to the platform, 5 to the creator and 93 to the seller. Both cuts come out of the price in this model — a venue that charges the buyer a fee on top splits differently — and creator royalties on classic Solana NFTs are a marketplace convention (programmable NFTs can enforce them on-chain). An educational model of a sale split, not a live marketplace quote. Not financial advice.</p>
+      <form id="split-calc">
+        <div class="grid">
+          <div>
+            <label for="split-price">Sale price</label>
+            <input id="split-price" name="split-price" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="split-platform">Platform fee (basis points)</label>
+            <input id="split-platform" name="split-platform" inputmode="numeric" value="200">
+          </div>
+          <div>
+            <label for="split-royalty">Creator royalty (basis points)</label>
+            <input id="split-royalty" name="split-royalty" inputmode="numeric" value="500">
+          </div>
+          <div>
+            <label for="split-fee-out">Platform fee (model)</label>
+            <input id="split-fee-out" name="split-fee-out" readonly>
+          </div>
+          <div>
+            <label for="split-royalty-out">Creator royalty (model)</label>
+            <input id="split-royalty-out" name="split-royalty-out" readonly>
+          </div>
+          <div>
+            <label for="split-seller-out">Seller receives (model)</label>
+            <input id="split-seller-out" name="split-seller-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Split the sale</button>
+        <p class="result" id="split-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1068,6 +1103,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=19"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>

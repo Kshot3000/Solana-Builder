@@ -743,6 +743,48 @@ function anchorSpace(fields) {
   };
 }
 
+/* ---------- Tool 23: marketplace / escrow sale split ---------- */
+/* A sale on a marketplace or through an escrow program splits one price
+   three ways: the platform takes a fee in basis points, the creator takes
+   a royalty in basis points, and the seller receives what is left. Both
+   cuts FLOOR in exact scaled-BigInt, like on-chain u64 math, and the
+   seller is the REMAINDER — price minus the two floored cuts — never a
+   third independently rounded percentage, so the three parts always sum
+   to the price exactly and no smallest unit is created or destroyed by
+   rounding. The remainder convention also means the seller keeps the
+   flooring dust: a 3-unit price split 50/50 pays 1 unit to each cut and
+   1 unit to the seller, not 1.5 anywhere. Each rate is capped at 10,000
+   bps and the two together may not exceed 10,000 bps (the seller's share
+   can legitimately reach exactly zero when they sum to 10,000 and the
+   floors leave nothing — flagged, not hidden). Scope stated on the page:
+   both cuts come OUT of the price; venues that charge the buyer a fee on
+   top instead are a different split, and creator royalties on classic
+   Solana NFTs are a marketplace convention (programmable NFTs can enforce
+   them on-chain) — this model teaches the arithmetic, not any one venue's
+   policy. */
+function saleSplit(priceStr, platformBps, royaltyBps) {
+  var price = parseScaled(priceStr);
+  var p = Number(platformBps);
+  var r = Number(royaltyBps);
+  if (price === null || price <= 0n) return null;
+  if (!Number.isInteger(p) || !Number.isInteger(r)) return null;
+  if (p < 0 || r < 0 || p > 10000 || r > 10000) return null;
+  if (p + r > 10000) return null;
+  var platformFee = (price * BigInt(p)) / 10000n;
+  var royalty = (price * BigInt(r)) / 10000n;
+  var seller = price - platformFee - royalty;
+  return {
+    price: formatScaled(price),
+    platformFee: formatScaled(platformFee),
+    royalty: formatScaled(royalty),
+    seller: formatScaled(seller),
+    platformBps: p,
+    royaltyBps: r,
+    combinedBps: p + r,
+    sellerZero: seller === 0n
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1232,6 +1274,7 @@ if (typeof module !== "undefined" && module.exports) {
     clmmPosition, lpDeposit, isqrtBigInt, vestingSchedule, MAX_VESTING_MONTHS, lendingHealth,
     txSize, shortvecLen, PACKET_DATA_SIZE,
     anchorSpace, anchorFieldSize, ANCHOR_DISCRIMINATOR_BYTES, MAX_FIELD_PARAM,
+    saleSplit,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1709,6 +1752,26 @@ if (typeof document !== "undefined") {
       document.getElementById("sp-rent-out").value = res.rentLamports.toLocaleString("en-US") + " lamports";
       var parts = res.fields.map(function (f, idx) { return "field " + (idx + 1) + " (" + typeNames[f.type] + ") " + f.bytes + (f.bytes === 1 ? " byte" : " bytes"); }).join(", ");
       setText("sp-result", "Model output: " + parts + " - " + res.dataBytes + " bytes of field data plus the 8-byte Anchor discriminator is " + res.totalBytes + " bytes of account space, which locks " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL) as its rent-exempt deposit at the network's current rent parameters. Borsh packs fields back to back with no padding; enums are not modelled (add 1 byte plus the largest variant per enum by hand), and a struct with more than four fields adds linearly. An educational model of the serialization format, not a live account. Not financial advice.");
+    });
+
+    var splitForm = document.getElementById("split-calc");
+    if (splitForm) splitForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = saleSplit(val("split-price"), val("split-platform"), val("split-royalty"));
+      if (res === null) {
+        document.getElementById("split-fee-out").value = "Invalid";
+        document.getElementById("split-royalty-out").value = "Invalid";
+        document.getElementById("split-seller-out").value = "Invalid";
+        setText("split-result", "Check the inputs: the sale price must be above zero with at most 9 decimal places, and the platform fee and creator royalty are whole basis points from 0 to 10,000 whose sum may not exceed 10,000 (100%) - past that the seller's share would go negative, so the split does not exist.");
+        return;
+      }
+      document.getElementById("split-fee-out").value = res.platformFee;
+      document.getElementById("split-royalty-out").value = res.royalty;
+      document.getElementById("split-seller-out").value = res.seller;
+      var zeroNote = res.sellerZero
+        ? " The two cuts take the entire price at these rates, so the seller receives exactly 0 - that is the arithmetic of a combined 100% take, stated plainly rather than rounded away."
+        : "";
+      setText("split-result", "Model output: a sale at " + res.price + " splits into a platform fee of " + res.platformFee + " (" + res.platformBps + " bps), a creator royalty of " + res.royalty + " (" + res.royaltyBps + " bps) and " + res.seller + " to the seller. Both cuts floor at the smallest unit and the seller takes the remainder, so the three parts sum to the price exactly - the seller also keeps any flooring dust." + zeroNote + " Both cuts come out of the price in this model; a venue that charges the buyer on top splits differently, and creator royalties on classic Solana NFTs are a marketplace convention (programmable NFTs can enforce them on-chain). An educational model of a sale split, not a live marketplace quote. Not financial advice.");
     });
 
     /* catalogue filter */
