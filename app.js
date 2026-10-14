@@ -1073,6 +1073,68 @@ function associatedTokenAddress(ownerStr, mintStr, tokenProgramStr) {
   };
 }
 
+/* ---------- Tool 28: compressed NFT tree planner ---------- */
+/* A compressed NFT (cNFT) keeps no per-asset accounts on-chain: the
+   assets live in an off-chain index, and the only on-chain state is
+   one concurrent Merkle tree account under SPL account compression
+   (the structure Metaplex Bubblegum mints into). What creating that
+   account costs is pure layout, and the layout is fixed by three
+   choices made once, at creation:
+     account bytes = header 56
+                   + counters and rightmost-path fixed part 64
+                   + changelog ring: bufferSize x (40 + 32 x maxDepth)
+                   + rightmost proof nodes: 32 x maxDepth
+                   + canopy: (2^(canopyDepth+1) - 2) x 32, if any
+   The 56 header bytes are the account-compression header (max buffer
+   4 + max depth 4 + authority 32 + creation slot 8 + padding 6, plus
+   the 2 discriminant/version bytes). Each changelog entry stores a
+   32-byte root, an 8-byte index and one 32-byte hash per tree level -
+   the ring of recent changes is what lets many mints update the tree
+   concurrently without invalidating each other's proofs, and it is
+   almost the whole account (98%+ at typical sizes; the compression
+   whitepaper's depth-24, buffer-1024 tree is 827,392 changelog bytes
+   of 828,280 total). The buffer size must be a power of two - the
+   ring is indexed by mask. A tree holds 2^maxDepth leaves. A canopy
+   stores the top canopyDepth levels of nodes on-chain (that many
+   fewer proof hashes every later transfer must supply); Bubblegum's
+   tree creation requires canopyDepth >= maxDepth - 17 once the depth
+   passes 17, so a transfer's remaining proof stays within the
+   account limit. Rent is the hub's rent-exempt formula priced on the
+   account size. Creation also pays a normal transaction fee, and
+   minting into the tree afterwards is a separate cost - neither is
+   modelled here. */
+var CMT_HEADER_BYTES = 56;
+var CMT_FIXED_BYTES = 64;
+var CMT_MAX_DEPTH = 30;
+var CMT_MAX_BUFFER_SIZE = 16384;
+
+function merkleTreePlan(maxDepth, maxBufferSize, canopyDepth) {
+  var d = Number(maxDepth), b = Number(maxBufferSize), c = Number(canopyDepth);
+  if (!Number.isInteger(d) || d < 1 || d > CMT_MAX_DEPTH) return null;
+  if (!Number.isInteger(b) || b < 8 || b > CMT_MAX_BUFFER_SIZE || (b & (b - 1)) !== 0) return null;
+  if (!Number.isInteger(c) || c < 0 || c > d) return null;
+  var changelogEntryBytes = 40 + 32 * d;
+  var changelogBytes = b * changelogEntryBytes;
+  var rightmostBytes = 32 * d;
+  var canopyBytes = c > 0 ? (Math.pow(2, c + 1) - 2) * 32 : 0;
+  var sizeBytes = CMT_HEADER_BYTES + CMT_FIXED_BYTES + changelogBytes + rightmostBytes + canopyBytes;
+  var rent = rentExempt(sizeBytes);
+  var capacity = Math.pow(2, d);
+  return {
+    maxDepth: d, maxBufferSize: b, canopyDepth: c,
+    headerBytes: CMT_HEADER_BYTES, fixedBytes: CMT_FIXED_BYTES,
+    changelogEntryBytes: changelogEntryBytes, changelogBytes: changelogBytes,
+    rightmostBytes: rightmostBytes, canopyBytes: canopyBytes,
+    sizeBytes: sizeBytes,
+    rentLamports: rent.rentExemptLamports, rentSol: rent.rentExemptSol,
+    capacity: capacity,
+    perLeafLamports: rent.rentExemptLamports / capacity,
+    changelogSharePct: 100 * changelogBytes / sizeBytes,
+    proofNodesToSupply: d - c,
+    minCanopyForBubblegum: d > 17 ? d - 17 : 0
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1567,6 +1629,7 @@ if (typeof module !== "undefined" && module.exports) {
     clmmFeesOwed, FEE_GROWTH_Q64, FEE_GROWTH_MODULUS,
     inflationSchedule, INITIAL_INFLATION_PCT, TERMINAL_INFLATION_PCT,
     associatedTokenAddress, ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+    merkleTreePlan, CMT_HEADER_BYTES, CMT_FIXED_BYTES, CMT_MAX_DEPTH, CMT_MAX_BUFFER_SIZE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2136,6 +2199,27 @@ if (typeof document !== "undefined") {
       }
       document.getElementById("ata-out").value = res.address;
       setText("ata-result", "Model output: the associated token account for owner " + res.owner + " and mint " + res.mint + " under the " + res.tokenProgram + " program is " + res.address + " - the PDA of the seeds [owner, token program, mint] under the Associated Token Account program, found at bump " + res.bump + " (" + res.candidatesTried + (res.candidatesTried === 1 ? " candidate" : " candidates") + " tried). The derivation is pure math on the three addresses - whether that account has been created on-chain yet is a separate question this tool does not read. An educational model of ATA derivation, not a live account lookup. Not financial advice.");
+    });
+
+    var cmtForm = document.getElementById("cmt-calc");
+    if (cmtForm) cmtForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = merkleTreePlan(val("cmt-depth"), val("cmt-buffer"), val("cmt-canopy"));
+      if (res === null) {
+        document.getElementById("cmt-size-out").value = "Invalid";
+        document.getElementById("cmt-rent-out").value = "Invalid";
+        setText("cmt-result", "Check the inputs: the max depth must be a whole number from 1 to 30, the changelog buffer size must be a power of two from 8 to 16,384 (the ring is indexed by mask, so a non-power-of-two size cannot exist on-chain), and the canopy depth must be a whole number from 0 up to the max depth.");
+        return;
+      }
+      document.getElementById("cmt-size-out").value = res.sizeBytes.toLocaleString("en-US") + " bytes";
+      document.getElementById("cmt-rent-out").value = res.rentLamports.toLocaleString("en-US") + " lamports";
+      var canopyNote = res.canopyDepth === 0
+        ? " With no canopy, every later transfer or burn must supply all " + res.maxDepth + " proof hashes itself."
+        : " The canopy stores the top " + res.canopyDepth + " level(s) on-chain, so every later transfer or burn supplies " + res.proofNodesToSupply + " proof hashes instead of " + res.maxDepth + ".";
+      var bubblegumNote = res.canopyDepth < res.minCanopyForBubblegum
+        ? " Note: at a depth past 17, Bubblegum's tree creation requires a canopy of at least " + res.minCanopyForBubblegum + " for this depth, so this exact configuration is one the raw account-compression program allows but Bubblegum would refuse."
+        : "";
+      setText("cmt-result", "Model output: a concurrent Merkle tree of max depth " + res.maxDepth + ", a changelog buffer of " + res.maxBufferSize + " and canopy depth " + res.canopyDepth + " takes a " + res.sizeBytes.toLocaleString("en-US") + "-byte account: a 56-byte header, 64 bytes of counters and rightmost-path fixed data, a changelog ring of " + res.maxBufferSize.toLocaleString("en-US") + " entries x " + res.changelogEntryBytes + " bytes = " + res.changelogBytes.toLocaleString("en-US") + " bytes (" + res.changelogSharePct.toFixed(2) + "% of the account - the ring of recent roots and paths is what lets mints proceed concurrently, and it is almost the entire cost), " + res.rightmostBytes + " bytes of rightmost proof nodes" + (res.canopyBytes > 0 ? " and " + res.canopyBytes.toLocaleString("en-US") + " bytes of canopy" : "") + ". Creating it locks " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL) as the rent-exempt deposit, for a capacity of " + res.capacity.toLocaleString("en-US") + " compressed assets - about " + res.perLeafLamports.toFixed(2) + " lamports of tree rent per asset at full capacity." + canopyNote + bubblegumNote + " The assets themselves live off-chain in an indexer; only this tree account sits on-chain. Creation also pays a normal transaction fee and minting is a separate cost - neither is modelled. An educational model of the SPL account-compression tree layout, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

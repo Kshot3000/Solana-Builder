@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1128,6 +1128,36 @@
         <p class="result" id="ata-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>28. Compressed NFT tree planner — what a concurrent Merkle tree account costs</h3>
+      <p>A <strong>compressed NFT</strong> has no token account of its own: the asset lives off-chain in an indexer, and the only on-chain state is one <strong>concurrent Merkle tree</strong> account (SPL account compression — the structure Metaplex Bubblegum mints into). Creating that account is a one-time rent decision made from three numbers chosen up front. The account is a 56-byte header, 64 bytes of counters and rightmost-path fixed data, a <strong>changelog ring</strong> of <code>bufferSize × (40 + 32 × maxDepth)</code> bytes — one entry per recent change, each holding a root, an index and one hash per tree level, which is what lets many mints update the tree concurrently — plus <code>32 × maxDepth</code> bytes of rightmost proof, plus an optional <strong>canopy</strong> that stores the top levels on-chain so later transfers supply fewer proof hashes. The changelog is almost the whole account: the headline tree below (depth 14, buffer 64, no canopy) is a 31,800-byte account locking 222,218,880 lamports (0.22221888 SOL) of rent for a capacity of 16,384 assets — and 31,232 of its bytes are the changelog ring. The buffer size must be a power of two (the ring is indexed by mask), a tree holds <code>2^maxDepth</code> assets, and past depth 17 Bubblegum's tree creation requires a canopy of at least <code>maxDepth − 17</code>. Creation also pays a normal transaction fee and minting into the tree is a separate cost — neither is modelled. An educational model of the tree account layout, not a live quote. Not financial advice.</p>
+      <form id="cmt-calc">
+        <div class="grid">
+          <div>
+            <label for="cmt-depth">Max depth (tree holds 2^depth assets, 1–30)</label>
+            <input id="cmt-depth" name="cmt-depth" value="14">
+          </div>
+          <div>
+            <label for="cmt-buffer">Changelog buffer size (power of two, 8–16,384)</label>
+            <input id="cmt-buffer" name="cmt-buffer" value="64">
+          </div>
+          <div>
+            <label for="cmt-canopy">Canopy depth (0 up to the max depth)</label>
+            <input id="cmt-canopy" name="cmt-canopy" value="0">
+          </div>
+          <div>
+            <label for="cmt-size-out">Tree account size (model)</label>
+            <input id="cmt-size-out" name="cmt-size-out" readonly>
+          </div>
+          <div>
+            <label for="cmt-rent-out">Rent-exempt deposit (model)</label>
+            <input id="cmt-rent-out" name="cmt-rent-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the tree account</button>
+        <p class="result" id="cmt-result" aria-live="polite"></p>
+      </form>
+    </article>
 
   </section>
 
@@ -1235,6 +1265,7 @@
       <li><strong>Time a stake's warmup or cooldown by the queue, not the calendar</strong> (Tool 24 above): stake changes state only at epoch boundaries, and per epoch at most 9% of the cluster's effective stake may activate or deactivate in total (900 bps; it was 25% before the rate reduction), shared pro-rata by everything moving — your epoch change is your portion ÷ the total moving × that cap, floored, with a 1-lamport minimum. A stake small against the cluster is fully effective after one epoch; whale-sized moves and crowded exits take several, which is why an unstake can still be draining after the epoch rolls.</li>
       <li><strong>Read a CLMM position's fees from its counters, not a balance</strong> (Tool 25 above): uncollected fees are floor((fee growth inside now − at last touch) × liquidity ÷ 2<sup>64</sup>) plus what an earlier touch already settled as owed — and the subtraction wraps modulo 2<sup>128</sup>, so a counter lower than its stored value is the u128 wrapping, not negative fees. Touching a position settles and re-stores the counter, which is why "since the last touch" is the only span the growth delta ever describes.</li>
       <li><strong>Price dilution from the schedule, not from headlines</strong> (Tool 26 above): new SOL is issued at max(1.5%, 8% × 0.85<sup>years</sup>) — at year 5 that is 3.5496%, and the 1.5% terminal floor arrives at year ≈10.30, so issuance never stops, it just slows to the floor. The rate glides per epoch (the year is fractional on-chain), and a governance-adopted doubling of the disinflation rate to 30% is not a live parameter until the validator implements it — model it at 3,000 bps, don't quote it as current.</li>
+      <li><strong>Budget a compressed NFT collection by its tree, not per asset</strong> (Tool 28 above): a cNFT collection's on-chain cost is one concurrent Merkle tree account — 56 bytes of header, 64 fixed, a changelog ring of buffer × (40 + 32 × depth) bytes, 32 × depth of rightmost proof, plus any canopy — and the ring is almost all of it: a depth-14, buffer-64 tree is 31,800 bytes and 222,218,880 lamports of rent for 16,384 assets, of which 31,232 bytes are changelog. Depth sets capacity (2<sup>depth</sup>), the buffer (a power of two) sets how many concurrent updates the tree absorbs, and a canopy trades more rent up front for fewer proof hashes on every later transfer.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1261,6 +1292,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
