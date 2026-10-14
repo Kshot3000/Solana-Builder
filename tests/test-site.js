@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=4"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=5"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("seven tool forms", (html.match(/<form id=/g) || []).length === 7);
+check("eight tool forms", (html.match(/<form id=/g) || []).length === 8);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -163,6 +163,30 @@ check("base58Decode rejects junk and empty", app.base58Decode("0") === null && a
 check("base58 alphabet omits 0 O I l and has 58 chars", app.BASE58_ALPHABET.length === 58 && !/[0OIl]/.test(app.BASE58_ALPHABET));
 check("guide teaches address format (Tool 7)", guide.includes("Tool 7") && guide.includes("32 bytes"));
 check("address checker labelled format-only in index.html", html.includes("This checks format only"));
+
+/* Tool 8 — staking rewards: per-epoch compounding, commission off the reward.
+   Headline vectors prototype-verified in a clean foreground run before pinning:
+   7.3% / 182.5 epochs-per-year = exactly 0.04% per epoch. */
+near("staking: first epoch net at 7.3%, 10% commission = 0.036 SOL on 100", app.stakingRewards("100", 7.3, 1, 10).firstEpochNetSol, 0.036, 1e-12);
+near("staking: one epoch, no commission = 0.04 SOL", app.stakingRewards("100", 7.3, 1, 0).totalRewardsSol, 0.04, 1e-12);
+near("staking: 182 epochs at 7.3%, no commission compounds to ~7.55 SOL", app.stakingRewards("100", 7.3, 182, 0).totalRewardsSol, 7.549975710464878, 1e-9);
+check("staking: compounding beats simple interest over 182 epochs", app.stakingRewards("100", 7.3, 182, 0).totalRewardsSol > 100 * 0.0004 * 182);
+near("staking: 365 epochs at 7.3%, 5% commission", app.stakingRewards("100", 7.3, 365, 5).totalRewardsSol, 14.874914876097733, 1e-9);
+check("staking: zero yield earns nothing", app.stakingRewards("100", 0, 182, 0).totalRewardsSol === 0);
+check("staking: 100% commission earns nothing", app.stakingRewards("100", 7.3, 182, 100).totalRewardsSol === 0);
+check("staking: final = stake + rewards", (() => { const r = app.stakingRewards("1000", 5, 10, 8); return Math.abs(r.finalStakeSol - (1000 + r.totalRewardsSol)) < 1e-9; })());
+near("staking: 1000 SOL at 5%, 10 epochs, 8% commission first epoch", app.stakingRewards("1000", 5, 10, 8).firstEpochNetSol, 0.25205479452054796, 1e-12);
+check("staking rejects zero stake", app.stakingRewards("0", 7.3, 10, 5) === null);
+check("staking rejects yield over 100%", app.stakingRewards("100", 101, 10, 5) === null);
+check("staking rejects negative yield", app.stakingRewards("100", -1, 10, 5) === null);
+check("staking rejects zero epochs", app.stakingRewards("100", 7.3, 0, 5) === null);
+check("staking rejects epochs above the model cap", app.stakingRewards("100", 7.3, 1826, 5) === null);
+check("staking rejects fractional epochs", app.stakingRewards("100", 7.3, 10.5, 5) === null);
+check("staking rejects commission over 100%", app.stakingRewards("100", 7.3, 10, 101) === null);
+check("staking rejects junk stake", app.stakingRewards("abc", 7.3, 10, 5) === null);
+check("staking exposes epoch constants", app.SLOTS_PER_EPOCH === 432000 && app.EPOCHS_PER_YEAR === 182.5 && app.MAX_STAKING_EPOCHS === 1825);
+check("guide teaches staking rewards (Tool 8)", guide.includes("Tool 8") && guide.includes("432,000 slots"));
+check("staking labelled assumption-not-live in index.html", html.includes("The yield is your assumption"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -225,6 +225,37 @@
         <p class="result" id="addr-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>8. Staking rewards estimator — epoch compounding</h3>
+      <p>Staking pays once per epoch — 432,000 slots, about 2 days at the target slot time, so about 182.5 epochs a year. Rewards land in the stake account and compound from the next epoch; validators take their commission as a percentage of the reward, not of your stake. Enter a stake, an annual yield you assume, a validator commission, and a number of epochs. The yield is your assumption — this is not a live network yield.</p>
+      <form id="stake-calc">
+        <div class="grid">
+          <div>
+            <label for="stake-amt">Stake (SOL)</label>
+            <input id="stake-amt" name="stake-amt" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="stake-yield">Assumed gross annual yield (%)</label>
+            <input id="stake-yield" name="stake-yield" inputmode="decimal" value="7.3">
+          </div>
+          <div>
+            <label for="stake-epochs">Epochs</label>
+            <input id="stake-epochs" name="stake-epochs" inputmode="numeric" value="182">
+          </div>
+          <div>
+            <label for="stake-comm">Validator commission (% of rewards)</label>
+            <input id="stake-comm" name="stake-comm" inputmode="decimal" value="10">
+          </div>
+          <div>
+            <label for="stake-out">Final stake (SOL, model)</label>
+            <input id="stake-out" name="stake-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Estimate rewards</button>
+        <p class="result" id="stake-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -313,6 +344,7 @@
       <li><strong>Price a transaction before you send it</strong> (Tool 5 above): 5,000 lamports per signature plus a priority fee charged on the compute-unit limit you request — simulate, then set the limit close to real usage instead of overpaying for headroom you never use.</li>
       <li><strong>Convert token amounts with the mint's own decimals</strong> (Tool 6 above): token accounts store raw integers, and the same raw number is a different UI amount under every mint — read the decimals off the mint before you move an amount between code and UI.</li>
       <li><strong>Check every address before you trust it</strong> (Tool 7 above): an address is 32 bytes in base58 — a paste with stray or missing characters decodes to the wrong length. Format is only the first check; still compare the full address character-for-character with its source.</li>
+      <li><strong>Model staking before you delegate</strong> (Tool 8 above): rewards arrive once per epoch (about 2 days), commission comes off the reward — not the stake — and credited rewards compound. Compare validators on commission and reliability, never on a headline yield alone; the yield you model is an assumption, not a promise.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -339,6 +371,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

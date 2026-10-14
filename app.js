@@ -216,6 +216,53 @@ function checkAddress(str) {
   return { valid: true, charLength: s.length, byteLength: 32, reason: null };
 }
 
+/* ---------- Tool 8: staking rewards estimator (epoch compounding model) ---------- */
+/* Solana pays staking rewards once per epoch. An epoch is 432,000 slots —
+   at the target ~400 ms per slot that is about 2 days, so a year holds about
+   182.5 epochs (actual epochs drift with real slot times). Rewards credited
+   to an active stake account are added to its balance, so they compound from
+   the next epoch on. Validators take their commission as a percentage OF the
+   reward, not of the stake. This model takes the gross annual yield as a
+   USER ASSUMPTION (it is not a live network yield — real yield moves with
+   inflation, total stake and validator performance, and liquid-staking tokens
+   differ again), spreads it evenly over the epochs of a year, deducts
+   commission each epoch, and compounds the net reward epoch by epoch.
+   Because of that per-epoch compounding, the effective return over a full
+   year lands slightly above the nominal annual rate entered. */
+var SLOTS_PER_EPOCH = 432000;
+var EPOCHS_PER_YEAR = 182.5; /* ~2-day epochs: 365 / 2 */
+var MAX_STAKING_EPOCHS = 1825; /* ~10 years of epochs — a model cap, not a network limit */
+
+function stakingRewards(stakeStr, annualYieldPct, epochs, commissionPct) {
+  if (parseScaled(stakeStr) === null) return null;
+  var stake = Number(stakeStr);
+  var y = Number(annualYieldPct);
+  var n = Number(epochs);
+  var c = Number(commissionPct);
+  if (!isFinite(stake) || stake <= 0) return null;
+  if (!isFinite(y) || y < 0 || y > 100) return null;
+  if (!Number.isInteger(n) || n < 1 || n > MAX_STAKING_EPOCHS) return null;
+  if (!isFinite(c) || c < 0 || c > 100) return null;
+  var perEpochGrossRate = (y / 100) / EPOCHS_PER_YEAR;
+  var balance = stake;
+  var firstEpochNet = null;
+  for (var i = 0; i < n; i++) {
+    var gross = balance * perEpochGrossRate;
+    var net = gross * (1 - c / 100);
+    if (i === 0) firstEpochNet = net;
+    balance += net;
+  }
+  return {
+    stake: stake,
+    annualYieldPct: y,
+    epochs: n,
+    commissionPct: c,
+    firstEpochNetSol: firstEpochNet,
+    totalRewardsSol: balance - stake,
+    finalStakeSol: balance
+  };
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -235,8 +282,9 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     parseScaled, formatScaled, solToLamports, lamportsToSol, cpSwap,
     rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch,
-    base58Decode, base58Encode, checkAddress,
+    base58Decode, base58Encode, checkAddress, stakingRewards,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
+    SLOTS_PER_EPOCH, EPOCHS_PER_YEAR, MAX_STAKING_EPOCHS,
     BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS,
     BASE58_ALPHABET
   };
@@ -362,6 +410,22 @@ if (typeof document !== "undefined") {
             ? "Invalid: this is well-formed base58 but decodes to " + res.byteLength + " bytes, and a Solana address is exactly 32 bytes. A pasted address with extra or missing characters lands here — re-copy it from the source and compare in full."
             : "Enter an address to check — a string of base58 characters that should decode to exactly 32 bytes.");
       }
+    });
+
+    var stakeForm = document.getElementById("stake-calc");
+    if (stakeForm) stakeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = stakingRewards(val("stake-amt"), val("stake-yield"), val("stake-epochs"), val("stake-comm"));
+      if (res === null) {
+        setText("stake-result", "Check the inputs: stake must be a positive SOL amount, the assumed annual yield a number from 0 to 100%, epochs a whole number from 1 to 1,825, and commission a number from 0 to 100%.");
+        return;
+      }
+      document.getElementById("stake-out").value = res.finalStakeSol.toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
+      setText("stake-result", "Model output: at an assumed gross annual yield of " + res.annualYieldPct +
+        "% spread over ~182.5 epochs a year, the first epoch nets about " + res.firstEpochNetSol.toFixed(6) +
+        " SOL after " + res.commissionPct + "% validator commission, and over " + res.epochs + " epochs the stake grows by about " +
+        res.totalRewardsSol.toFixed(6) + " SOL to about " + res.finalStakeSol.toFixed(6) +
+        " SOL, because each epoch's reward is added to the stake and compounds. The yield here is your assumption, not a live network yield — real returns move with inflation, total stake, validator performance and commission changes, and rewards only start after a stake activates (about an epoch) and arrive at epoch boundaries. An educational model, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
