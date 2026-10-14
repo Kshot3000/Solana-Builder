@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1158,6 +1158,32 @@
         <p class="result" id="cmt-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>29. Seeded address finder — createWithSeed (base + seed + owner)</h3>
+      <p>Solana's other deterministic address, older than the PDA: the system program's <strong>create_account_with_seed</strong> derives an account address as <code>SHA-256(base ‖ seed ‖ owner)</code> — the base signer's 32 bytes, one seed string, and the 32 bytes of the program that will own the account. That is the whole formula: <strong>no marker string, no bump byte, and no ed25519 curve check</strong> — a seeded address may land on the curve and is still valid, because nobody needs (or could know) a private key for it; the base signed its creation. This is how the CLI fans one keypair out into many stake accounts — <code>solana create-address-with-seed --from &lt;base&gt; 0 STAKE</code>, then seed <code>1</code>, <code>2</code>, … under the Stake program. The seed is at most <strong>32 bytes as UTF-8</strong> and is used exactly as typed (spaces are bytes — it is never trimmed). Headline: this hub's donation address as base, seed <code>0</code>, the Stake program (<code>Stake11111111111111111111111111111111111111</code>) as owner derives <code>4z22cSCVREYe519iEet4xdqBSrTDx9muhtRR3fcRxpod</code> — an on-curve result that a PDA search would have rejected. An educational model of seeded-address derivation, not a live account lookup. Not financial advice.</p>
+      <form id="seed-calc">
+        <div class="grid">
+          <div>
+            <label for="seed-base">Base address (the signer the account is derived from)</label>
+            <input id="seed-base" name="seed-base" value="G7xepVyQSrxtH61ZooXvPAmnS8omQ1TvHqB8qDmHXWm">
+          </div>
+          <div>
+            <label for="seed-seed">Seed string (at most 32 UTF-8 bytes, used exactly as typed)</label>
+            <input id="seed-seed" name="seed-seed" value="0">
+          </div>
+          <div>
+            <label for="seed-owner">Owner program address (will own the account)</label>
+            <input id="seed-owner" name="seed-owner" value="Stake11111111111111111111111111111111111111">
+          </div>
+          <div>
+            <label for="seed-out">Seeded address (model)</label>
+            <input id="seed-out" name="seed-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Derive the seeded address</button>
+        <p class="result" id="seed-result" aria-live="polite"></p>
+      </form>
+    </article>
 
   </section>
 
@@ -1266,6 +1292,7 @@
       <li><strong>Read a CLMM position's fees from its counters, not a balance</strong> (Tool 25 above): uncollected fees are floor((fee growth inside now − at last touch) × liquidity ÷ 2<sup>64</sup>) plus what an earlier touch already settled as owed — and the subtraction wraps modulo 2<sup>128</sup>, so a counter lower than its stored value is the u128 wrapping, not negative fees. Touching a position settles and re-stores the counter, which is why "since the last touch" is the only span the growth delta ever describes.</li>
       <li><strong>Price dilution from the schedule, not from headlines</strong> (Tool 26 above): new SOL is issued at max(1.5%, 8% × 0.85<sup>years</sup>) — at year 5 that is 3.5496%, and the 1.5% terminal floor arrives at year ≈10.30, so issuance never stops, it just slows to the floor. The rate glides per epoch (the year is fractional on-chain), and a governance-adopted doubling of the disinflation rate to 30% is not a live parameter until the validator implements it — model it at 3,000 bps, don't quote it as current.</li>
       <li><strong>Budget a compressed NFT collection by its tree, not per asset</strong> (Tool 28 above): a cNFT collection's on-chain cost is one concurrent Merkle tree account — 56 bytes of header, 64 fixed, a changelog ring of buffer × (40 + 32 × depth) bytes, 32 × depth of rightmost proof, plus any canopy — and the ring is almost all of it: a depth-14, buffer-64 tree is 31,800 bytes and 222,218,880 lamports of rent for 16,384 assets, of which 31,232 bytes are changelog. Depth sets capacity (2<sup>depth</sup>), the buffer (a power of two) sets how many concurrent updates the tree absorbs, and a canopy trades more rent up front for fewer proof hashes on every later transfer.</li>
+      <li><strong>Derive a seeded address when a signer — not a program — needs many accounts</strong> (Tool 29 above): a seeded address is <code>SHA-256(base ‖ seed ‖ owner)</code> — no marker, no bump, no curve check, so an on-curve result is valid (the hub's donation address with seed <code>0</code> under the Stake program derives <code>4z22cSCVREYe519iEet4xdqBSrTDx9muhtRR3fcRxpod</code>). Reach for a PDA (Tool 16) when a program must sign; reach for a seed when a base keypair creates a family of accounts, one seed per member, and signs their creation itself. The seed is a single string of at most 32 UTF-8 bytes, used byte-for-byte.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1292,6 +1319,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=25"></script>
+<script src="app.js?v=26"></script>
 </body>
 </html>

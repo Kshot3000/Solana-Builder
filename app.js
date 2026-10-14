@@ -1135,6 +1135,52 @@ function merkleTreePlan(maxDepth, maxBufferSize, canopyDepth) {
   };
 }
 
+/* ---------- Tool 29: seeded address finder (createWithSeed) ---------- */
+/* The other deterministic address on Solana, older than the PDA: the
+   system program's create_account_with_seed derives an account address
+   from a signer base, one seed string and the program that will own
+   the account:
+     address = SHA-256(base bytes || seed UTF-8 bytes || owner bytes)
+   That is the whole formula — no "ProgramDerivedAddress" marker, no
+   bump byte and NO ed25519 curve check: a seeded address may land ON
+   the curve and is still valid (nobody knows a private key for it,
+   because the bytes are a hash output, not a generated keypair — the
+   account is controlled by its owner program and created by an
+   instruction the base signs). This is how the CLI fans one keypair
+   out into many stake accounts: `solana create-address-with-seed
+   --from <base> 0 STAKE`, then "1", "2", ... under the Stake program.
+   The seed is a single string of at most 32 UTF-8 bytes (the SDK's
+   MAX_SEED_LEN); an empty seed is allowed by the SDK. The seed is NOT
+   trimmed — spaces are bytes and change the address. Derivation is
+   pure hashing, identical on every cluster; whether the account has
+   been created on-chain is a separate question this tool does not
+   read. Contrast Tool 16 (PDAs): marker + bump + off-curve required,
+   because a program must be able to sign for a PDA; a seeded account
+   needs no program signature — its base signed its creation. */
+var MAX_SEED_ADDRESS_SEED_BYTES = 32;
+var STAKE_PROGRAM_ID = "Stake11111111111111111111111111111111111111";
+
+function createWithSeed(baseStr, seedStr, ownerStr) {
+  if (typeof baseStr !== "string" || typeof ownerStr !== "string") return null;
+  if (typeof seedStr !== "string") return null;
+  var baseBytes = base58Decode(baseStr.trim());
+  var ownerBytes = base58Decode(ownerStr.trim());
+  if (baseBytes === null || baseBytes.length !== 32) return null;
+  if (ownerBytes === null || ownerBytes.length !== 32) return null;
+  var seedBytes = utf8Bytes(seedStr);
+  if (seedBytes === null || seedBytes.length > MAX_SEED_ADDRESS_SEED_BYTES) return null;
+  var hash = sha256Bytes(baseBytes.concat(seedBytes, ownerBytes));
+  return {
+    base: baseStr.trim(),
+    seed: seedStr,
+    seedByteLen: seedBytes.length,
+    owner: ownerStr.trim(),
+    address: base58Encode(hash),
+    addressBytes: hash,
+    onCurve: isOnCurveBytes(hash)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1630,6 +1676,7 @@ if (typeof module !== "undefined" && module.exports) {
     inflationSchedule, INITIAL_INFLATION_PCT, TERMINAL_INFLATION_PCT,
     associatedTokenAddress, ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
     merkleTreePlan, CMT_HEADER_BYTES, CMT_FIXED_BYTES, CMT_MAX_DEPTH, CMT_MAX_BUFFER_SIZE,
+    createWithSeed, MAX_SEED_ADDRESS_SEED_BYTES, STAKE_PROGRAM_ID,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2220,6 +2267,22 @@ if (typeof document !== "undefined") {
         ? " Note: at a depth past 17, Bubblegum's tree creation requires a canopy of at least " + res.minCanopyForBubblegum + " for this depth, so this exact configuration is one the raw account-compression program allows but Bubblegum would refuse."
         : "";
       setText("cmt-result", "Model output: a concurrent Merkle tree of max depth " + res.maxDepth + ", a changelog buffer of " + res.maxBufferSize + " and canopy depth " + res.canopyDepth + " takes a " + res.sizeBytes.toLocaleString("en-US") + "-byte account: a 56-byte header, 64 bytes of counters and rightmost-path fixed data, a changelog ring of " + res.maxBufferSize.toLocaleString("en-US") + " entries x " + res.changelogEntryBytes + " bytes = " + res.changelogBytes.toLocaleString("en-US") + " bytes (" + res.changelogSharePct.toFixed(2) + "% of the account - the ring of recent roots and paths is what lets mints proceed concurrently, and it is almost the entire cost), " + res.rightmostBytes + " bytes of rightmost proof nodes" + (res.canopyBytes > 0 ? " and " + res.canopyBytes.toLocaleString("en-US") + " bytes of canopy" : "") + ". Creating it locks " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL) as the rent-exempt deposit, for a capacity of " + res.capacity.toLocaleString("en-US") + " compressed assets - about " + res.perLeafLamports.toFixed(2) + " lamports of tree rent per asset at full capacity." + canopyNote + bubblegumNote + " The assets themselves live off-chain in an indexer; only this tree account sits on-chain. Creation also pays a normal transaction fee and minting is a separate cost - neither is modelled. An educational model of the SPL account-compression tree layout, not a live quote. Not financial advice.");
+    });
+
+    var seedForm = document.getElementById("seed-calc");
+    if (seedForm) seedForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = createWithSeed(val("seed-base"), val("seed-seed"), val("seed-owner"));
+      if (res === null) {
+        document.getElementById("seed-out").value = "Invalid";
+        setText("seed-result", "Check the inputs: the base and the owner must each be a base58 address that decodes to exactly 32 bytes, and the seed must be at most 32 bytes as UTF-8 (a multi-byte character counts for more than one byte). The seed is used exactly as typed - it is not trimmed, because spaces are bytes and change the address.");
+        return;
+      }
+      document.getElementById("seed-out").value = res.address;
+      var curveNote = res.onCurve
+        ? " This result lands ON the ed25519 curve - and is still a valid seeded address: unlike a PDA there is no curve check and no bump scan here, because nobody needs a private key for it and nobody could know one (the bytes are a hash output)."
+        : " This result happens to land off the ed25519 curve - which is not required here: unlike a PDA there is no curve check and no bump scan, and an on-curve result would be just as valid.";
+      setText("seed-result", "Model output: SHA-256 of the base " + res.base + ", the " + res.seedByteLen + "-byte seed and the owner " + res.owner + " derives the seeded address " + res.address + "." + curveNote + " The derivation is pure math - whether that account has been created on-chain yet (creation is a system-program instruction the base signs, paying the account's rent) is a separate question this tool does not read. An educational model of seeded-address derivation, not a live account lookup. Not financial advice.");
     });
 
     /* catalogue filter */
