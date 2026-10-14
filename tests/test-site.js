@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=5"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=6"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("eight tool forms", (html.match(/<form id=/g) || []).length === 8);
+check("ten tool forms (nine tools, Tool 9 has build + inspect)", (html.match(/<form id=/g) || []).length === 10);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -187,6 +187,38 @@ check("staking rejects junk stake", app.stakingRewards("abc", 7.3, 10, 5) === nu
 check("staking exposes epoch constants", app.SLOTS_PER_EPOCH === 432000 && app.EPOCHS_PER_YEAR === 182.5 && app.MAX_STAKING_EPOCHS === 1825);
 check("guide teaches staking rewards (Tool 8)", guide.includes("Tool 8") && guide.includes("432,000 slots"));
 check("staking labelled assumption-not-live in index.html", html.includes("The yield is your assumption"));
+
+/* Tool 9 — Solana Pay transfer-request URLs. The three build vectors are the
+   official specification's own examples, byte-for-byte. */
+const MV = "mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+check("pay: spec example 1 builds byte-for-byte", app.buildSolanaPayUrl({ recipient: MV, amount: "1", label: "Michael", message: "Thanks for all the fish", memo: "OrderId12345" }) === "solana:" + MV + "?amount=1&label=Michael&message=Thanks%20for%20all%20the%20fish&memo=OrderId12345");
+check("pay: spec example 2 (0.01 USDC) builds byte-for-byte", app.buildSolanaPayUrl({ recipient: MV, amount: "0.01", splToken: USDC_MINT }) === "solana:" + MV + "?amount=0.01&spl-token=" + USDC_MINT);
+check("pay: spec example 3 (label only, amount left to the wallet)", app.buildSolanaPayUrl({ recipient: MV, label: "Michael" }) === "solana:" + MV + "?label=Michael");
+check("pay: spec example 1 parses back to its fields", (() => { const p = app.parseSolanaPayUrl("solana:" + MV + "?amount=1&label=Michael&message=Thanks%20for%20all%20the%20fish&memo=OrderId12345"); return p && p.recipient === MV && p.amount === "1" && p.splToken === null && p.label === "Michael" && p.message === "Thanks for all the fish" && p.memo === "OrderId12345" && p.asset === "SOL" && p.references.length === 0; })());
+check("pay: amount 0 is valid (spec)", app.buildSolanaPayUrl({ recipient: MV, amount: "0" }) === "solana:" + MV + "?amount=0");
+check("pay: amount below 1 without a leading 0 rejected", app.buildSolanaPayUrl({ recipient: MV, amount: ".5" }) === null);
+check("pay: scientific notation rejected", app.buildSolanaPayUrl({ recipient: MV, amount: "1e3" }) === null && app.validPayAmount("1e3", null) === false);
+check("pay: SOL amount at 9 decimals ok, 10 rejected", app.buildSolanaPayUrl({ recipient: MV, amount: "0.000000001" }) !== null && app.buildSolanaPayUrl({ recipient: MV, amount: "0.0000000001" }) === null);
+check("pay: trailing zeros past 9 decimals carry no precision", app.buildSolanaPayUrl({ recipient: MV, amount: "1.0000000000" }) !== null);
+check("pay: USDC amount at 7 decimals rejected, 6 ok", app.buildSolanaPayUrl({ recipient: MV, amount: "0.0000001", splToken: USDC_MINT }) === null && app.buildSolanaPayUrl({ recipient: MV, amount: "0.000001", splToken: USDC_MINT }) !== null);
+check("pay: unknown mint precision cannot be checked locally", app.buildSolanaPayUrl({ recipient: MV, amount: "0.000000000001", splToken: "So11111111111111111111111111111111111111112" }) !== null);
+check("pay: known-mint table holds USDC + USDG at 6", app.KNOWN_MINT_DECIMALS[USDC_MINT] === 6 && app.KNOWN_MINT_DECIMALS["2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH"] === 6);
+check("pay: two references keep their order both ways", (() => { const u = app.buildSolanaPayUrl({ recipient: MV, amount: "2", references: ["11111111111111111111111111111111", USDC_MINT] }); const p = app.parseSolanaPayUrl(u); return u === "solana:" + MV + "?amount=2&reference=11111111111111111111111111111111&reference=" + USDC_MINT && p.references[0] === "11111111111111111111111111111111" && p.references[1] === USDC_MINT; })());
+check("pay: build-parse-build round trip with memo needing encoding", (() => { const f = { recipient: MV, amount: "3.25", splToken: USDC_MINT, reference: "11111111111111111111111111111111", label: "A B", memo: "x&y" }; return app.buildSolanaPayUrl(app.parseSolanaPayUrl(app.buildSolanaPayUrl(f))) === app.buildSolanaPayUrl(f); })());
+check("pay: memo ampersand is percent-encoded", app.buildSolanaPayUrl({ recipient: MV, memo: "x&y" }) === "solana:" + MV + "?memo=x%26y");
+check("pay: duplicate amount in a parsed URL rejected, not first/last-wins", app.parseSolanaPayUrl("solana:" + MV + "?amount=1&amount=999") === null);
+check("pay: duplicate spl-token in a parsed URL rejected", app.parseSolanaPayUrl("solana:" + MV + "?spl-token=" + USDC_MINT + "&spl-token=So11111111111111111111111111111111111111112") === null);
+check("pay: malformed percent-encoding rejected", app.parseSolanaPayUrl("solana:" + MV + "?label=%E0%A4%A") === null);
+check("pay: wrong scheme rejected", app.parseSolanaPayUrl("https:" + MV + "?amount=1") === null && app.parseSolanaPayUrl("solana-pay:" + MV) === null);
+check("pay: invalid recipient rejected both ways", app.buildSolanaPayUrl({ recipient: "abc0def", amount: "1" }) === null && app.parseSolanaPayUrl("solana:abc0def?amount=1") === null);
+check("pay: 45-char stray-paste recipient rejected", app.buildSolanaPayUrl({ recipient: SOL_INVALID_45, amount: "1" }) === null);
+check("pay: present-but-empty mint refused, not dropped into a SOL link", app.buildSolanaPayUrl({ recipient: MV, splToken: "" }) === null && app.parseSolanaPayUrl("solana:" + MV + "?spl-token=") === null);
+check("pay: present-but-empty reference refused", app.buildSolanaPayUrl({ recipient: MV, reference: "" }) === null && app.parseSolanaPayUrl("solana:" + MV + "?reference=abc") === null);
+check("pay: bare recipient parses with the amount left to the wallet", (() => { const p = app.parseSolanaPayUrl("solana:" + MV); return p && p.amount === null && p.asset === "SOL"; })());
+check("pay: hub donation address builds a link", app.buildSolanaPayUrl({ recipient: SOL, amount: "0.1", label: "Solana Ecosystem Builder" }) === "solana:" + SOL + "?amount=0.1&label=Solana%20Ecosystem%20Builder");
+check("guide teaches Solana Pay (Tool 9)", guide.includes("Tool 9") && guide.includes("associated token accounts must not be used"));
+check("pay tool labelled local / nothing sent in index.html", html.includes("nothing is sent and no wallet opens") && html.includes("associated token accounts must not be used"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);

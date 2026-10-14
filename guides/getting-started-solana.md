@@ -23,7 +23,7 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the seven mechanics that decide your costs
+## 3. Learn the eight mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
@@ -34,6 +34,8 @@ Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 6. **Address format.** An address is 32 bytes in base58 — the alphabet omits 0, O, I and l so addresses can't be misread, and leading `1`s are leading zero bytes (the System Program is 32 zero bytes). Anything that isn't base58, or decodes to anything but exactly 32 bytes, is not an address: a paste with two stray characters tacked on decodes to 33 bytes and fails. The hub's checker (Tool 7) validates the format locally — then still compare the full address character-for-character with its source, because format says nothing about whose address it is.
 
 7. **Staking rewards.** Rewards are paid once per epoch — 432,000 slots, about 2 days at the target slot time, so about 182.5 epochs a year. A validator's commission is a percentage of the reward, not of the stake, and rewards credited to an active stake account compound from the next epoch on. Model it before you delegate (Tool 8): at an assumed 7.3% gross annual yield, one epoch pays 0.04% of the stake before commission. The yield is an assumption, never a live quote — real yield moves with inflation, total stake and validator performance, stake takes about an epoch to activate, and unstaking takes about an epoch to cool down.
+
+8. **Payment links (Solana Pay).** A transfer request is one URL: `solana:<recipient>?amount=…&spl-token=…&reference=…&label=…&message=…&memo=…`. The recipient is a native account — associated token accounts must not be used as the recipient, because the wallet derives the token account from the `spl-token` mint. The amount is in user units (SOL, not lamports; a token's UI amount, not raw units): 0 is valid, a missing amount means the wallet asks the payer, decimals below 1 need a leading 0, scientific notation is prohibited, and an amount finer than the asset's decimals (9 for SOL, the mint's own otherwise) is malformed. Label and message are display-only; a memo goes on-chain in an SPL Memo instruction and is public forever. Reference is the one repeatable field — wallets attach the keys to the transfer in order, which is how a merchant finds a payment afterwards. The hub's builder and inspector (Tool 9) work both directions locally: build a link, then paste it back and read what it actually says before you share or pay it.
 
 ## 4. Scaffold and test
 
@@ -56,5 +58,5 @@ Only deploy once tests pass, and label everything you show users for what it is:
 ## Where next
 
 - Swap mechanics in depth: my [Raydium Renaissance](https://kshot3000.github.io/Raydium-Renaissance/) hub (130+ pool tools).
-- Payments: the [Solana Pay Link Desk](https://kshot3000.github.io/solana-pay-link-desk/) builds Solana Pay links locally.
+- Payments: the [Solana Pay Link Desk](https://kshot3000.github.io/solana-pay-link-desk/) builds Solana Pay links locally, and Tool 9 on this hub builds and inspects transfer-request URLs.
 - Docs: https://solana.com/docs and the Anchor book at https://www.anchor-lang.com.

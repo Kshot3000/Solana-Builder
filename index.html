@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -256,6 +256,63 @@
         <p class="result" id="stake-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>9. Solana Pay URL builder &amp; inspector — transfer requests</h3>
+      <p>Solana Pay encodes a payment request as one URL: <code>solana:&lt;recipient&gt;?amount=…&amp;spl-token=…&amp;reference=…&amp;label=…&amp;message=…&amp;memo=…</code> — the string inside payment QR codes across the ecosystem. The recipient is the base58 address of a native SOL account: associated token accounts must not be used as the recipient, because for a token payment the wallet derives the recipient's token account from the mint you name in <code>spl-token</code>. The amount is in user units — SOL, not lamports; a token's UI amount, not raw units — 0 is valid, leaving it out means the wallet asks the payer, and an amount finer than the asset's decimals (9 for SOL, the mint's own for a token) is malformed. Label and message are display-only; a memo is written on-chain in an SPL Memo instruction and is public forever, so never put anything private in it. A reference is an extra read-only key the wallet attaches to the transfer, so the payment can be found by it later. Build a URL, or paste one in to inspect it — both run locally, nothing is sent and no wallet opens.</p>
+      <form id="pay-calc">
+        <div class="grid">
+          <div>
+            <label for="pay-recipient">Recipient (native account address)</label>
+            <input id="pay-recipient" name="pay-recipient" value="G7xepVyQSrxtH61ZooXvPAmnS8omQ1TvHqB8qDmHXWm">
+          </div>
+          <div>
+            <label for="pay-amount">Amount (user units, optional)</label>
+            <input id="pay-amount" name="pay-amount" inputmode="decimal" placeholder="0.1">
+          </div>
+          <div>
+            <label for="pay-spl">SPL token mint (optional — blank = SOL)</label>
+            <input id="pay-spl" name="pay-spl" placeholder="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v">
+          </div>
+          <div>
+            <label for="pay-ref">Reference (optional)</label>
+            <input id="pay-ref" name="pay-ref" placeholder="A unique key to find this payment by">
+          </div>
+          <div>
+            <label for="pay-label">Label (optional, display only)</label>
+            <input id="pay-label" name="pay-label" placeholder="Who is asking">
+          </div>
+          <div>
+            <label for="pay-message">Message (optional, display only)</label>
+            <input id="pay-message" name="pay-message" placeholder="What it is for">
+          </div>
+          <div>
+            <label for="pay-memo">Memo (optional, public on-chain)</label>
+            <input id="pay-memo" name="pay-memo" placeholder="Order 12345">
+          </div>
+          <div>
+            <label for="pay-out">Solana Pay URL (result)</label>
+            <input id="pay-out" name="pay-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Build the URL</button>
+        <p class="result" id="pay-result" aria-live="polite"></p>
+      </form>
+      <form id="payparse-calc">
+        <div class="grid">
+          <div>
+            <label for="payparse-in">Solana Pay URL to inspect</label>
+            <input id="payparse-in" name="payparse-in" placeholder="solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?amount=1">
+          </div>
+          <div>
+            <label for="payparse-out">Inspection result</label>
+            <input id="payparse-out" name="payparse-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Inspect the URL</button>
+        <p class="result" id="payparse-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -345,6 +402,7 @@
       <li><strong>Convert token amounts with the mint's own decimals</strong> (Tool 6 above): token accounts store raw integers, and the same raw number is a different UI amount under every mint — read the decimals off the mint before you move an amount between code and UI.</li>
       <li><strong>Check every address before you trust it</strong> (Tool 7 above): an address is 32 bytes in base58 — a paste with stray or missing characters decodes to the wrong length. Format is only the first check; still compare the full address character-for-character with its source.</li>
       <li><strong>Model staking before you delegate</strong> (Tool 8 above): rewards arrive once per epoch (about 2 days), commission comes off the reward — not the stake — and credited rewards compound. Compare validators on commission and reliability, never on a headline yield alone; the yield you model is an assumption, not a promise.</li>
+      <li><strong>Read a payment link before you pay it</strong> (Tool 9 above): a Solana Pay URL names the recipient, the amount in user units and the asset — an empty amount means the wallet asks, a memo is public on-chain forever, and a well-formed link can still point at the wrong recipient, so inspect it and compare the recipient in full.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -371,6 +429,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

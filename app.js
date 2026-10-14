@@ -263,6 +263,116 @@ function stakingRewards(stakeStr, annualYieldPct, epochs, commissionPct) {
   };
 }
 
+/* ---------- Tool 9: Solana Pay transfer-request URLs (build & parse) ---------- */
+/* Solana Pay encodes a payment request as one URL:
+   solana:<recipient>?amount=<amount>&spl-token=<mint>&reference=<ref>
+     &label=<label>&message=<message>&memo=<memo>
+   The recipient is the base58 address of a NATIVE SOL account — an associated
+   token account must not be used as the recipient; for a token payment the
+   wallet derives the recipient's token account from the spl-token mint.
+   Amount is in user units (SOL, not lamports; a token's UI amount, not raw
+   units), is non-negative (0 is valid — omitting it makes the wallet ask the
+   payer), needs a leading 0 before the point when below 1, and scientific
+   notation is prohibited. An amount finer than the asset's decimals is
+   malformed: 9 for SOL, the mint's own decimals for a token. This builder
+   knows two mints' decimals locally (USDC and USDG, 6 each); for any other
+   mint it cannot check precision without an RPC lookup, so it builds the
+   URL and the wallet remains the check — stated plainly in the UI.
+   Reference is the ONLY repeatable field (order preserved — wallets attach
+   the keys to the transfer in order, so a merchant can find the payment by
+   reference later); every other field is single-value and a URL carrying one
+   twice is rejected as ambiguous, never first-wins or last-wins. Label and
+   message are display-only; a memo is written on-chain in an SPL Memo
+   instruction and is public forever. Present-but-empty spl-token / reference
+   values are rejected, never silently dropped into a different payment.
+   Local string work only: nothing is sent and no wallet opens. */
+var KNOWN_MINT_DECIMALS = {
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6, /* USDC */
+  "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH": 6  /* USDG */
+};
+
+function payAmountDecimals(amountStr, splToken) {
+  if (!splToken) return 9; /* SOL */
+  return Object.prototype.hasOwnProperty.call(KNOWN_MINT_DECIMALS, splToken)
+    ? KNOWN_MINT_DECIMALS[splToken] : null; /* unknown mint: cannot check locally */
+}
+
+function validPayAmount(amountStr, splToken) {
+  if (typeof amountStr !== "string") return false;
+  var s = amountStr.trim();
+  if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(s)) return false;
+  var maxDec = payAmountDecimals(s, splToken || null);
+  if (maxDec === null) return true;
+  var frac = (s.split(".")[1] || "").replace(/0+$/, ""); /* trailing zeros carry no precision */
+  return frac.length <= maxDec;
+}
+
+function buildSolanaPayUrl(f) {
+  if (!f || !checkAddress(f.recipient || "").valid) return null;
+  var hasSpl = f.splToken !== undefined && f.splToken !== null;
+  if (hasSpl && !checkAddress(f.splToken).valid) return null;
+  var spl = hasSpl ? f.splToken.trim() : null;
+  var params = [];
+  if (f.amount !== undefined && f.amount !== null && String(f.amount).trim() !== "") {
+    var a = String(f.amount).trim();
+    if (!validPayAmount(a, spl)) return null;
+    params.push("amount=" + encodeURIComponent(a));
+  }
+  if (hasSpl) params.push("spl-token=" + encodeURIComponent(spl));
+  var refs = [];
+  if (Array.isArray(f.references)) refs = f.references;
+  else if (f.reference !== undefined && f.reference !== null) refs = [f.reference];
+  for (var i = 0; i < refs.length; i++) {
+    if (!checkAddress(refs[i] || "").valid) return null;
+    params.push("reference=" + encodeURIComponent(String(refs[i]).trim()));
+  }
+  var textFields = [["label", f.label], ["message", f.message], ["memo", f.memo]];
+  for (var j = 0; j < textFields.length; j++) {
+    var v = textFields[j][1];
+    if (v !== undefined && v !== null && String(v) !== "") {
+      params.push(textFields[j][0] + "=" + encodeURIComponent(String(v)));
+    }
+  }
+  return "solana:" + String(f.recipient).trim() + (params.length ? "?" + params.join("&") : "");
+}
+
+function parseSolanaPayUrl(url) {
+  if (typeof url !== "string") return null;
+  var s = url.trim();
+  if (s.indexOf("solana:") !== 0) return null;
+  var rest = s.slice("solana:".length);
+  var qIdx = rest.indexOf("?");
+  var recipient = qIdx >= 0 ? rest.slice(0, qIdx) : rest;
+  if (!checkAddress(recipient).valid) return null;
+  var out = { recipient: recipient, amount: null, splToken: null, references: [], label: null, message: null, memo: null, asset: "SOL" };
+  if (qIdx < 0) return out;
+  var SINGLE = { amount: 1, "spl-token": 1, label: 1, message: 1, memo: 1 };
+  var seen = {};
+  try {
+    var pairs = rest.slice(qIdx + 1).split("&");
+    for (var i = 0; i < pairs.length; i++) {
+      if (!pairs[i]) continue;
+      var eq = pairs[i].indexOf("=");
+      var k = decodeURIComponent(eq >= 0 ? pairs[i].slice(0, eq) : pairs[i]);
+      var v = eq >= 0 ? decodeURIComponent(pairs[i].slice(eq + 1)) : "";
+      if (k === "reference") { out.references.push(v); continue; }
+      if (SINGLE[k]) { if (seen[k]) return null; seen[k] = true; }
+      if (k === "amount") out.amount = v;
+      else if (k === "spl-token") out.splToken = v;
+      else if (k === "label") out.label = v;
+      else if (k === "message") out.message = v;
+      else if (k === "memo") out.memo = v;
+    }
+  } catch (e) { return null; /* malformed percent-encoding */ }
+  if (out.amount !== null && !validPayAmount(out.amount, out.splToken)) return null;
+  if (out.splToken !== null && !checkAddress(out.splToken).valid) return null;
+  for (var r = 0; r < out.references.length; r++) {
+    if (!checkAddress(out.references[r]).valid) return null;
+  }
+  out.asset = out.splToken ? "SPL" : "SOL";
+  return out;
+}
+
 /* ---------- Tool 4: impermanent loss (two-asset 50/50 pool) ---------- */
 /* IL(r) = 2*sqrt(r)/(1+r) - 1 where r is the price ratio new/old. */
 function impermanentLoss(ratioStr) {
@@ -283,6 +393,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseScaled, formatScaled, solToLamports, lamportsToSol, cpSwap,
     rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch,
     base58Decode, base58Encode, checkAddress, stakingRewards,
+    buildSolanaPayUrl, parseSolanaPayUrl, validPayAmount, KNOWN_MINT_DECIMALS,
     RENT_LAMPORTS_PER_BYTE_YEAR, ACCOUNT_STORAGE_OVERHEAD, SCALE,
     SLOTS_PER_EPOCH, EPOCHS_PER_YEAR, MAX_STAKING_EPOCHS,
     BASE_FEE_LAMPORTS_PER_SIGNATURE, MAX_COMPUTE_UNIT_LIMIT, MAX_TOKEN_DECIMALS,
@@ -426,6 +537,51 @@ if (typeof document !== "undefined") {
         " SOL after " + res.commissionPct + "% validator commission, and over " + res.epochs + " epochs the stake grows by about " +
         res.totalRewardsSol.toFixed(6) + " SOL to about " + res.finalStakeSol.toFixed(6) +
         " SOL, because each epoch's reward is added to the stake and compounds. The yield here is your assumption, not a live network yield — real returns move with inflation, total stake, validator performance and commission changes, and rewards only start after a stake activates (about an epoch) and arrive at epoch boundaries. An educational model, not a live quote. Not financial advice.");
+    });
+
+    var payForm = document.getElementById("pay-calc");
+    if (payForm) payForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var ref = val("pay-ref").trim();
+      var url = buildSolanaPayUrl({
+        recipient: val("pay-recipient"),
+        amount: val("pay-amount"),
+        splToken: document.getElementById("pay-spl").value === "" ? undefined : val("pay-spl"),
+        references: ref ? [ref] : [],
+        label: val("pay-label"),
+        message: val("pay-message"),
+        memo: val("pay-memo")
+      });
+      if (url === null) {
+        setText("pay-result", "Check the inputs: the recipient must be a valid-format 32-byte address (a native account — an associated token account must not be used as the recipient); the amount, if given, must be a plain decimal with a leading 0 below 1, no scientific notation, and no more decimal places than the asset supports (9 for SOL, 6 for the USDC and USDG mints this page knows); a filled-in mint or reference must be a valid-format address — a present-but-invalid one is refused, never silently dropped.");
+        return;
+      }
+      document.getElementById("pay-out").value = url;
+      var parsed = parseSolanaPayUrl(url);
+      setText("pay-result", "Built locally: a Solana Pay transfer request for " +
+        (parsed.amount !== null ? parsed.amount + " " : "an amount the payer's wallet will ask for, in ") +
+        (parsed.asset === "SPL" ? "the SPL token named by the mint field" : "SOL") +
+        " to " + parsed.recipient + ". Nothing was sent and no wallet opened — this URL (or a QR code of it) is what a payer's wallet reads to compose the transfer. Read it back in full before sharing: the recipient in the string is where the money goes. For a mint this page does not know, precision past the mint's decimals cannot be checked here and the wallet will reject the URL as malformed.");
+    });
+
+    var payParseForm = document.getElementById("payparse-calc");
+    if (payParseForm) payParseForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = parseSolanaPayUrl(val("payparse-in"));
+      if (res === null) {
+        document.getElementById("payparse-out").value = "Not a well-formed transfer request";
+        setText("payparse-result", "This string is not a well-formed Solana Pay transfer request: it needs the solana: scheme, a valid-format 32-byte recipient, a plain-decimal amount (leading 0 below 1, no scientific notation, no finer than the asset's decimals), valid-format mint and reference addresses when present, no single-value field carried twice, and intact percent-encoding. A wallet would reject it as malformed — do not try to pay it.");
+        return;
+      }
+      document.getElementById("payparse-out").value = "Well-formed — " + res.asset + " transfer request";
+      var parts = ["Recipient: " + res.recipient,
+        res.amount !== null ? "Amount: " + res.amount + " (user units)" : "Amount: not fixed — the wallet must ask the payer",
+        res.splToken ? "SPL token mint: " + res.splToken : "Asset: native SOL"];
+      if (res.references.length) parts.push("Reference" + (res.references.length === 1 ? "" : "s") + ": " + res.references.join(", "));
+      if (res.label) parts.push("Label: " + res.label);
+      if (res.message) parts.push("Message: " + res.message);
+      if (res.memo) parts.push("Memo (public, on-chain): " + res.memo);
+      setText("payparse-result", parts.join(" · ") + ". Checked locally only: well-formed says the URL follows the format, not that the recipient is who you meant — compare the recipient in full with the source you trust before paying.");
     });
 
     /* catalogue filter */

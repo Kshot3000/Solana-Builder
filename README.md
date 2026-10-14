@@ -16,6 +16,7 @@ I build, fix and improve across Solana: Raydium, Jupiter, Orca, Anchor, Solana P
 6. **SPL token amount converter** — UI amount ⇄ raw units by the mint's own decimals (USDC 6, SOL 9, some mints 0), exact BigInt; amounts finer than the mint's decimals are rejected, never rounded.
 7. **Solana address checker** — base58 format validation: every character in the base58 alphabet (no 0, O, I or l) and a decoded length of exactly 32 bytes; format only — it does not check that an account exists or is safe to send to.
 8. **Staking rewards estimator** — rewards once per epoch (432,000 slots, ~2 days, ~182.5 epochs/year), validator commission taken from the reward, net rewards compounded epoch by epoch; the annual yield is a user assumption, not a live network yield.
+9. **Solana Pay URL builder & inspector** — builds and parses transfer-request URLs (`solana:<recipient>?amount=…&spl-token=…&reference=…&label=…&message=…&memo=…`) per the Solana Pay specification: the recipient must be a native account (associated token accounts must not be used), amounts are user units with the asset's decimal precision enforced where the mint is known locally (SOL 9, USDC and USDG 6), duplicate single-value fields and malformed percent-encoding are rejected, and nothing is sent.
 
 Every tool is labelled on the page for what it is: an educational model, not live quotes, not live data, not financial advice. No wallet connects and nothing executes on-chain.
 
