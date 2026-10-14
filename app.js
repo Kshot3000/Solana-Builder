@@ -426,6 +426,52 @@ function clmmRange(lower, upper, current, spacing) {
   };
 }
 
+/* ---------- Tool 17: CLMM position amounts from liquidity ---------- */
+/* A concentrated-liquidity position is not defined by how much of each
+   token you hand over — it is defined by a liquidity amount L and a tick
+   range, and the token amounts FOLLOW from the square-root prices
+   (price = token1 per token0, Tool 10; s = sqrt(price)):
+     current at/below the range:  amount0 = L * (1/sLower - 1/sUpper), amount1 = 0
+     current at/above the range:  amount0 = 0, amount1 = L * (sUpper - sLower)
+     current inside the range:    amount0 = L * (1/sCurrent - 1/sUpper),
+                                  amount1 = L * (sCurrent - sLower)
+   The branches agree at the boundaries (at the lower tick amount1 is 0
+   either way), so the composition moves continuously from all-token0
+   below the range to all-token1 above it — that drift IS the position's
+   price exposure. The maths is the shared CLMM formula (Uniswap v3's
+   SqrtPriceMath, which Raydium CLMM and Orca Whirlpools implement the
+   same way); this float model was cross-verified against the reference
+   SDK's Q96 integer implementation on in/below/above/boundary cases —
+   agreement to within that implementation's whole-unit flooring.
+   Amounts are PRINCIPAL at the current tick: swap fees a position earns
+   accrue separately on-chain and are not included, and the split moves
+   as the price moves. Amounts are in raw token units — a UI amount also
+   needs each mint's decimals (Tool 6). The value split is measured in
+   token1 at the current price: value1 = amount0 * price + amount1. */
+function clmmPosition(liquidityStr, lower, upper, current) {
+  var Lscaled = parseScaled(liquidityStr);
+  var lo = Number(lower), hi = Number(upper), cur = Number(current);
+  if (Lscaled === null || Lscaled <= 0n) return null;
+  if (!Number.isInteger(lo) || !Number.isInteger(hi) || !Number.isInteger(cur)) return null;
+  if (lo < MIN_TICK || hi > MAX_TICK || cur < MIN_TICK || cur > MAX_TICK) return null;
+  if (lo >= hi) return null;
+  var L = Number(Lscaled) / 1e9;
+  var priceLower = tickToPrice(lo), priceUpper = tickToPrice(hi), priceCurrent = tickToPrice(cur);
+  var sLo = Math.sqrt(priceLower), sHi = Math.sqrt(priceUpper), sCur = Math.sqrt(priceCurrent);
+  var amount0, amount1, status;
+  if (cur <= lo) { amount0 = L * (1 / sLo - 1 / sHi); amount1 = 0; status = "below"; }
+  else if (cur >= hi) { amount0 = 0; amount1 = L * (sHi - sLo); status = "above"; }
+  else { amount0 = L * (1 / sCur - 1 / sHi); amount1 = L * (sCur - sLo); status = "in"; }
+  return {
+    liquidity: formatScaled(Lscaled),
+    tickLower: lo, tickUpper: hi, tickCurrent: cur,
+    priceLower: priceLower, priceUpper: priceUpper, priceCurrent: priceCurrent,
+    amount0: amount0, amount1: amount1, status: status,
+    inRange: lo <= cur && cur < hi,
+    valueInToken1: amount0 * priceCurrent + amount1
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -912,6 +958,7 @@ if (typeof module !== "undefined" && module.exports) {
     slippageAmounts, MAX_SLIPPAGE_BPS,
     transferFee, transferFeeGrossUp, MAX_FEE_BASIS_POINTS,
     sandwichAttack, liquidStaking,
+    clmmPosition,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -1262,6 +1309,28 @@ if (typeof document !== "undefined") {
           ? "the first candidate tried, bump 255, already hashed off the ed25519 curve."
           : "the scan tried " + res.candidatesTried + " candidates: every bump from 255 down to " + (res.bump + 1) + " hashed to a point ON the ed25519 curve, where a private key could exist, so it can never be a PDA; bump " + res.bump + " landed off-curve.") +
         " A PDA has no private key: only that program can sign for it, by presenting these seeds and this bump. Derivation is pure SHA-256 hashing — nothing was looked up and nothing executed on-chain, and the same inputs derive this address on every cluster. Well-formed is not the same as trustworthy: check the program ID and seeds against the source you trust, in full, before treating anything sent to this address as the program's.");
+    });
+
+    var clmmposForm = document.getElementById("clmmpos-calc");
+    if (clmmposForm) clmmposForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = clmmPosition(val("clmmpos-l"), val("clmmpos-lower"), val("clmmpos-upper"), val("clmmpos-current"));
+      function fmtAmt(x) { return x === 0 ? "0" : (x < 0.001 || x >= 1e15 ? x.toExponential(6) : String(Number(x.toPrecision(10)))); }
+      if (res === null) {
+        document.getElementById("clmmpos-a0-out").value = "Invalid";
+        document.getElementById("clmmpos-a1-out").value = "Invalid";
+        setText("clmmpos-result", "Check the inputs: the liquidity must be a positive number with at most 9 decimals, and all three ticks whole numbers from -443,636 to 443,636 with the lower tick below the upper tick.");
+        return;
+      }
+      document.getElementById("clmmpos-a0-out").value = fmtAmt(res.amount0);
+      document.getElementById("clmmpos-a1-out").value = fmtAmt(res.amount1);
+      var pct0 = res.valueInToken1 > 0 ? (res.amount0 * res.priceCurrent / res.valueInToken1) * 100 : 0;
+      var where = res.status === "in"
+        ? "inside the range, so the position is active and holds both assets"
+        : res.status === "below"
+          ? "at or below the lower tick, so the position holds only token0 and earns no fees until the price climbs back into the range"
+          : "at or above the upper tick, so the position holds only token1 and earns no fees until the price falls back into the range";
+      setText("clmmpos-result", "Model output: liquidity " + res.liquidity + " over ticks " + res.tickLower + " to " + res.tickUpper + " (prices " + fmtAmt(res.priceLower) + " to " + fmtAmt(res.priceUpper) + ") at the current tick " + res.tickCurrent + " (price " + fmtAmt(res.priceCurrent) + ") holds " + fmtAmt(res.amount0) + " token0 and " + fmtAmt(res.amount1) + " token1 in raw units — about " + pct0.toFixed(2) + "% of its value in token0, measured in token1 at the current price. The current tick is " + where + ". These amounts are the position's principal at this tick: fees it earns accrue separately, and the split drifts toward whichever asset the price moves away from — that drift is the position's price exposure (and the root of impermanent loss, Tool 4). Convert raw units with each mint's decimals before treating them as wallet amounts (Tool 6). An educational model, not a live pool quote. Not financial advice.");
     });
 
     /* catalogue filter */

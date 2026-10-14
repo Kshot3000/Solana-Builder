@@ -42,15 +42,15 @@ check("models labelled not-live / not-financial-advice in index.html",
 /* structure */
 check("exactly one <h1>", (html.match(/<h1[ >]/g) || []).length === 1);
 check("has <main> landmark", /<main[\s>]/.test(html));
-check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=13"));
+check("cache keys present", html.includes("styles.css?v=1") && html.includes("app.js?v=14"));
 check("css non-trivial", css.length > 1500);
-for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out"]) {
+for (const id of ["sol-in", "lam-out", "lam-in", "sol-out", "swap-rin", "swap-rout", "swap-ain", "swap-fee", "swap-out", "rent-len", "rent-out", "il-ratio", "il-out", "fee-sigs", "fee-cu", "fee-price", "fee-out", "tok-dec", "tok-ui", "tok-raw-out", "tok-raw", "tok-ui-out", "addr-in", "addr-out", "stake-amt", "stake-yield", "stake-epochs", "stake-comm", "stake-out", "pay-recipient", "pay-amount", "pay-spl", "pay-ref", "pay-label", "pay-message", "pay-memo", "pay-out", "payparse-in", "payparse-out", "tick-in", "tick-price-out", "price-in", "price-tick-out", "range-lower", "range-upper", "range-current", "range-spacing", "range-out", "slip-expout", "slip-expin", "slip-bps", "slip-min-out", "slip-max-out", "epoch-slot-in", "epoch-out", "epochrange-in", "epochrange-out", "tfee-amt", "tfee-bps", "tfee-max", "tfee-fee-out", "tfee-net-out", "tgross-net", "tgross-bps", "tgross-max", "tgross-out", "sand-rin", "sand-rout", "sand-victim", "sand-attacker", "sand-fee", "sand-slip", "sand-victim-out", "sand-attacker-out", "lst-total", "lst-supply", "lst-rewards", "lst-deposit", "lst-redeem", "lst-rate-out", "lst-redeem-out", "pda-program", "pda-seed1", "pda-seed2", "pda-out", "clmmpos-l", "clmmpos-lower", "clmmpos-upper", "clmmpos-current", "clmmpos-a0-out", "clmmpos-a1-out"]) {
   check("control labelled: " + id, html.includes(`for="${id}"`) && html.includes(`id="${id}"`));
 }
-for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "donation-address", "copy-address"]) {
+for (const id of ["lamp-calc", "swap-calc", "rent-calc", "il-calc", "fee-calc", "tok-calc", "addr-calc", "stake-calc", "pay-calc", "payparse-calc", "tick-calc", "clmmrange-calc", "slip-calc", "lamp-result", "swap-result", "rent-result", "il-result", "fee-result", "tok-result", "addr-result", "stake-result", "pay-result", "payparse-result", "tick-result", "range-result", "slip-result", "epoch-calc", "epochrange-calc", "epoch-result", "epochrange-result", "tfee-calc", "tgross-calc", "tfee-result", "tgross-result", "sand-calc", "sand-result", "lst-calc", "lst-result", "pda-calc", "pda-result", "clmmpos-calc", "clmmpos-result", "donation-address", "copy-address"]) {
   check("element present: " + id, html.includes(`id="${id}"`));
 }
-check("twenty tool forms (sixteen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 20);
+check("twenty-one tool forms (seventeen tools, Tools 9, 10, 12 and 13 each have two)", (html.match(/<form id=/g) || []).length === 21);
 
 /* catalogue: 15 entries, Kyle's two flagged, filters cover the categories used */
 const liCount = (html.match(/<li data-cat=/g) || []).length;
@@ -380,6 +380,28 @@ check("pda: 16 seeds allowed (bump 251, matching the reference SDK), 17 refused"
 check("pda: exposes the runtime limits and marker", app.MAX_PDA_SEEDS === 16 && app.MAX_PDA_SEED_BYTES === 32 && app.PDA_MARKER === "ProgramDerivedAddress");
 check("guide teaches PDAs (Tool 16)", guide.includes("Tool 16") && guide.includes("AispKP3Ls5d2m6t411kMtP1xkPemdZPGPJUvemsBqmXA") && guide.includes("BeJv9nhxhAhGVUpVaN4USa9TgpGiYhauc6VU5QyQZrbq"));
 check("pda tool labelled model / no private key in index.html", html.includes("A PDA has no private key") && html.includes("no lookup, no execution"));
+
+/* Tool 17 — CLMM position amounts: cross-verified against the @uniswap/v3-sdk
+   reference implementation (Q96 integer SqrtPriceMath) in a foreground prototype —
+   every vector below agreed to within that implementation's whole-unit flooring */
+check("clmmpos: headline L=1e6 over -600..600 at tick 0 holds ~29,553 of each", (() => { const r = app.clmmPosition("1000000", -600, 600, 0); return r !== null && r.status === "in" && r.inRange; })());
+near("clmmpos: headline amount0", app.clmmPosition("1000000", -600, 600, 0).amount0, 29553.010879133868, 0.001);
+near("clmmpos: headline amount1 (symmetric range at price 1)", app.clmmPosition("1000000", -600, 600, 0).amount1, 29553.010879133977, 0.001);
+check("clmmpos: below the range holds only token0, the full-range amount", (() => { const r = app.clmmPosition("1000000", -600, 600, -1200); return r.status === "below" && r.amount1 === 0 && !r.inRange; })());
+near("clmmpos: below-range amount0", app.clmmPosition("1000000", -600, 600, -1200).amount0, 60005.99925504313, 0.001);
+check("clmmpos: above the range holds only token1, the full-range amount", (() => { const r = app.clmmPosition("1000000", -600, 600, 1200); return r.status === "above" && r.amount0 === 0 && !r.inRange; })());
+near("clmmpos: above-range amount1", app.clmmPosition("1000000", -600, 600, 1200).amount1, 60005.99925504324, 0.001);
+check("clmmpos: boundaries are continuous — at the lower tick amount1 is 0 and amount0 the full amount; at the upper tick the mirror", (() => { const lo = app.clmmPosition("1000000", -600, 600, -600); const hi = app.clmmPosition("1000000", -600, 600, 600); return lo.amount1 === 0 && Math.abs(lo.amount0 - 60005.99925504313) < 0.001 && hi.amount0 === 0 && Math.abs(hi.amount1 - 60005.99925504324) < 0.001; })());
+check("clmmpos: in-range flag follows Tool 10's rule (lower <= current < upper)", app.clmmPosition("1000000", -600, 600, -600).inRange === true && app.clmmPosition("1000000", -600, 600, 600).inRange === false);
+near("clmmpos: asymmetric vector amount0 (reference SDK: 49794690 floored)", app.clmmPosition("123456789", -10020, 4980, -3360).amount0, 49794690.42533552, 0.01);
+near("clmmpos: asymmetric vector amount1 (reference SDK: 29558188 floored)", app.clmmPosition("123456789", -10020, 4980, -3360).amount1, 29558188.053344868, 0.01);
+check("clmmpos: amounts scale linearly with L", (() => { const a = app.clmmPosition("1000000", -600, 600, 0); const b = app.clmmPosition("2000000", -600, 600, 0); return Math.abs(b.amount0 - 2 * a.amount0) < 1e-6 && Math.abs(b.amount1 - 2 * a.amount1) < 1e-6; })());
+check("clmmpos: value split at price 1 in the symmetric headline is 50/50 in token1 terms", (() => { const r = app.clmmPosition("1000000", -600, 600, 0); return Math.abs(r.valueInToken1 - (r.amount0 + r.amount1)) < 1e-6; })());
+check("clmmpos: rejects zero / negative / over-precise liquidity", app.clmmPosition("0", -600, 600, 0) === null && app.clmmPosition("-5", -600, 600, 0) === null && app.clmmPosition("1.0000000001", -600, 600, 0) === null);
+check("clmmpos: rejects empty range, inverted range and out-of-bounds ticks", app.clmmPosition("1000", 600, 600, 0) === null && app.clmmPosition("1000", 600, -600, 0) === null && app.clmmPosition("1000", -443637, 600, 0) === null && app.clmmPosition("1000", -600, 443637, 0) === null && app.clmmPosition("1000", -600, 600, 443637) === null);
+check("clmmpos: rejects non-integer ticks", app.clmmPosition("1000", -600.5, 600, 0) === null && app.clmmPosition("1000", -600, 600, 0.5) === null);
+check("guide teaches CLMM position amounts (Tool 17)", guide.includes("Tool 17") && guide.includes("60,005.999") && guide.includes("sixteen mechanics"));
+check("clmmpos tool labelled principal-only / model in index.html", html.includes("fees a position earns accrue separately") && html.includes("cross-verified against a reference SDK"));
 
 /* catalogue filter logic */
 check("filter all matches anything", app.catalogueMatch("dex", "all") === true);

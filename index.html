@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -591,6 +591,41 @@
         <p class="result" id="pda-result" aria-live="polite"></p>
       </form>
     </article>
+
+    <article class="tool">
+      <h3>17. CLMM position amounts — what a liquidity amount holds</h3>
+      <p>A concentrated-liquidity position on Raydium CLMM or Orca Whirlpools is not opened by handing over a chosen amount of each token. You pick a <strong>liquidity</strong> amount L and a tick range (Tool 10), and the token amounts follow from the square-root prices: inside the range the position holds <code>L × (1/√P<sub>current</sub> − 1/√P<sub>upper</sub>)</code> of token0 and <code>L × (√P<sub>current</sub> − √P<sub>lower</sub>)</code> of token1; at or below the lower tick it holds only token0, at or above the upper tick only token1 — the composition slides continuously from one asset to the other as the price crosses the range, which is exactly the position's price exposure. Headline: L = 1,000,000 over ticks −600 to 600 at tick 0 holds about 29,553 of each token. The model uses the shared CLMM formula and was cross-verified against a reference SDK's integer implementation. Amounts are the position's principal in raw token units at the current tick — fees a position earns accrue separately and are not included, and a UI amount also needs each mint's decimals (Tool 6). An educational model, not a live pool quote. Not financial advice.</p>
+      <form id="clmmpos-calc">
+        <div class="grid">
+          <div>
+            <label for="clmmpos-l">Liquidity L</label>
+            <input id="clmmpos-l" name="clmmpos-l" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="clmmpos-lower">Lower tick</label>
+            <input id="clmmpos-lower" name="clmmpos-lower" inputmode="numeric" value="-600">
+          </div>
+          <div>
+            <label for="clmmpos-upper">Upper tick</label>
+            <input id="clmmpos-upper" name="clmmpos-upper" inputmode="numeric" value="600">
+          </div>
+          <div>
+            <label for="clmmpos-current">Current tick</label>
+            <input id="clmmpos-current" name="clmmpos-current" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="clmmpos-a0-out">Token0 amount (raw units, model)</label>
+            <input id="clmmpos-a0-out" name="clmmpos-a0-out" readonly>
+          </div>
+          <div>
+            <label for="clmmpos-a1-out">Token1 amount (raw units, model)</label>
+            <input id="clmmpos-a1-out" name="clmmpos-a1-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Compute the position amounts</button>
+        <p class="result" id="clmmpos-result" aria-live="polite"></p>
+      </form>
+    </article>
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -688,6 +723,7 @@
       <li><strong>Understand what a sandwich does to a loose tolerance</strong> (Tool 14 above): an attacker front-runs a visible swap, lets it fill worse, and back-runs into the price move — the profit is the victim's loss. The slippage bound is the defence: tight enough and the victim's transaction aborts instead of filling (the attacker then loses the round-trip unwinding alone); loose enough and the bad fill passes its own protection. Private routing keeps a swap out of the public flow the attack reads.</li>
       <li><strong>Price a liquid staking token by its rate, not its balance</strong> (Tool 15 above): an LST does not rebase — rewards grow the pool's total SOL while the supply stands still, so the SOL-per-token rate rises and the same token amount redeems for more SOL over time. A rate below 1, or a deposit that mints at a stale rate, is a red flag; and a dust deposit can floor to zero tokens, so never deposit an amount whose minted figure you have not checked.</li>
       <li><strong>Derive program addresses from seeds, never store a key for them</strong> (Tool 16 above): a PDA is <code>SHA-256(seeds ‖ bump ‖ program ID ‖ "ProgramDerivedAddress")</code> kept only when the hash lands off the ed25519 curve — a result on the curve could have a private key and is rejected, which is why derivation scans bump 255 downward for the first off-curve hash. At most 16 seeds, each at most 32 bytes; seeds are raw bytes (text means its UTF-8 encoding; a pubkey seed is its 32 bytes — an associated token account is exactly this derivation). A PDA has no private key: only its program can sign for it, with those seeds and that bump.</li>
+      <li><strong>Size a concentrated position from its liquidity, not from token amounts</strong> (Tool 17 above): a CLMM position is L plus a tick range, and the amounts follow — inside the range it holds both assets in the proportion the current tick sets, below the range only token0, above it only token1, sliding continuously as the price crosses. At tick 0 over −600…600, L = 1,000,000 holds about 29,553 of each. The amounts are principal only: earned fees accrue separately, and every price move re-splits the position toward the asset being sold — that drift is the exposure behind impermanent loss.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -714,6 +750,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>
