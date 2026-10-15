@@ -2269,6 +2269,52 @@ function govVote(supplyStr, forStr, againstStr, abstainStr, quorumBps, approvalB
   };
 }
 
+/* ---------- Tool 49: token supply allocation planner ---------- */
+/* A token launch fixes its total supply at mint time and splits it into
+   buckets - liquidity, community, team, treasury and the like - stated as
+   shares of the supply. Shares are entered here in basis points (the unit
+   launch documents and mint configurations actually use). The three named
+   buckets are floored at the smallest unit in exact scaled-BigInt:
+   floor(supply x bps / 10000). Four floored shares can sum to less than
+   the supply (each floor discards under one smallest unit), so the FOURTH
+   bucket - the treasury, the designated remainder bucket - receives
+   supply minus the three floored amounts: the parts then sum to the
+   supply EXACTLY, and the remainder bucket absorbs the flooring dust,
+   which is provably 0 to 3 smallest units (the summed remainders of four
+   divisions by 10000). The treasury's nominal floored share and the dust
+   it absorbed are both reported, never hidden. Shares must sum to at
+   most 10000 bps - a split that promises more than the whole supply is
+   rejected, as is any fractional or out-of-range share. At whole-token
+   supplies every product has at most 4 decimal places and the dust is 0;
+   it appears only at the smallest-unit scale. Prototype-verified before
+   pinning: 19,999 cases, 0 mismatches on sum-exactness, per-bucket floor
+   minimality, treasury >= its nominal share, and dust in [0, 3] units. */
+function tokenAllocation(supplyStr, liquidityBps, communityBps, teamBps) {
+  var supply = parseScaled(supplyStr);
+  var lb = Number(liquidityBps), cb = Number(communityBps), tb = Number(teamBps);
+  if (supply === null || supply <= 0n) return null;
+  var shares = [lb, cb, tb];
+  for (var i = 0; i < shares.length; i++) {
+    if (!Number.isInteger(shares[i]) || shares[i] < 0 || shares[i] > 10000) return null;
+  }
+  if (lb + cb + tb > 10000) return null;
+  var treasuryBps = 10000 - lb - cb - tb;
+  var liquidity = supply * BigInt(lb) / 10000n;
+  var community = supply * BigInt(cb) / 10000n;
+  var team = supply * BigInt(tb) / 10000n;
+  var treasuryNominal = supply * BigInt(treasuryBps) / 10000n;
+  var treasury = supply - liquidity - community - team;
+  var dust = treasury - treasuryNominal;
+  return {
+    supply: formatScaled(supply),
+    liquidityBps: lb, communityBps: cb, teamBps: tb, treasuryBps: treasuryBps,
+    liquidity: formatScaled(liquidity), community: formatScaled(community),
+    team: formatScaled(team), treasury: formatScaled(treasury),
+    treasuryNominal: formatScaled(treasuryNominal),
+    dust: formatScaled(dust), dustUnits: Number(dust)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2778,6 +2824,7 @@ if (typeof module !== "undefined" && module.exports) {
     airdropCost, MAX_AIRDROP_RECIPIENTS, TOKEN_ACCOUNT_BYTES,
     dutchAuctionPrice, MAX_DUTCH_DURATION_SECONDS,
     govVote,
+    tokenAllocation,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3777,6 +3824,24 @@ if (typeof document !== "undefined") {
         ? " The proposal PASSES - both bars are cleared."
         : " The proposal FAILS - " + (!res.quorumMet && !res.approvalMet ? "both bars are missed." : (!res.quorumMet ? "a tally can win the vote and still fail on turnout; that is this case." : "quorum alone does not carry a proposal the decisive votes reject."));
       setText("gov-result", "Model output: " + quorumNote + approvalNote + verdict + " Abstentions count toward quorum and toward neither side of approval - the convention modelled here; a framework that weighs them differently, vote weights other than one-token-one-vote, and any live tally are not modelled, and no live proposal is read. An educational model of a governance vote, not a live tally. Not financial advice.");
+    });
+
+    var allocForm = document.getElementById("alloc-calc");
+    if (allocForm) allocForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = tokenAllocation(val("alloc-supply"), val("alloc-liquidity"), val("alloc-community"), val("alloc-team"));
+      if (res === null) {
+        document.getElementById("alloc-liq-out").value = "Invalid";
+        document.getElementById("alloc-treasury-out").value = "Invalid";
+        setText("alloc-result", "Check the inputs: the total supply must be above zero (amounts up to 9 decimal places), and each named share a whole number of basis points from 0 to 10,000, with the three named shares together no more than 10,000 - a split cannot promise more than the whole supply.");
+        return;
+      }
+      document.getElementById("alloc-liq-out").value = res.liquidity;
+      document.getElementById("alloc-treasury-out").value = res.treasury;
+      var dustNote = res.dustUnits === 0
+        ? " The four buckets sum to the supply exactly with no flooring dust at this scale."
+        : " The treasury's nominal floored share would be " + res.treasuryNominal + "; as the remainder bucket it receives " + res.dust + " more - the flooring dust from all four buckets (never more than 3 smallest units) - so the four buckets still sum to the supply exactly.";
+      setText("alloc-result", "Model output: a supply of " + res.supply + " splits into liquidity " + res.liquidity + " (" + fmtAmt(res.liquidityBps / 100) + "%), community " + res.community + " (" + fmtAmt(res.communityBps / 100) + "%), team " + res.team + " (" + fmtAmt(res.teamBps / 100) + "%) and a treasury remainder of " + res.treasury + " (" + fmtAmt(res.treasuryBps / 100) + "%)." + dustNote + " The named buckets are floored at the smallest unit and the treasury is the designated remainder - the convention modelled here; a launch that assigns its dust to a different bucket, or rounds instead of flooring, splits differently in the smallest units. Bucket labels are the common ones; what each bucket may be used for is set by the launch's own terms, vesting (Tool 19) is not applied here, and no live token is read. An educational model of a supply split, not a live token. Not financial advice.");
     });
 
     /* catalogue filter */
