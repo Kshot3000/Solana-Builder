@@ -1231,6 +1231,48 @@ function tokenValuation(priceStr, circStr, totalStr, maxStr) {
   };
 }
 
+/* ---------- Tool 31: address lookup table planner ---------- */
+/* An address lookup table is an on-chain account that lets v0 transactions
+   reference accounts by a 1-byte index instead of a full 32-byte key:
+     account bytes = LOOKUP_TABLE_META_SIZE (56) + 32 x addresses stored
+   The metadata holds the deactivation slot, last-extended slot and the
+   authority; addresses follow it raw. A table holds at most 256 addresses
+   because the indexes are u8. The account is priced like any other, with
+   the hub rent formula (Tool 3), and the deposit is reclaimable only by
+   deactivating the table and waiting out the cooldown until its
+   deactivation slot leaves the SlotHashes sysvar - stated, not modelled.
+   In a transaction the lookup section costs shortvec(1) for the list of
+   tables + the table's own 32-byte key + two shortvec counts + 1 byte per
+   loaded address - exactly the lookupBytes figure of Tool 21's txSize -
+   so loading a single address through a table costs 4 bytes MORE than
+   inlining it (36 vs 32), while loading many costs far less. One table
+   per transaction is modelled here; real transactions may use several. */
+var ALT_META_BYTES = 56;
+var ALT_MAX_ADDRESSES = 256;
+
+function lookupTablePlan(storedStr, writableStr, readonlyStr) {
+  var stored = Number(storedStr), w = Number(writableStr), r = Number(readonlyStr);
+  if (!Number.isInteger(stored) || stored < 0 || stored > ALT_MAX_ADDRESSES) return null;
+  if (!Number.isInteger(w) || !Number.isInteger(r) || w < 0 || r < 0) return null;
+  if (w + r < 1 || w + r > stored) return null;
+  var sizeBytes = ALT_META_BYTES + 32 * stored;
+  var rent = rentExempt(sizeBytes);
+  var used = w + r;
+  var lookupBytes = shortvecLen(1) + 32 + shortvecLen(w) + w + shortvecLen(r) + r;
+  var staticBytes = 32 * used;
+  return {
+    stored: stored, writable: w, readonly: r, used: used,
+    metaBytes: ALT_META_BYTES, addressBytes: 32 * stored,
+    sizeBytes: sizeBytes,
+    rentLamports: rent.rentExemptLamports, rentSol: rent.rentExemptSol,
+    fillPct: stored * 100 / ALT_MAX_ADDRESSES,
+    perAddressLamports: 32 * 6960,
+    lookupBytes: lookupBytes, staticBytes: staticBytes,
+    savingBytes: staticBytes - lookupBytes,
+    savingIsNegative: staticBytes - lookupBytes < 0
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1728,6 +1770,7 @@ if (typeof module !== "undefined" && module.exports) {
     merkleTreePlan, CMT_HEADER_BYTES, CMT_FIXED_BYTES, CMT_MAX_DEPTH, CMT_MAX_BUFFER_SIZE,
     createWithSeed, MAX_SEED_ADDRESS_SEED_BYTES, STAKE_PROGRAM_ID,
     tokenValuation,
+    lookupTablePlan, ALT_META_BYTES, ALT_MAX_ADDRESSES,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2355,6 +2398,24 @@ if (typeof document !== "undefined") {
         ? " Note the market cap floors to exactly 0 at this precision: the price times the circulating supply is under one smallest unit of the quote, so 0 is the exact floored figure, not a missing value."
         : "";
       setText("mcap-result", "Model output: at a price of " + res.price + " per token, a circulating supply of " + res.circulating + " gives a market cap of " + res.marketCap + "; the total minted supply of " + res.total + " values at " + res.totalValuation + ", and the max supply of " + res.max + " gives a fully diluted valuation (FDV) of " + res.fdv + ". Circulating is " + res.circPctOfTotal.toFixed(4) + "% of the total supply." + dilutedNote + zeroNote + " The price and supplies are your inputs — no live price or mint is read, and a data site's circulating figure is that site's own accounting of locked and treasury wallets. An educational model of token valuation, not live market data. Not financial advice.");
+    });
+
+    var altForm = document.getElementById("alt-calc");
+    if (altForm) altForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = lookupTablePlan(val("alt-stored"), val("alt-w"), val("alt-r"));
+      if (res === null) {
+        document.getElementById("alt-size-out").value = "Invalid";
+        document.getElementById("alt-rent-out").value = "Invalid";
+        setText("alt-result", "Check the inputs: addresses stored must be a whole number from 0 to 256 (the u8 index cap), the writable and readonly counts whole numbers of 0 or more, at least one address must be loaded, and a transaction cannot load more addresses than the table stores.");
+        return;
+      }
+      document.getElementById("alt-size-out").value = String(res.sizeBytes);
+      document.getElementById("alt-rent-out").value = String(res.rentLamports);
+      var savingNote = res.savingIsNegative
+        ? " Loading so few addresses through a table costs " + (-res.savingBytes) + " bytes MORE than inlining them - the table reference is paid before the first index saves anything, which is why tables pay off only when a transaction loads many addresses (or the same table serves many transactions)."
+        : " Loading those " + res.used + " addresses through the table costs " + res.lookupBytes + " bytes instead of " + res.staticBytes + " bytes of inline keys - a saving of " + res.savingBytes + " bytes in every transaction that loads them this way.";
+      setText("alt-result", "Model output: a table storing " + res.stored + " addresses (" + res.fillPct.toFixed(4) + "% of the 256 cap) is a " + res.sizeBytes + "-byte account - 56 bytes of metadata plus " + res.addressBytes + " bytes of addresses - and locks a rent-exempt deposit of " + res.rentLamports + " lamports (" + res.rentSol + " SOL), " + res.perAddressLamports + " lamports per stored address." + savingNote + " The deposit comes back only by deactivating the table and waiting out the cooldown until its deactivation slot leaves the SlotHashes sysvar - stated, not modelled - and one table per transaction is modelled here. An educational model of the lookup-table layout, not a live account lookup. Not financial advice.");
     });
 
     /* catalogue filter */

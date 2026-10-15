@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1219,6 +1219,37 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>31. Address lookup table planner — table account size, rent &amp; per-transaction savings</h3>
+      <p>A v0 transaction can load accounts through an <strong>address lookup table</strong>: an on-chain account holding up to <strong>256 addresses</strong> (the indexes are u8, one byte each) that transactions reference by index instead of writing out each 32-byte key. The account's layout is fixed: <strong>56 bytes of metadata</strong> (deactivation slot, last-extended slot, authority) <strong>+ 32 bytes per stored address</strong>, priced with the rent formula of Tool 3 — a full table is 8,248 bytes locking 58,296,960 lamports, and the headline table below storing 64 addresses is a 2,104-byte account locking 15,534,720 lamports (0.01553472 SOL). In a transaction the lookup section costs 1 byte for the table list, the table's own 32-byte key, two shortvec counts and 1 byte per loaded address — exactly Tool 21's lookup figure — so loading <em>one</em> address this way costs 4 bytes more than inlining it, while the headline load of 20 addresses (12 writable, 8 readonly) costs 55 bytes instead of 640, saving 585 bytes in every transaction that loads them. The deposit is reclaimable only by deactivating the table and waiting out the cooldown until its deactivation slot leaves the SlotHashes sysvar — stated here, not modelled; one table per transaction is modelled. An educational model of the lookup-table layout, not a live account lookup. Not financial advice.</p>
+      <form id="alt-calc">
+        <div class="grid">
+          <div>
+            <label for="alt-stored">Addresses stored in the table (0–256)</label>
+            <input id="alt-stored" name="alt-stored" value="64">
+          </div>
+          <div>
+            <label for="alt-w">Addresses one transaction loads as writable</label>
+            <input id="alt-w" name="alt-w" value="12">
+          </div>
+          <div>
+            <label for="alt-r">Addresses one transaction loads as readonly</label>
+            <input id="alt-r" name="alt-r" value="8">
+          </div>
+          <div>
+            <label for="alt-size-out">Table account size in bytes (model)</label>
+            <input id="alt-size-out" name="alt-size-out" readonly>
+          </div>
+          <div>
+            <label for="alt-rent-out">Rent-exempt deposit in lamports (model)</label>
+            <input id="alt-rent-out" name="alt-rent-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the lookup table</button>
+        <p class="result" id="alt-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1328,6 +1359,7 @@
       <li><strong>Budget a compressed NFT collection by its tree, not per asset</strong> (Tool 28 above): a cNFT collection's on-chain cost is one concurrent Merkle tree account — 56 bytes of header, 64 fixed, a changelog ring of buffer × (40 + 32 × depth) bytes, 32 × depth of rightmost proof, plus any canopy — and the ring is almost all of it: a depth-14, buffer-64 tree is 31,800 bytes and 222,218,880 lamports of rent for 16,384 assets, of which 31,232 bytes are changelog. Depth sets capacity (2<sup>depth</sup>), the buffer (a power of two) sets how many concurrent updates the tree absorbs, and a canopy trades more rent up front for fewer proof hashes on every later transfer.</li>
       <li><strong>Derive a seeded address when a signer — not a program — needs many accounts</strong> (Tool 29 above): a seeded address is <code>SHA-256(base ‖ seed ‖ owner)</code> — no marker, no bump, no curve check, so an on-curve result is valid (the hub's donation address with seed <code>0</code> under the Stake program derives <code>4z22cSCVREYe519iEet4xdqBSrTDx9muhtRR3fcRxpod</code>). Reach for a PDA (Tool 16) when a program must sign; reach for a seed when a base keypair creates a family of accounts, one seed per member, and signs their creation itself. The seed is a single string of at most 32 UTF-8 bytes, used byte-for-byte.</li>
       <li><strong>Read a token's valuation by which supply it multiplies</strong> (Tool 30 above): market cap is price × circulating supply, FDV is price × max supply, and the multiple between them is max ÷ circulating — the price cancels, so it is pure dilution still to come. At a price of 2.5 with 400,000,000 circulating of a 1,000,000,000 max, the market cap is 1,000,000,000 and the FDV 2,500,000,000: only 40% of the supply trades today, and the FDV assumes today's price survives the rest arriving.</li>
+      <li><strong>Plan a lookup table by its account, not just its savings</strong> (Tool 31 above): a table is an account of 56 metadata bytes + 32 per stored address (256 maximum, because the indexes are u8) with a rent-exempt deposit to match — 2,104 bytes and 15,534,720 lamports for 64 addresses — and its per-transaction saving is the table reference (32-byte key, a list byte and two shortvec counts) plus 1 byte per loaded address against 32 bytes inline: one loaded address costs 4 bytes MORE through a table, twenty cost 55 bytes instead of 640. Deactivating and closing a table to reclaim the deposit waits out a cooldown first.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1354,6 +1386,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>
