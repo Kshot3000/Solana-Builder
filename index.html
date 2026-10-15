@@ -1522,6 +1522,49 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>38. Lending liquidation calculator — what one liquidation repays and seizes</h3>
+      <p>Tool 20 judges <em>when</em> a lending position may be liquidated; this model prices <em>what one liquidation does</em>. A market lets a liquidator repay at most a <strong>close factor</strong> share of the debt in a single liquidation and seize collateral worth the repaid amount marked up by the <strong>liquidation bonus</strong> — the liquidator's profit, paid by the borrower. The headline position of <strong>10 units at 100 against a debt of 500</strong>, at a <strong>500 bps (5%) bonus</strong> and a <strong>5,000 bps (50%) close factor</strong>: the repay is capped at <strong>250</strong>, the liquidator seizes <strong>2.625 units</strong> of collateral (worth 262.5 — a bonus profit of 12.5), and <strong>250 of debt remains against 7.375 units</strong> of collateral. Push the same market underwater — only 2 units of collateral against the 500 debt — and the marked-up seizure would take more than the position holds: the collateral is <strong>exhausted</strong>, the liquidator takes all of it and the effective repay falls to 190.476190476, leaving 309.523809524 of debt with nothing backing it. The bonus and close factor are inputs — every market (Kamino, Marginfi, Drift and peers) sets its own, and some allow a full close once health is low enough, which a 10,000 bps close factor represents here. Single collateral against a single debt, in exact scaled-BigInt. An educational model of a lending liquidation, not a live quote. Not financial advice.</p>
+      <form id="liqmax-calc">
+        <div class="grid">
+          <div>
+            <label for="liqmax-amt">Collateral amount (units of the collateral token)</label>
+            <input id="liqmax-amt" name="liqmax-amt" value="10">
+          </div>
+          <div>
+            <label for="liqmax-price">Collateral price (quote currency per unit)</label>
+            <input id="liqmax-price" name="liqmax-price" value="100">
+          </div>
+          <div>
+            <label for="liqmax-debt">Debt owed (quote currency)</label>
+            <input id="liqmax-debt" name="liqmax-debt" value="500">
+          </div>
+          <div>
+            <label for="liqmax-bonus">Liquidation bonus, basis points of the repaid amount (the market's input)</label>
+            <input id="liqmax-bonus" name="liqmax-bonus" value="500">
+          </div>
+          <div>
+            <label for="liqmax-close">Close factor, basis points of the debt repayable in one liquidation (the market's input)</label>
+            <input id="liqmax-close" name="liqmax-close" value="5000">
+          </div>
+          <div>
+            <label for="liqmax-repay-out">Amount the liquidator repays (model)</label>
+            <input id="liqmax-repay-out" name="liqmax-repay-out" readonly>
+          </div>
+          <div>
+            <label for="liqmax-seized-out">Collateral seized, in collateral units (model)</label>
+            <input id="liqmax-seized-out" name="liqmax-seized-out" readonly>
+          </div>
+          <div>
+            <label for="liqmax-remain-out">Debt remaining after the liquidation (model)</label>
+            <input id="liqmax-remain-out" name="liqmax-remain-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the maximum liquidation</button>
+        <p class="result" id="liqmax-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1664,6 +1707,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=34"></script>
+<script src="app.js?v=35"></script>
 </body>
 </html>
