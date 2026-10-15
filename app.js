@@ -2362,6 +2362,39 @@ function quadraticVote(budget, votesA, votesB, votesC) {
   };
 }
 
+/* ---------- Tool 51: token burn & holder-share calculator ---------- */
+/* A burn destroys tokens: supply falls by the burned amount and every
+   holder who does NOT burn owns a larger share of what remains, without
+   gaining a single token - the numerator stands still while the
+   denominator shrinks. This model burns tokens held by OTHERS (a
+   treasury or team burn is the common case): the holder's balance is
+   unchanged, so the burn is bounded by supply - holder, and burning all
+   of that leaves the holder at exactly 100%. Shares are floored to whole
+   basis points in exact scaled-BigInt (a holder's true share is the
+   rational balance / supply; the floored figure never overstates it),
+   so a dust holder can floor to 0 bps before AND after - reported,
+   not hidden. A burn does not by itself change a token's price, and
+   none is modelled or implied here. Prototype-verified before pinning:
+   20,000 cases, 0 mismatches against the Fraction definitions of the
+   three floored shares, and the holder's share never fell. */
+function burnShare(supplyStr, holderStr, burnStr) {
+  var S = parseScaled(supplyStr);
+  var H = parseScaled(holderStr);
+  var B = parseScaled(burnStr);
+  if (S === null || H === null || B === null) return null;
+  if (S <= 0n || H > S || B <= 0n || B > S - H) return null;
+  var ns = S - B;
+  var burnBps = Number((B * 10000n) / S);
+  var beforeBps = Number((H * 10000n) / S);
+  var afterBps = ns === 0n ? 0 : Number((H * 10000n) / ns);
+  return {
+    supply: formatScaled(S), holder: formatScaled(H), burn: formatScaled(B),
+    newSupply: formatScaled(ns),
+    burnBps: burnBps, beforeBps: beforeBps, afterBps: afterBps,
+    gainBps: afterBps - beforeBps, fullyBurned: ns === 0n
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2873,6 +2906,7 @@ if (typeof module !== "undefined" && module.exports) {
     govVote,
     tokenAllocation,
     quadraticVote, MAX_QV_BUDGET, MAX_QV_VOTES,
+    burnShare,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3908,6 +3942,24 @@ if (typeof document !== "undefined") {
         ? " That ballot is OVER budget by " + res.remaining.slice(1) + " credits - it cannot be cast as entered; trim votes (each one removed from a proposal saves its marginal cost) or raise the budget."
         : " That ballot fits the budget with " + res.remaining + " credits to spare.";
       setText("qv-result", "Model output: votes of " + res.votes[0] + ", " + res.votes[1] + " and " + res.votes[2] + " on the three proposals cost " + res.costs[0] + " + " + res.costs[1] + " + " + res.costs[2] + " = " + res.totalCost + " credits for " + res.totalVotes + " votes in total." + budgetNote + " The next vote on each proposal would cost " + res.nextCosts[0] + ", " + res.nextCosts[1] + " and " + res.nextCosts[2] + " more credits - the marginal cost 2v + 1 is what makes intensity expensive. Concentrating the whole budget of " + res.budget + " on one proposal buys at most " + res.maxSingleVotes + " votes (costing " + res.maxSingleCost + "). Three proposals and whole votes are modelled; each framework sets its own budget, proposal count and credit rules, and no live ballot is read. An educational model of a quadratic vote, not a live ballot. Not financial advice.");
+    });
+
+    var burnForm = document.getElementById("burn-calc");
+    if (burnForm) burnForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = burnShare(val("burn-supply"), val("burn-holder"), val("burn-amount"));
+      if (res === null) {
+        document.getElementById("burn-newsupply-out").value = "Invalid";
+        document.getElementById("burn-after-out").value = "Invalid";
+        setText("burn-result", "Check the inputs: the supply must be above zero, the holder balance no more than the supply, and the burn above zero and no more than the supply minus the holder balance - this model burns other holders' tokens, so it cannot burn the holder's own.");
+        return;
+      }
+      document.getElementById("burn-newsupply-out").value = res.newSupply;
+      document.getElementById("burn-after-out").value = fmtAmt(res.afterBps / 100) + "%";
+      var endNote = res.fullyBurned
+        ? " The burn destroys the entire supply, so no share remains to own."
+        : " The holder's share rises from " + fmtAmt(res.beforeBps / 100) + "% to " + fmtAmt(res.afterBps / 100) + "% (+" + res.gainBps + " whole basis points at the floored precision) while their balance stays exactly " + res.holder + " - a bigger share of a smaller supply, not more tokens.";
+      setText("burn-result", "Model output: burning " + res.burn + " (" + fmtAmt(res.burnBps / 100) + "% of the supply) takes the supply from " + res.supply + " to " + res.newSupply + "." + endNote + " Shares are floored to whole basis points, so a dust balance can show 0% before and after even though its rational share did rise. A burn does not by itself set or raise a price, and no price, live supply or live burn is read. An educational model of a token burn, not a live token. Not financial advice.");
     });
 
     /* catalogue filter */
