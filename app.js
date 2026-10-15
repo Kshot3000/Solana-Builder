@@ -1403,6 +1403,69 @@ function bondingCurve(vsolStr, vtokStr, supplyStr, raisedStr, targetStr, buyStr,
   };
 }
 
+/* ---------- Tool 34: perpetual funding payment model ---------- */
+/* Perpetual futures (Drift, Jupiter Perps and others on Solana) have no
+   expiry, so a periodic FUNDING payment keeps the perp price anchored to
+   the spot/index price: when the funding rate is positive, longs pay
+   shorts; when it is negative, shorts pay longs. The payment on a
+   position is definitional once the venue publishes its rate:
+     payment = notional x rate x time,  notional = size x mark price,
+   with the rate quoted in basis points per hour here (1 bp = 0.01%/hour).
+   This model takes the rate as an INPUT - every venue derives its own
+   from the mark/index premium, caps it at its own maximum, and settles
+   at its own interval (hourly is the common Solana cadence) - and runs
+   the payment in exact scaled BigInt: the magnitude floors at the
+   smallest unit, and the sign is reported from the POSITION's point of
+   view (positive = the position receives, negative = it pays). The
+   annualised figure is just the hourly rate x 8,760 hours, a quoting
+   convention, not a forecast: the rate resets every interval. */
+var MAX_FUNDING_RATE_BPS = 10000; /* 100% per hour - a guard, not a venue cap */
+var MAX_FUNDING_HOURS = 87600; /* ten years of hourly settlements */
+
+function parseSignedScaled(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (s.charAt(0) === "-") {
+    var mag = parseScaled(s.slice(1));
+    return mag === null ? null : -mag;
+  }
+  return parseScaled(s);
+}
+
+function perpFunding(sizeStr, priceStr, rateBpsStr, hoursStr, side) {
+  var size = parseScaled(sizeStr);
+  var price = parseScaled(priceStr);
+  var rate = parseSignedScaled(rateBpsStr);
+  var hours = parseScaled(hoursStr);
+  if (size === null || price === null || rate === null || hours === null) return null;
+  if (size <= 0n || price <= 0n || hours <= 0n) return null;
+  if (hours > BigInt(MAX_FUNDING_HOURS) * SCALE) return null;
+  var absRate = rate < 0n ? -rate : rate;
+  if (absRate > BigInt(MAX_FUNDING_RATE_BPS) * SCALE) return null;
+  if (side !== "long" && side !== "short") return null;
+  var notional = (size * price) / SCALE;
+  if (notional <= 0n) return null;
+  var perHourMag = (notional * absRate) / (10000n * SCALE);
+  var totalMag = (notional * absRate * hours) / (10000n * SCALE * SCALE);
+  var rateSign = rate > 0n ? 1 : (rate < 0n ? -1 : 0);
+  /* longs pay at a positive rate and receive at a negative one; shorts mirror */
+  var positionSign = side === "long" ? -rateSign : rateSign;
+  var perHour = BigInt(positionSign) * perHourMag;
+  var total = BigInt(positionSign) * totalMag;
+  return {
+    size: formatScaled(size), price: formatScaled(price),
+    notional: formatScaled(notional),
+    rateBps: formatScaled(rate), hours: formatScaled(hours), side: side,
+    perHour: formatScaled(perHour), total: formatScaled(total),
+    perHourMagnitude: formatScaled(perHourMag), totalMagnitude: formatScaled(totalMag),
+    annualizedPct: (Number(rate) / Number(SCALE)) * 8760 / 100,
+    payer: rateSign > 0 ? "longs" : (rateSign < 0 ? "shorts" : "none"),
+    positionPays: positionSign < 0,
+    positionReceives: positionSign > 0,
+    paymentIsZero: totalMag === 0n
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1903,6 +1966,7 @@ if (typeof module !== "undefined" && module.exports) {
     lookupTablePlan, ALT_META_BYTES, ALT_MAX_ADDRESSES,
     pythConfidence, formatRawExpo,
     bondingCurve,
+    perpFunding, parseSignedScaled, MAX_FUNDING_RATE_BPS, MAX_FUNDING_HOURS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2592,6 +2656,29 @@ if (typeof document !== "undefined") {
           ? " This buy carries the real SOL raised to the graduation target: on a live launchpad the curve would complete here and the real SOL and unsold tokens would migrate to an AMM pool, with the depth dropping as the virtual offset stays behind."
           : " The curve still stands short of its graduation target after this buy.");
       setText("curve-result", "Model output: the curve prices the token at " + res.spotPrice + " SOL before the buy and " + res.priceAfter + " SOL after it (a rise of " + res.priceRisePct.toFixed(4) + "% along the curve; prices are shown at 9 decimal places). The buy pays " + res.feeSol + " SOL of fee first, so " + res.effectiveIn + " SOL enters the curve and receives " + res.tokensOut + " tokens - an average of " + res.avgPricePaid + " SOL per token once the fee is counted. The virtual reserves move to " + res.newVirtualSol + " SOL and " + res.newVirtualToken + " tokens, while the real SOL the curve actually holds rises to " + res.raisedAfter + " SOL: progress to graduation moves from " + res.progressBeforePct.toFixed(4) + "% to " + res.progressAfterPct.toFixed(4) + "% of the target. The market cap the interfaces would quote (curve price times total supply) moves from " + res.mcapBefore + " SOL to " + res.mcapAfter + " SOL." + gradNote + " The virtual reserves are a pricing offset, not balances, and the fee rate, target and reserves are inputs - each launchpad sets its own and no live curve is read. An educational model of a launchpad bonding curve, not a live quote. Not financial advice.");
+    });
+
+    var fundForm = document.getElementById("fund-calc");
+    if (fundForm) fundForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = perpFunding(val("fund-size"), val("fund-price"), val("fund-rate"), val("fund-hours"), val("fund-side"));
+      if (res === null) {
+        document.getElementById("fund-notional-out").value = "Invalid";
+        document.getElementById("fund-total-out").value = "Invalid";
+        setText("fund-result", "Check the inputs: the position size, the mark price and the hours held must all be above zero (amounts may have up to 9 decimal places; hours are capped at 87,600), the funding rate is a signed number of basis points per hour between -10,000 and 10,000 (a leading minus sign is allowed, and expected), and the side is long or short - a position so small its notional floors to zero at this scale is rejected.");
+        return;
+      }
+      document.getElementById("fund-notional-out").value = res.notional;
+      document.getElementById("fund-total-out").value = res.total;
+      var flowNote = res.payer === "none"
+        ? " At a rate of exactly 0 there is no payment either way - neither side pays."
+        : (res.positionPays
+          ? " Your " + res.side + " position PAYS: at a " + (res.payer === "longs" ? "positive" : "negative") + " rate the " + res.payer + " pay the other side, and the payment leaves the position every settlement while it stays open."
+          : " Your " + res.side + " position RECEIVES: at a " + (res.payer === "longs" ? "positive" : "negative") + " rate the " + res.payer + " pay the other side, and your side collects.");
+      var zeroNote = res.paymentIsZero && res.payer !== "none"
+        ? " The payment floors to exactly 0 at the 9-decimal scale - the position is too small, or the rate too low, for a whole smallest unit to move."
+        : "";
+      setText("fund-result", "Model output: a " + res.size + " position at a mark price of " + res.price + " is a notional of " + res.notional + " (quote currency). At a funding rate of " + res.rateBps + " bps per hour the payment is " + res.perHourMagnitude + " per hour, so holding for " + res.hours + " hours at that same rate totals " + res.totalMagnitude + " - shown from your position's point of view as " + res.total + " (negative pays, positive receives), or " + res.perHour + " per hour." + flowNote + zeroNote + " The annualised figure for that hourly rate is " + res.annualizedPct.toFixed(4) + "% - a quoting convention (hourly rate x 8,760), not a forecast, because every venue resets its rate each interval from the mark/index premium and caps it at its own maximum. The rate, price and size are inputs and no live market is read. An educational model of perpetual funding, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

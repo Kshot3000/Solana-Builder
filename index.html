@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1332,6 +1332,48 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>34. Perpetual funding payment model — what holding a perp costs (or earns) per hour</h3>
+      <p>A <strong>perpetual future</strong> (Drift, Jupiter Perps and others) never expires, so a periodic <strong>funding payment</strong> anchors its price to spot: when the funding rate is <strong>positive, longs pay shorts</strong>; when it is <strong>negative, shorts pay longs</strong>. The payment is definitional once a venue publishes its rate: <strong>payment = notional × rate × time</strong>, with the notional = size × mark price and the rate quoted here in basis points per hour. The headline below holds a <strong>100-unit long at a mark price of 150</strong> — a 15,000 notional — at <strong>1 bp per hour</strong>: the long pays <strong>1.5 per hour, 36 over 24 hours</strong>, and that hourly rate annualises to 87.6% as a quoting convention (the rate itself resets every interval, so that figure is not a forecast). Every venue derives its own rate from the mark/index premium, caps it at its own maximum and settles at its own interval — hourly is the common Solana cadence — so the rate is an input here and no live market is read. An educational model of perpetual funding, not a live quote. Not financial advice.</p>
+      <form id="fund-calc">
+        <div class="grid">
+          <div>
+            <label for="fund-size">Position size (base units, e.g. SOL)</label>
+            <input id="fund-size" name="fund-size" value="100">
+          </div>
+          <div>
+            <label for="fund-price">Mark price (quote currency per base unit)</label>
+            <input id="fund-price" name="fund-price" value="150">
+          </div>
+          <div>
+            <label for="fund-rate">Funding rate, basis points per hour (signed: negative means shorts pay longs)</label>
+            <input id="fund-rate" name="fund-rate" value="1">
+          </div>
+          <div>
+            <label for="fund-hours">Hours held at that rate</label>
+            <input id="fund-hours" name="fund-hours" value="24">
+          </div>
+          <div>
+            <label for="fund-side">Position side</label>
+            <select id="fund-side" name="fund-side">
+              <option value="long" selected>Long — pays at a positive rate</option>
+              <option value="short">Short — pays at a negative rate</option>
+            </select>
+          </div>
+          <div>
+            <label for="fund-notional-out">Position notional, size × mark price (model)</label>
+            <input id="fund-notional-out" name="fund-notional-out" readonly>
+          </div>
+          <div>
+            <label for="fund-total-out">Total funding over the hold, from the position's view: negative pays, positive receives (model)</label>
+            <input id="fund-total-out" name="fund-total-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the funding</button>
+        <p class="result" id="fund-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1444,6 +1486,7 @@
       <li><strong>Plan a lookup table by its account, not just its savings</strong> (Tool 31 above): a table is an account of 56 metadata bytes + 32 per stored address (256 maximum, because the indexes are u8) with a rent-exempt deposit to match — 2,104 bytes and 15,534,720 lamports for 64 addresses — and its per-transaction saving is the table reference (32-byte key, a list byte and two shortvec counts) plus 1 byte per loaded address against 32 bytes inline: one loaded address costs 4 bytes MORE through a table, twenty cost 55 bytes instead of 640. Deactivating and closing a table to reclaim the deposit waits out a cooldown first.</li>
       <li><strong>Read an oracle price as a band, never a point</strong> (Tool 32 above): a Pyth-style feed publishes price ± conf at one exponent, conf being roughly one standard deviation — so judge a price by its band width in basis points of the price (150.00 ± 0.075 is 5 bps and passes a 1% guard; 67,890 ± 680 is 100.16 bps and fails that same guard), value collateral at the band's low end, and check staleness separately before trusting any of it.</li>
       <li><strong>Price a launchpad token off its virtual reserves, not its vault</strong> (Tool 33 above): a bonding curve's price is virtual SOL ÷ virtual token on a constant-product curve — the virtual SOL is a pricing offset, while the SOL the curve actually holds is the real raised figure that counts toward graduation. Every buy moves the price along the curve (3 SOL into the headline curve receives 90,081,892.62966333 tokens and lifts the price 20.78%), and at graduation the real SOL and unsold tokens migrate to an AMM at a continuous price but with the virtual depth left behind.</li>
+      <li><strong>Price the funding before the leverage</strong> (Tool 34 above): a perpetual charges (or pays) funding every interval — payment = notional × rate × time, longs paying shorts at a positive rate and shorts paying longs at a negative one. A 100-unit long at 150 pays 1.5 per hour at just 1 bp per hour — 36 over a day — and that rate annualises to 87.6%, so a funding rate that looks like a rounding error is a real carry cost on any hold longer than a scalp; the rate resets every interval, which is why the annualised figure is a quote, never a forecast.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1470,6 +1513,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>
