@@ -1818,6 +1818,54 @@ function routeSwap(reserveIn1Str, reserveMid1Str, reserveMid2Str, reserveOut2Str
   };
 }
 
+/* ---------- Tool 40: exact-out swap model ---------- */
+/* Tool 2 answers "how much out for this much in"; an exact-out order asks the
+   reverse - "how much in for exactly this much out" - the quote a wallet gives
+   when the payment amount is fixed. The pool's requirement is solved first with
+   no fee: floor(eff * reserveOut / (reserveIn + eff)) >= amountOut inverts to
+   eff >= amountOut * reserveIn / (reserveOut - amountOut), ceilinged at the
+   smallest unit - that is the net input the pool must receive. The gross input
+   is then the smallest amount whose Tool 2 fee withholding (floor(gross x bps
+   / 10,000)) still leaves that net: the withholding floors, so a plain gross-up
+   can land a smallest unit short, and the exact gross is found by binary search
+   over the withholding function, which steps monotonically. The reported
+   figures are Tool 2's own swap run at the solved gross, so the two tools can
+   never disagree; flooring can deliver a few smallest units MORE than the
+   target, reported as the excess, never hidden. A target at or beyond the
+   whole output reserve is rejected: a constant-product pool can never pay out
+   its entire reserve, however much is offered. */
+function cpSwapExactOut(reserveInStr, reserveOutStr, amountOutStr, feeBpsStr) {
+  var rIn = parseScaled(reserveInStr);
+  var rOut = parseScaled(reserveOutStr);
+  var aOut = parseScaled(amountOutStr);
+  var fS = parseScaled(feeBpsStr);
+  if (rIn === null || rOut === null || aOut === null || fS === null) return null;
+  if (rIn <= 0n || rOut <= 0n || aOut <= 0n || aOut >= rOut) return null;
+  if (fS % SCALE !== 0n) return null;
+  var f = Number(fS / SCALE);
+  if (!Number.isInteger(f) || f < 0 || f >= 10000) return null;
+  var denom = rOut - aOut;
+  var netIn = (aOut * rIn + denom - 1n) / denom;
+  var lo = netIn;
+  var hi = f === 0 ? netIn : (netIn * 10000n + BigInt(10000 - f) - 1n) / BigInt(10000 - f);
+  var effOf = function (g) { return g - (g * BigInt(f)) / 10000n; };
+  while (lo < hi) {
+    var mid = (lo + hi) / 2n;
+    if (effOf(mid) >= netIn) hi = mid; else lo = mid + 1n;
+  }
+  var actual = cpSwap(reserveInStr, reserveOutStr, formatScaled(lo), f);
+  if (actual === null) return null;
+  var actualOut = parseScaled(actual.amountOut);
+  return {
+    reserveIn: formatScaled(rIn), reserveOut: formatScaled(rOut),
+    amountOut: formatScaled(aOut), feeBps: f,
+    netIn: formatScaled(netIn),
+    amountIn: formatScaled(lo), fee: actual.fee, effectiveIn: actual.effectiveIn,
+    actualOut: actual.amountOut, excessOut: formatScaled(actualOut - aOut),
+    priceImpactPct: actual.priceImpactPct
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2323,7 +2371,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpPosition, MAX_PERP_LEVERAGE,
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
-    routeSwap,
+    routeSwap, cpSwapExactOut,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3144,6 +3192,24 @@ if (typeof document !== "undefined") {
       document.getElementById("route-out").value = res.amountOut;
       document.getElementById("route-spot-out").value = res.spotOut;
       setText("route-result", "Model output: hop 1 takes " + res.amountIn + " in, withholds a fee of " + res.hop1Fee + " (at " + res.fee1Bps + " bps) and swaps the remaining " + res.hop1EffectiveIn + " for " + res.midAmount + " of the intermediate token (a price impact of " + res.hop1PriceImpactPct.toFixed(4) + "% on that hop). Hop 2 swaps the full " + res.midAmount + " onward: it withholds " + res.hop2Fee + " of the intermediate token (at " + res.fee2Bps + " bps) and returns " + res.amountOut + " of the final token (a price impact of " + res.hop2PriceImpactPct.toFixed(4) + "% on that hop) - an effective price of " + res.effectivePrice + " final per unit in. At the pools' quoted spot prices the same route would be worth " + res.spotOut + ", so the two fees and the two impacts together cost " + res.totalCostBps + " bps of the spot value: routing costs compound across hops, which is why an aggregator compares routes instead of assuming one. This is the two-hop constant-product route model: both hops are the hub's Tool 2 swap, longer routes, split routes across several pools, concentrated-liquidity hops and any aggregator or interface fee a venue adds on top are not modelled, and no live pool is read. An educational model of a routed swap, not a live quote. Not financial advice.");
+    });
+
+    var xoForm = document.getElementById("xo-calc");
+    if (xoForm) xoForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = cpSwapExactOut(val("xo-rin"), val("xo-rout"), val("xo-aout"), val("xo-fee"));
+      if (res === null) {
+        document.getElementById("xo-in-out").value = "Invalid";
+        document.getElementById("xo-actual-out").value = "Invalid";
+        setText("xo-result", "Check the inputs: both reserves and the amount out must be above zero (amounts may have up to 9 decimal places), the amount out must be less than the pool's whole output reserve - a constant-product pool can never pay out its entire reserve - and the fee is a whole number of basis points from 0 up to (but not including) 10,000.");
+        return;
+      }
+      document.getElementById("xo-in-out").value = res.amountIn;
+      document.getElementById("xo-actual-out").value = res.actualOut;
+      var excessNote = res.excessOut === "0"
+        ? " The pool delivers exactly the target at this scale."
+        : " The pool's flooring delivers " + res.excessOut + " more than the target - the smallest gross input that reaches the target cannot land on it exactly at this scale, and the excess is reported, not hidden.";
+      setText("xo-result", "Model output: to receive " + res.amountOut + " out of a pool holding " + res.reserveIn + " / " + res.reserveOut + ", the pool must receive " + res.netIn + " after the fee, so at " + res.feeBps + " bps you pay " + res.amountIn + " in: the pool withholds a fee of " + res.fee + ", swaps the remaining " + res.effectiveIn + " and pays out " + res.actualOut + " (a price impact of " + res.priceImpactPct.toFixed(4) + "% on the swap leg)." + excessNote + " The input grows without bound as the target approaches the whole output reserve, which is why a large exact-out order against a shallow pool costs so much more than its spot value. This is the exact-out constant-product model: the solved input is the smallest one that reaches the target under the hub's Tool 2 swap, CLMM exact-out (which walks ticks instead) and any interface fee a venue adds on top are not modelled, and no live pool is read. An educational model of an exact-out swap, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

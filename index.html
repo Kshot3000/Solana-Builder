@@ -1616,6 +1616,41 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>40. Exact-out swap model - what receiving an exact amount costs</h3>
+      <p>Tool 2 prices a swap by what you put in; an <strong>exact-out</strong> order fixes the other end - the payment, invoice or arbitrage leg that must receive an exact amount - and asks what it costs to get it. Work backwards: the pool must receive <strong>amountOut &#215; reserveIn &#247; (reserveOut &#8722; amountOut)</strong>, ceilinged at the smallest unit, and your gross input is the smallest amount whose fee withholding still leaves that net, which is why it sits slightly above a plain gross-up (the withholding itself floors). The headline pool - <strong>1,000,000 / 1,000,000</strong> at <strong>25 bps</strong> - delivers exactly <strong>100,000 out</strong> for <strong>111,389.585073796 in</strong>: at spot prices that output is worth 100,000, so the fee (278.473962684) and the price impact together take the rest. Push the target toward the whole reserve and the cost explodes - receiving 999 of a 1,000 / 1,000 pool costs 1,001,503.759398496 in - and a target at or beyond the whole output reserve is rejected outright: a constant-product pool can never pay it out, however much is offered. Where flooring delivers a few smallest units more than the target, the excess is shown, never hidden. Exact scaled-BigInt throughout. An educational model of an exact-out swap, not a live quote. Not financial advice.</p>
+      <form id="xo-calc">
+        <div class="grid">
+          <div>
+            <label for="xo-rin">Pool reserve of the token you pay</label>
+            <input id="xo-rin" name="xo-rin" value="1000000">
+          </div>
+          <div>
+            <label for="xo-rout">Pool reserve of the token you receive</label>
+            <input id="xo-rout" name="xo-rout" value="1000000">
+          </div>
+          <div>
+            <label for="xo-aout">Exact amount out you must receive</label>
+            <input id="xo-aout" name="xo-aout" value="100000">
+          </div>
+          <div>
+            <label for="xo-fee">Swap fee, whole basis points (charged on the input)</label>
+            <input id="xo-fee" name="xo-fee" value="25">
+          </div>
+          <div>
+            <label for="xo-in-out">Amount in you must pay (model)</label>
+            <input id="xo-in-out" name="xo-in-out" readonly>
+          </div>
+          <div>
+            <label for="xo-actual-out">Amount the pool actually pays out at that input (model)</label>
+            <input id="xo-actual-out" name="xo-actual-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Solve the exact-out swap</button>
+        <p class="result" id="xo-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1758,6 +1793,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=36"></script>
+<script src="app.js?v=37"></script>
 </body>
 </html>
