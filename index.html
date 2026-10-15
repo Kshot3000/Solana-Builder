@@ -1429,6 +1429,56 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>36. Perpetual position margin, PnL &amp; liquidation price</h3>
+      <p>A perpetual position is judged on its <strong>margin</strong>, not its size: at <strong>leverage</strong> L you post <strong>initial margin = notional ÷ leverage</strong>, your <strong>unrealised PnL</strong> is (mark − entry) × size for a long (mirrored for a short), and your <strong>equity</strong> is margin + PnL. The venue liquidates when equity falls to the <strong>maintenance margin</strong> — a rate (an input here: every venue sets its own, often tiered by size) times the <em>current</em> notional — which is why liquidation strikes while money still remains: the headline long of <strong>100 units at 150, 10x leverage, a 500 bps maintenance rate</strong> posts <strong>1,500</strong> of margin and is liquidated at <strong>142.105263157</strong>, a fall of only about 5.26%, even though its margin would not reach zero until 135. At a mark of 180 the same position shows a PnL of <strong>3,000</strong> — +200% on its margin for a +20% price move: leverage multiplies the return on margin by exactly the leverage, in both directions. A long at leverage 1 or below has <strong>no liquidation price</strong> at all — its margin covers the whole notional, so no fall can reach the line. This is the isolated-margin model: cross margin, funding payments (Tool 34), trading fees, partial liquidation and any liquidation penalty are not modelled, and no live market is read. An educational model of perpetual position margin, not a live quote. Not financial advice.</p>
+      <form id="ppos-calc">
+        <div class="grid">
+          <div>
+            <label for="ppos-side">Position side</label>
+            <select id="ppos-side" name="ppos-side">
+              <option value="long" selected>Long — profits when the mark rises</option>
+              <option value="short">Short — profits when the mark falls</option>
+            </select>
+          </div>
+          <div>
+            <label for="ppos-size">Position size (base units, e.g. SOL)</label>
+            <input id="ppos-size" name="ppos-size" value="100">
+          </div>
+          <div>
+            <label for="ppos-entry">Entry price (quote currency per base unit)</label>
+            <input id="ppos-entry" name="ppos-entry" value="150">
+          </div>
+          <div>
+            <label for="ppos-mark">Mark price to judge the position at (quote currency per base unit)</label>
+            <input id="ppos-mark" name="ppos-mark" value="180">
+          </div>
+          <div>
+            <label for="ppos-leverage">Leverage (initial margin = notional ÷ leverage)</label>
+            <input id="ppos-leverage" name="ppos-leverage" value="10">
+          </div>
+          <div>
+            <label for="ppos-mmr">Maintenance margin rate, basis points of the current notional (the venue's input)</label>
+            <input id="ppos-mmr" name="ppos-mmr" value="500">
+          </div>
+          <div>
+            <label for="ppos-margin-out">Initial margin posted (model)</label>
+            <input id="ppos-margin-out" name="ppos-margin-out" readonly>
+          </div>
+          <div>
+            <label for="ppos-pnl-out">Unrealised PnL at the mark: positive profits, negative loses (model)</label>
+            <input id="ppos-pnl-out" name="ppos-pnl-out" readonly>
+          </div>
+          <div>
+            <label for="ppos-liq-out">Liquidation price (model)</label>
+            <input id="ppos-liq-out" name="ppos-liq-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Judge the position</button>
+        <p class="result" id="ppos-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1543,6 +1593,7 @@
       <li><strong>Price a launchpad token off its virtual reserves, not its vault</strong> (Tool 33 above): a bonding curve's price is virtual SOL ÷ virtual token on a constant-product curve — the virtual SOL is a pricing offset, while the SOL the curve actually holds is the real raised figure that counts toward graduation. Every buy moves the price along the curve (3 SOL into the headline curve receives 90,081,892.62966333 tokens and lifts the price 20.78%), and at graduation the real SOL and unsold tokens migrate to an AMM at a continuous price but with the virtual depth left behind.</li>
       <li><strong>Price the funding before the leverage</strong> (Tool 34 above): a perpetual charges (or pays) funding every interval — payment = notional × rate × time, longs paying shorts at a positive rate and shorts paying longs at a negative one. A 100-unit long at 150 pays 1.5 per hour at just 1 bp per hour — 36 over a day — and that rate annualises to 87.6%, so a funding rate that looks like a rounding error is a real carry cost on any hold longer than a scalp; the rate resets every interval, which is why the annualised figure is a quote, never a forecast.</li>
       <li><strong>Read a lending rate off its curve, not its headline</strong> (Tool 35 above): a borrow rate is a kinked function of utilization — borrowed ÷ supplied — climbing gently to the optimal utilization, then steeply past it, and suppliers earn the borrow rate × utilization × (1 − reserve factor). A market at exactly its 80% kink with a 2% base and 4% first slope charges 6% and pays suppliers 4.32%; the same market at 90% charges 36%. A quoted supply yield is only as durable as the utilization under it, and every parameter is governance-set, so check the curve before trusting either rate.</li>
+      <li><strong>Judge a perp by its liquidation price, not its leverage alone</strong> (Tool 36 above): equity = margin + PnL is liquidated when it falls to the maintenance margin — a venue-set rate times the current notional — so a 10x long at a 500 bps maintenance rate liquidates on a fall of only about 5.26%, while equity still remains; the same leverage multiplies your return on margin exactly, in both directions. Funding (Tool 34) is the carry on top of this, and no leverage at or below 1x has a liquidation price at all.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1569,6 +1620,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=32"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

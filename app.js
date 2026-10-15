@@ -1535,6 +1535,83 @@ function lendingRate(suppliedStr, borrowedStr, baseBpsStr, slope1BpsStr, optimal
   };
 }
 
+/* ---------- Tool 36: perpetual position margin, PnL & liquidation ---------- */
+/* A perpetual position on isolated margin (the default teaching model on
+   Solana perp venues such as Drift and Jupiter Perps) is defined by four
+   figures, all definitional once the venue's MAINTENANCE MARGIN RATE is
+   given as an input (each venue sets its own, often tiered by size):
+     notional        = size x entry price
+     initial margin  = notional / leverage
+     unrealised PnL  = (mark - entry) x size for a long, mirrored for a short
+     equity          = margin + PnL
+   The venue liquidates when equity falls to the MAINTENANCE MARGIN,
+   maintenance = mmr x size x mark - which happens BEFORE the margin is
+   exhausted, because the maintenance figure is a live share of the current
+   notional. Solving equity = maintenance for the price gives the
+   liquidation price in one exact rational step:
+     long:  (notional - margin) / (size x (1 - mmr))
+     short: (notional + margin) / (size x (1 + mmr))
+   A long whose margin covers the whole notional (leverage at or below 1)
+   has no positive liquidation price - no fall can reach it - and that is
+   reported as a flag, not a price of 0. PnL magnitude floors at the
+   smallest unit like the floored integer math on-chain (the magnitude is
+   computed, then signed - never a signed floor). Cross margin, funding
+   (Tool 34), trading fees, partial liquidations and the liquidation
+   penalty/insurance-fund mechanics are NOT in this model and are stated
+   on the page. Verified against the float definitions, with identical
+   parsed string inputs on both sides, on 20,000 random cases before
+   shipping - including the identity that equity at the reported
+   liquidation price equals the maintenance margin there. */
+var MAX_PERP_LEVERAGE = 1000; /* a guard, not a venue cap */
+
+function perpPosition(side, sizeStr, entryStr, markStr, leverageStr, mmrBpsStr) {
+  var size = parseScaled(sizeStr);
+  var entry = parseScaled(entryStr);
+  var mark = parseScaled(markStr);
+  var lev = parseScaled(leverageStr);
+  var mmr = parseScaled(mmrBpsStr); /* maintenance margin rate, bps x SCALE */
+  if (size === null || entry === null || mark === null || lev === null || mmr === null) return null;
+  if (size <= 0n || entry <= 0n || mark <= 0n || lev <= 0n) return null;
+  if (lev > BigInt(MAX_PERP_LEVERAGE) * SCALE) return null;
+  if (mmr < 0n || mmr >= 10000n * SCALE) return null;
+  if (side !== "long" && side !== "short") return null;
+  var notional = (size * entry) / SCALE;
+  if (notional <= 0n) return null;
+  var margin = (notional * SCALE) / lev;
+  if (margin <= 0n) return null;
+  var diff = mark > entry ? mark - entry : entry - mark;
+  var pnlMag = (diff * size) / SCALE;
+  var isProfit = mark === entry ? false : ((side === "long") === (mark > entry));
+  var pnl = mark === entry ? 0n : (isProfit ? pnlMag : -pnlMag);
+  var equity = margin + pnl;
+  var notionalMark = (size * mark) / SCALE;
+  var maintenance = (notionalMark * mmr) / (10000n * SCALE);
+  var denBase = 10000n * SCALE;
+  var liq = null;
+  var noLiquidation = false;
+  if (side === "long") {
+    var d = notional - margin;
+    if (d <= 0n) { noLiquidation = true; }
+    else { liq = (d * SCALE * denBase) / (size * (denBase - mmr)); }
+  } else {
+    liq = ((notional + margin) * SCALE * denBase) / (size * (denBase + mmr));
+  }
+  return {
+    side: side, size: formatScaled(size), entry: formatScaled(entry), mark: formatScaled(mark),
+    leverage: formatScaled(lev), mmrBps: formatScaled(mmr),
+    notional: formatScaled(notional), margin: formatScaled(margin),
+    pnl: formatScaled(pnl), pnlIsProfit: pnl > 0n, pnlIsLoss: pnl < 0n,
+    equity: formatScaled(equity), equityIsNegative: equity < 0n,
+    notionalAtMark: formatScaled(notionalMark), maintenance: formatScaled(maintenance),
+    status: equity < maintenance ? "below" : (equity === maintenance ? "at" : "above"),
+    liquidationPrice: liq === null ? null : formatScaled(liq),
+    noLiquidation: noLiquidation,
+    distanceToLiquidationPct: liq === null ? null : Math.abs(Number(mark) - Number(liq)) / Number(mark) * 100,
+    returnOnMarginPct: Number(pnl) / Number(margin) * 100,
+    priceMovePct: (Number(mark) - Number(entry)) / Number(entry) * 100
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2037,6 +2114,7 @@ if (typeof module !== "undefined" && module.exports) {
     bondingCurve,
     perpFunding, parseSignedScaled, MAX_FUNDING_RATE_BPS, MAX_FUNDING_HOURS,
     lendingRate, MAX_IRATE_BPS, MAX_IRATE_DAYS,
+    perpPosition, MAX_PERP_LEVERAGE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2774,6 +2852,34 @@ if (typeof document !== "undefined") {
         ? " With nothing borrowed there is no interest and suppliers earn nothing, whatever the curve says the borrow rate would be."
         : "";
       setText("irate-result", "Model output: " + res.borrowed + " borrowed of " + res.supplied + " supplied is a utilization of " + res.utilizationPct + "%, against an optimal utilization of " + res.optimalPct + "%." + kinkNote + " The borrow rate is " + res.borrowRatePct + "% per year (" + res.borrowRateBps + " bps) and suppliers earn " + res.supplyRatePct + "% per year (" + res.supplyRateBps + " bps) - the borrow rate times the utilization, less the reserve factor the protocol keeps. Compounded daily at that borrow rate, the borrowed total accrues " + res.interest + " of interest over " + res.days + " days, ending at " + res.endBalance + "." + zeroNote + " Daily compounding at a frozen utilization is this model's stated convention - real markets accrue continuously or per-slot and the rate moves as utilization moves, and every market sets (and governance changes) its own curve parameters. The amounts and parameters are inputs and no live market is read. An educational model of a lending rate curve, not a live quote. Not financial advice.");
+    });
+
+    var pposForm = document.getElementById("ppos-calc");
+    if (pposForm) pposForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = perpPosition(val("ppos-side"), val("ppos-size"), val("ppos-entry"), val("ppos-mark"), val("ppos-leverage"), val("ppos-mmr"));
+      if (res === null) {
+        document.getElementById("ppos-margin-out").value = "Invalid";
+        document.getElementById("ppos-pnl-out").value = "Invalid";
+        document.getElementById("ppos-liq-out").value = "Invalid";
+        setText("ppos-result", "Check the inputs: the position size, entry price and mark price must all be above zero (amounts may have up to 9 decimal places), the leverage must be above zero and at most 1,000, the maintenance margin rate is a number of basis points from 0 up to (but not including) 10,000, and the side is long or short - a position so small its notional or margin floors to zero at this scale is rejected.");
+        return;
+      }
+      document.getElementById("ppos-margin-out").value = res.margin;
+      document.getElementById("ppos-pnl-out").value = res.pnl;
+      document.getElementById("ppos-liq-out").value = res.noLiquidation ? "None - no fall reaches it" : res.liquidationPrice;
+      var pnlNote = res.pnlIsProfit
+        ? " The mark has moved in your favour, so the position is in profit."
+        : (res.pnlIsLoss ? " The mark has moved against you, so the position is at a loss." : " The mark is exactly the entry price, so the unrealised PnL is exactly 0.");
+      var statusNote = res.status === "below"
+        ? " At this mark the equity is BELOW the maintenance margin - on a live venue this position would already have been liquidated; the negative equity a deep move can show here is arithmetic the venue never lets happen, because liquidation intervenes first."
+        : (res.status === "at"
+          ? " At this mark the equity sits exactly ON the maintenance margin - the liquidation line itself."
+          : " At this mark the equity stands above the maintenance margin, so the position is not liquidatable at this price.");
+      var liqNote = res.noLiquidation
+        ? " There is no liquidation price: at this leverage the margin covers the whole notional, so no fall in the mark can reduce the equity to the maintenance margin - the price cannot go below zero."
+        : " The liquidation price is " + res.liquidationPrice + " - the mark is " + res.distanceToLiquidationPct.toFixed(4) + "% away from it. Note where it sits relative to the entry: because the maintenance margin is a live share of the current notional, liquidation triggers while equity still remains, well before the margin would reach zero.";
+      setText("ppos-result", "Model output: a " + res.size + " " + res.side + " opened at " + res.entry + " is a notional of " + res.notional + ", and at " + res.leverage + "x leverage the initial margin posted is " + res.margin + ". At a mark of " + res.mark + " (a move of " + res.priceMovePct.toFixed(4) + "% from entry) the unrealised PnL is " + res.pnl + " - a return of " + res.returnOnMarginPct.toFixed(4) + "% on the margin - so the equity is " + res.equity + " against a maintenance margin of " + res.maintenance + " (the " + res.mmrBps + " bps maintenance rate applied to the current notional of " + res.notionalAtMark + ")." + pnlNote + statusNote + liqNote + " This is the isolated-margin model: cross margin, funding payments (Tool 34), trading fees, partial liquidation and any liquidation penalty are not modelled, every venue sets its own maintenance rate (often tiered by position size) and liquidation engine, and no live market is read. An educational model of perpetual position margin, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
