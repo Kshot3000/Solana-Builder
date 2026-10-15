@@ -1866,6 +1866,53 @@ function cpSwapExactOut(reserveInStr, reserveOutStr, amountOutStr, feeBpsStr) {
   };
 }
 
+/* ---------- Tool 41: arbitrage profit model ---------- */
+/* A constant-product pool never learns the outside price by itself: an
+   arbitrageur who can sell the output token elsewhere at an external price
+   (quoted here in input per output, an input) buys it from the pool while
+   the pool's price is lower, and the trade itself pushes the pool's price
+   up toward the external one. The swap leg is Tool 2's own cpSwap, so the
+   tools cannot disagree; the output is then valued at the external price
+   floored once in exact BigInt, and the profit is that value minus the
+   gross input - signed, because a trade past the alignment point, or one
+   against a gap the fee and impact already eat, loses money. The post-trade
+   spot price (reserveIn + effectiveIn) / (reserveOut - amountOut), floored,
+   shows where the trade leaves the pool's price: short of the external
+   price when the fee closes the gap early, past it when the trade
+   overshoots. One direction only - buying the output token from this pool
+   to resell at the external price; the mirrored trade is the same model
+   with the tokens swapped. The external sale is assumed to fill in full at
+   exactly the quoted price: no external fee, slippage, gas or priority fee
+   is modelled, and no live price or pool is read. */
+function arbitrageTrade(reserveInStr, reserveOutStr, amountInStr, feeBpsStr, externalPriceStr) {
+  var rIn = parseScaled(reserveInStr);
+  var rOut = parseScaled(reserveOutStr);
+  var aIn = parseScaled(amountInStr);
+  var fS = parseScaled(feeBpsStr);
+  var px = parseScaled(externalPriceStr);
+  if (rIn === null || rOut === null || aIn === null || fS === null || px === null) return null;
+  if (rIn <= 0n || rOut <= 0n || aIn <= 0n || px <= 0n) return null;
+  if (fS % SCALE !== 0n) return null;
+  var f = Number(fS / SCALE);
+  if (!Number.isInteger(f) || f < 0 || f >= 10000) return null;
+  var swap = cpSwap(reserveInStr, reserveOutStr, amountInStr, f);
+  if (swap === null) return null;
+  var out = parseScaled(swap.amountOut);
+  var eff = parseScaled(swap.effectiveIn);
+  var value = (out * px) / SCALE;
+  var profit = value - aIn;
+  return {
+    reserveIn: formatScaled(rIn), reserveOut: formatScaled(rOut),
+    amountIn: formatScaled(aIn), feeBps: f, externalPrice: formatScaled(px),
+    spotPrice: formatScaled((rIn * SCALE) / rOut),
+    fee: swap.fee, effectiveIn: swap.effectiveIn, amountOut: swap.amountOut,
+    externalValue: formatScaled(value), profit: formatScaled(profit),
+    profitable: profit > 0n,
+    postSpotPrice: formatScaled(((rIn + eff) * SCALE) / (rOut - out)),
+    priceImpactPct: swap.priceImpactPct
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2371,7 +2418,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpPosition, MAX_PERP_LEVERAGE,
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
-    routeSwap, cpSwapExactOut,
+    routeSwap, cpSwapExactOut, arbitrageTrade,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3210,6 +3257,24 @@ if (typeof document !== "undefined") {
         ? " The pool delivers exactly the target at this scale."
         : " The pool's flooring delivers " + res.excessOut + " more than the target - the smallest gross input that reaches the target cannot land on it exactly at this scale, and the excess is reported, not hidden.";
       setText("xo-result", "Model output: to receive " + res.amountOut + " out of a pool holding " + res.reserveIn + " / " + res.reserveOut + ", the pool must receive " + res.netIn + " after the fee, so at " + res.feeBps + " bps you pay " + res.amountIn + " in: the pool withholds a fee of " + res.fee + ", swaps the remaining " + res.effectiveIn + " and pays out " + res.actualOut + " (a price impact of " + res.priceImpactPct.toFixed(4) + "% on the swap leg)." + excessNote + " The input grows without bound as the target approaches the whole output reserve, which is why a large exact-out order against a shallow pool costs so much more than its spot value. This is the exact-out constant-product model: the solved input is the smallest one that reaches the target under the hub's Tool 2 swap, CLMM exact-out (which walks ticks instead) and any interface fee a venue adds on top are not modelled, and no live pool is read. An educational model of an exact-out swap, not a live quote. Not financial advice.");
+    });
+
+    var arbForm = document.getElementById("arb-calc");
+    if (arbForm) arbForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = arbitrageTrade(val("arb-rin"), val("arb-rout"), val("arb-ain"), val("arb-fee"), val("arb-price"));
+      if (res === null) {
+        document.getElementById("arb-out-out").value = "Invalid";
+        document.getElementById("arb-profit-out").value = "Invalid";
+        setText("arb-result", "Check the inputs: both reserves, the amount in and the external price must be above zero (amounts and the price may have up to 9 decimal places), the fee is a whole number of basis points from 0 up to (but not including) 10,000, and the trade must be large enough for the pool to pay out at least one smallest unit.");
+        return;
+      }
+      document.getElementById("arb-out-out").value = res.amountOut;
+      document.getElementById("arb-profit-out").value = res.profit;
+      var verdict = res.profitable
+        ? "the trade profits by " + res.profit + " of the input token before any external cost"
+        : "the trade does not profit - it returns " + res.profit + " of the input token, because the fee and the price impact together eat the gap";
+      setText("arb-result", "Model output: the pool starts at a spot price of " + res.spotPrice + " input per output against an external price of " + res.externalPrice + ". Swapping " + res.amountIn + " in withholds a fee of " + res.fee + " (at " + res.feeBps + " bps), swaps the remaining " + res.effectiveIn + " and pays out " + res.amountOut + " (a price impact of " + res.priceImpactPct.toFixed(4) + "%). Sold at the external price that output is worth " + res.externalValue + ", so " + verdict + ". The trade leaves the pool's spot price at " + res.postSpotPrice + " - short of the external price when the fee closes the remaining gap, past it when the trade overshoots the alignment point, which is why the profitable size is the one that stops at alignment, not the largest one. This is the arbitrage model: the swap leg is the hub's Tool 2 swap, the external sale is assumed to fill in full at exactly the quoted price with no external fee, slippage, gas or priority fee modelled, the mirrored direction (selling into this pool) is the same model with the tokens swapped, and no live price or pool is read. An educational model of an arbitrage trade, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
