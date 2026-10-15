@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, stableswap pools — the Curve-style invariant behind stable pools, its invariant D and post-trade balance solved by integer Newton iteration, the amplification coefficient that holds the price near 1:1 while the pool stays balanced and bends back toward constant-product pricing as it unbalances, with the swap fee charged on the output, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1479,6 +1479,49 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>37. Stableswap swap model — the invariant that prices stable pools near 1:1</h3>
+      <p>Pools of like-valued tokens (a USDC/USDT pair) do not use the constant-product curve of Tool 2 — that curve prices every pool as if its tokens could diverge, and charges for it. A <strong>stableswap</strong> pool (the Curve-style invariant behind Saber and other stable pools on Solana) blends a constant-sum line with constant-product: its <strong>invariant D</strong> is solved from the balances and an <strong>amplification coefficient A</strong> — as A grows the price holds near <strong>1:1</strong> while the pool stays balanced, and as the pool unbalances (or A falls) the curve bends back toward constant-product pricing. The headline pool of <strong>1,000,000 / 1,000,000 at A = 100</strong> has D = <strong>2,000,000</strong> and returns a 10,000 trade at <strong>9,999.502463058 gross</strong> — a price impact of under 0.005%, against 9,900 on the constant-product curve — before its 4 bps fee, charged on the output, leaves <strong>9,995.502662073</strong>. Unbalance the same pool to 1,500,000 / 500,000 and the trade returns 9,910.453997586 gross: the curve defends the peg only while liquidity backs it. D and the post-trade balance have no closed form, so both are solved by integer Newton iteration in exact BigInt — the method the on-chain programs themselves use, which can sit a few smallest units from the real-valued curve on extreme inputs. Both tokens are treated at the same decimals, the stable-pool case. An educational model of a stableswap pool, not a live quote. Not financial advice.</p>
+      <form id="stab-calc">
+        <div class="grid">
+          <div>
+            <label for="stab-x">Pool balance of the token you trade in</label>
+            <input id="stab-x" name="stab-x" value="1000000">
+          </div>
+          <div>
+            <label for="stab-y">Pool balance of the token you receive</label>
+            <input id="stab-y" name="stab-y" value="1000000">
+          </div>
+          <div>
+            <label for="stab-amp">Amplification coefficient A (whole number — higher holds the price nearer 1:1)</label>
+            <input id="stab-amp" name="stab-amp" value="100">
+          </div>
+          <div>
+            <label for="stab-dx">Amount in</label>
+            <input id="stab-dx" name="stab-dx" value="10000">
+          </div>
+          <div>
+            <label for="stab-fee">Swap fee, basis points of the output (the venue's input)</label>
+            <input id="stab-fee" name="stab-fee" value="4">
+          </div>
+          <div>
+            <label for="stab-d-out">Invariant D — the pool's total value at the peg (model)</label>
+            <input id="stab-d-out" name="stab-d-out" readonly>
+          </div>
+          <div>
+            <label for="stab-net-out">Amount you receive, after the fee (model)</label>
+            <input id="stab-net-out" name="stab-net-out" readonly>
+          </div>
+          <div>
+            <label for="stab-price-out">Effective price received per unit in (model)</label>
+            <input id="stab-price-out" name="stab-price-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the stableswap trade</button>
+        <p class="result" id="stab-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1594,6 +1637,7 @@
       <li><strong>Price the funding before the leverage</strong> (Tool 34 above): a perpetual charges (or pays) funding every interval — payment = notional × rate × time, longs paying shorts at a positive rate and shorts paying longs at a negative one. A 100-unit long at 150 pays 1.5 per hour at just 1 bp per hour — 36 over a day — and that rate annualises to 87.6%, so a funding rate that looks like a rounding error is a real carry cost on any hold longer than a scalp; the rate resets every interval, which is why the annualised figure is a quote, never a forecast.</li>
       <li><strong>Read a lending rate off its curve, not its headline</strong> (Tool 35 above): a borrow rate is a kinked function of utilization — borrowed ÷ supplied — climbing gently to the optimal utilization, then steeply past it, and suppliers earn the borrow rate × utilization × (1 − reserve factor). A market at exactly its 80% kink with a 2% base and 4% first slope charges 6% and pays suppliers 4.32%; the same market at 90% charges 36%. A quoted supply yield is only as durable as the utilization under it, and every parameter is governance-set, so check the curve before trusting either rate.</li>
       <li><strong>Judge a perp by its liquidation price, not its leverage alone</strong> (Tool 36 above): equity = margin + PnL is liquidated when it falls to the maintenance margin — a venue-set rate times the current notional — so a 10x long at a 500 bps maintenance rate liquidates on a fall of only about 5.26%, while equity still remains; the same leverage multiplies your return on margin exactly, in both directions. Funding (Tool 34) is the carry on top of this, and no leverage at or below 1x has a liquidation price at all.</li>
+      <li><strong>Stable pools price off an invariant, not x × y = k</strong> (Tool 37 above): a stableswap pool's amplification coefficient holds the price near 1:1 while the pool stays balanced — a balanced 1,000,000 / 1,000,000 pool at A = 100 returns a 10,000 trade at 9,999.502463058, where constant-product returns 9,900 — but unbalance the pool and the same curve bends back toward constant-product pricing. The peg is defended by balanced liquidity, never guaranteed by the formula.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1620,6 +1664,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=33"></script>
+<script src="app.js?v=34"></script>
 </body>
 </html>

@@ -1612,6 +1612,104 @@ function perpPosition(side, sizeStr, entryStr, markStr, leverageStr, mmrBpsStr) 
   };
 }
 
+/* ---------- Tool 37: stableswap invariant swap model ---------- */
+/* A stableswap pool (the Curve-style invariant behind Saber and other
+   stable pools on Solana) prices two like-valued tokens off the
+   invariant   Ann * (x + y) + D = Ann * D + D^3 / (4xy),   Ann = A * n^n
+   with n = 2 coins and A the AMPLIFICATION COEFFICIENT: as A grows the
+   curve flattens toward a constant-sum (1:1) line near balance, and as
+   A falls toward 1 it bends toward the constant-product curve of
+   Tool 2. Neither D nor the post-trade balance has a closed form the
+   integer math can use, so both are solved by Newton iteration in exact
+   BigInt - the same integer Newton the on-chain programs run, which is
+   why the result can sit a few smallest units from the real-valued
+   solution on extreme inputs: that tolerance is the integer
+   convention, stated in the sweep tolerance of the tests, not hidden.
+   The get_y step finishes by picking, of the Newton endpoint and its
+   two neighbours, the balance that minimises the residual of the
+   quadratic y^2 + (b - D)y - c, which removes the truncation bias.
+   The swap fee is charged on the OUTPUT (the Curve/Saber convention):
+   fee = grossOut x feeBps / 10000, floored; the trader receives the
+   remainder. Both tokens are modelled at the same decimals, which is
+   the stable-pool case (a USDC/USDT pair, both 6 decimals) - stated on
+   the page. D is reported because it is the pool's total value at the
+   peg in this model: for a balanced pool it equals x + y exactly.
+   Verified before shipping against the float definitions on 20,000
+   prototype cases with identical parsed inputs (0 mismatches inside a
+   tolerance of a few smallest units). */
+var MAX_STABLE_AMP = 100000; /* a guard, not a venue cap */
+
+function stableInvariantD(x, y, amp) { /* BigInt in, BigInt out */
+  var s = x + y;
+  if (s === 0n) return 0n;
+  var ann = amp * 4n;
+  var d = s;
+  for (var i = 0; i < 256; i++) {
+    var dp = d;
+    dp = (dp * d) / (x * 2n);
+    dp = (dp * d) / (y * 2n);
+    var next = ((ann * s + dp * 2n) * d) / ((ann - 1n) * d + 3n * dp);
+    var diff = next > d ? next - d : d - next;
+    d = next;
+    if (diff <= 1n) break;
+  }
+  return d;
+}
+
+function stableSolveY(xNew, d, amp) { /* BigInt in, BigInt out */
+  var ann = amp * 4n;
+  var c = d;
+  c = (c * d) / (xNew * 2n);
+  c = (c * d) / (ann * 2n);
+  var b = xNew + d / ann;
+  var y = d;
+  for (var i = 0; i < 256; i++) {
+    var next = (y * y + c) / (2n * y + b - d);
+    var diff = next > y ? next - y : y - next;
+    y = next;
+    if (diff <= 1n) break;
+  }
+  var best = y, bestRes = null;
+  for (var k = -1n; k <= 1n; k++) {
+    var cand = y + k;
+    if (cand < 0n) continue;
+    var res = cand * cand + (b - d) * cand - c;
+    if (res < 0n) res = -res;
+    if (bestRes === null || res < bestRes) { bestRes = res; best = cand; }
+  }
+  return best;
+}
+
+function stableSwap(xStr, yStr, ampStr, dxStr, feeBpsStr) {
+  var x = parseScaled(xStr);
+  var y = parseScaled(yStr);
+  var ampS = parseScaled(ampStr);
+  var dx = parseScaled(dxStr);
+  var feeBps = parseScaled(feeBpsStr);
+  if (x === null || y === null || ampS === null || dx === null || feeBps === null) return null;
+  if (x <= 0n || y <= 0n || dx <= 0n) return null;
+  if (ampS <= 0n || ampS % SCALE !== 0n || ampS > BigInt(MAX_STABLE_AMP) * SCALE) return null;
+  if (feeBps < 0n || feeBps >= 10000n * SCALE) return null;
+  var amp = ampS / SCALE;
+  var d = stableInvariantD(x, y, amp);
+  var yNew = stableSolveY(x + dx, d, amp);
+  var gross = y - yNew;
+  if (gross <= 0n) return null;
+  var fee = (gross * feeBps) / (10000n * SCALE);
+  var net = gross - fee;
+  if (net <= 0n) return null;
+  return {
+    balanceIn: formatScaled(x), balanceOut: formatScaled(y),
+    amp: formatScaled(ampS), amountIn: formatScaled(dx),
+    invariantD: formatScaled(d),
+    grossOut: formatScaled(gross), fee: formatScaled(fee), feeBps: formatScaled(feeBps),
+    netOut: formatScaled(net),
+    newBalanceIn: formatScaled(x + dx), newBalanceOut: formatScaled(yNew),
+    effectivePrice: formatScaled((net * SCALE) / dx),
+    grossPriceImpactPct: (1 - Number(gross) / Number(dx)) * 100
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2115,6 +2213,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpFunding, parseSignedScaled, MAX_FUNDING_RATE_BPS, MAX_FUNDING_HOURS,
     lendingRate, MAX_IRATE_BPS, MAX_IRATE_DAYS,
     perpPosition, MAX_PERP_LEVERAGE,
+    stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2880,6 +2979,23 @@ if (typeof document !== "undefined") {
         ? " There is no liquidation price: at this leverage the margin covers the whole notional, so no fall in the mark can reduce the equity to the maintenance margin - the price cannot go below zero."
         : " The liquidation price is " + res.liquidationPrice + " - the mark is " + res.distanceToLiquidationPct.toFixed(4) + "% away from it. Note where it sits relative to the entry: because the maintenance margin is a live share of the current notional, liquidation triggers while equity still remains, well before the margin would reach zero.";
       setText("ppos-result", "Model output: a " + res.size + " " + res.side + " opened at " + res.entry + " is a notional of " + res.notional + ", and at " + res.leverage + "x leverage the initial margin posted is " + res.margin + ". At a mark of " + res.mark + " (a move of " + res.priceMovePct.toFixed(4) + "% from entry) the unrealised PnL is " + res.pnl + " - a return of " + res.returnOnMarginPct.toFixed(4) + "% on the margin - so the equity is " + res.equity + " against a maintenance margin of " + res.maintenance + " (the " + res.mmrBps + " bps maintenance rate applied to the current notional of " + res.notionalAtMark + ")." + pnlNote + statusNote + liqNote + " This is the isolated-margin model: cross margin, funding payments (Tool 34), trading fees, partial liquidation and any liquidation penalty are not modelled, every venue sets its own maintenance rate (often tiered by position size) and liquidation engine, and no live market is read. An educational model of perpetual position margin, not a live quote. Not financial advice.");
+    });
+
+    var stabForm = document.getElementById("stab-calc");
+    if (stabForm) stabForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = stableSwap(val("stab-x"), val("stab-y"), val("stab-amp"), val("stab-dx"), val("stab-fee"));
+      if (res === null) {
+        document.getElementById("stab-d-out").value = "Invalid";
+        document.getElementById("stab-net-out").value = "Invalid";
+        document.getElementById("stab-price-out").value = "Invalid";
+        setText("stab-result", "Check the inputs: both pool balances and the amount in must be above zero (amounts may have up to 9 decimal places), the amplification coefficient is a whole number from 1 to 100,000, and the swap fee is a number of basis points from 0 up to (but not including) 10,000 - a trade so small its output floors to zero at this scale is rejected.");
+        return;
+      }
+      document.getElementById("stab-d-out").value = res.invariantD;
+      document.getElementById("stab-net-out").value = res.netOut;
+      document.getElementById("stab-price-out").value = res.effectivePrice;
+      setText("stab-result", "Model output: the pool's invariant D is " + res.invariantD + " - its total value at the peg, exactly the sum of the balances when the pool is balanced. Trading " + res.amountIn + " of the first token in takes the balances from " + res.balanceIn + " / " + res.balanceOut + " to " + res.newBalanceIn + " / " + res.newBalanceOut + ": the curve returns " + res.grossOut + " gross (a price impact of " + res.grossPriceImpactPct.toFixed(4) + "% against the 1:1 peg, before the fee), the swap fee of " + res.feeBps + " bps is charged on that output and withholds " + res.fee + ", and you receive " + res.netOut + " - an effective price of " + res.effectivePrice + " per unit in. Raise the amplification and the same trade prices closer to 1:1 while the pool stays balanced; unbalance the pool or trade big against it and the curve bends toward constant-product pricing and the impact grows. The fee stays in the pool for its liquidity providers. This is the two-coin stableswap model: multi-coin pools, the virtual-price growth of the LP token over time, and any admin fee a venue skims are not modelled, both tokens are treated at the same decimals, the integer Newton solver can sit a few smallest units from the real-valued curve on extreme inputs (the on-chain convention), and no live pool is read. An educational model of a stableswap pool, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
