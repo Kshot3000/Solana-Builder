@@ -2218,6 +2218,57 @@ function dutchAuctionPrice(startStr, floorStr, durationSeconds, elapsedSeconds, 
   };
 }
 
+/* ---------- Tool 48: DAO governance quorum & approval ---------- */
+/* A token-governance proposal (Realms / SPL Governance and most DAO
+   frameworks on Solana) must clear TWO independent bars, and confusing
+   them is the classic misread of a vote tally:
+     (1) QUORUM - enough of the governing supply must participate at all:
+         votes cast (for + against + abstain) >= ceil(supply x quorumBps
+         / 10000). The requirement CEILINGS at the smallest unit, because
+         anything less is literally below the stated fraction of supply.
+     (2) APPROVAL - of the decisive votes, enough must be FOR:
+         for / (for + against) >= approvalBps / 10000, the share floored
+         at the smallest bp like an on-chain integer comparison.
+   ABSTAIN counts toward quorum (the holder showed up) but toward neither
+   side of approval - the convention modelled here, stated on the page;
+   frameworks that weigh abstain differently are not this model. Votes
+   cast cannot exceed the governing supply in a one-token-one-vote tally,
+   so a larger cast is rejected rather than quoted. A tally can clear
+   approval by a landslide and still FAIL on quorum - the headline does
+   exactly that. All amounts in exact scaled-BigInt; prototype-verified
+   before pinning: 20,000 cases, the ceiling/floor minimality properties
+   held in every case (quorumNeeded is the smallest amount whose fraction
+   of supply reaches the quorum, approvalBpsActual the largest whole bp
+   not exceeding the true for-share). */
+function govVote(supplyStr, forStr, againstStr, abstainStr, quorumBps, approvalBps) {
+  var supply = parseScaled(supplyStr), fv = parseScaled(forStr);
+  var av = parseScaled(againstStr), ab = parseScaled(abstainStr);
+  var q = Number(quorumBps), ap = Number(approvalBps);
+  if (supply === null || fv === null || av === null || ab === null) return null;
+  if (supply <= 0n) return null;
+  if (!Number.isInteger(q) || q < 0 || q > 10000) return null;
+  if (!Number.isInteger(ap) || ap < 1 || ap > 10000) return null;
+  var cast = fv + av + ab;
+  if (cast > supply) return null;
+  var quorumNeeded = (supply * BigInt(q) + 9999n) / 10000n;
+  var shortfall = quorumNeeded > cast ? quorumNeeded - cast : 0n;
+  var decided = fv + av;
+  var approvalActual = decided > 0n ? Number(fv * 10000n / decided) : null;
+  var quorumMet = cast >= quorumNeeded;
+  var approvalMet = approvalActual !== null && approvalActual >= ap;
+  return {
+    supply: formatScaled(supply), forVotes: formatScaled(fv),
+    againstVotes: formatScaled(av), abstainVotes: formatScaled(ab),
+    cast: formatScaled(cast), quorumBps: q, approvalBps: ap,
+    quorumNeeded: formatScaled(quorumNeeded),
+    quorumShortfall: formatScaled(shortfall),
+    turnoutBps: Number(cast * 10000n / supply),
+    approvalActualBps: approvalActual,
+    quorumMet: quorumMet, approvalMet: approvalMet,
+    passes: quorumMet && approvalMet
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2726,6 +2777,7 @@ if (typeof module !== "undefined" && module.exports) {
     routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap, orderBookBuy, twapOracle, MAX_TWAP_SECONDS, lpWithdraw,
     airdropCost, MAX_AIRDROP_RECIPIENTS, TOKEN_ACCOUNT_BYTES,
     dutchAuctionPrice, MAX_DUTCH_DURATION_SECONDS,
+    govVote,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3699,6 +3751,32 @@ if (typeof document !== "undefined") {
           ? " The price holds at this step until the next drop in " + res.nextDropInSeconds + " seconds, and reaches the floor in " + res.remainingSeconds + " seconds."
           : " The price keeps falling continuously and reaches the floor in " + res.remainingSeconds + " seconds.");
       setText("dutch-result", "Model output: " + res.elapsedSeconds + " seconds into a " + res.durationSeconds + "-second fall from " + res.startPrice + " to a floor of " + res.floorPrice + ", the price is " + res.price + " - down " + res.dropped + ", which is " + fmtAmt(res.dropPctOfRange) + "% of the whole drop." + stateNote + " The decay here is linear; some sales use an exponential curve instead, which falls faster early - that form is not modelled. The schedule is your input - no live sale is read, and whether the price is worth paying is the buyer's judgement, not the model's. An educational model of a Dutch auction's price schedule, not a live quote. Not financial advice.");
+    });
+
+    var govForm = document.getElementById("gov-calc");
+    if (govForm) govForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = govVote(val("gov-supply"), val("gov-for"), val("gov-against"), val("gov-abstain"), val("gov-quorum"), val("gov-approval"));
+      if (res === null) {
+        document.getElementById("gov-cast-out").value = "Invalid";
+        document.getElementById("gov-verdict-out").value = "Invalid";
+        setText("gov-result", "Check the inputs: the governing supply must be above zero, each vote tally zero or more (amounts up to 9 decimal places), the tallies together no more than the supply, the quorum a whole number of basis points from 0 to 10,000, and the approval threshold a whole number from 1 to 10,000.");
+        return;
+      }
+      document.getElementById("gov-cast-out").value = res.cast;
+      document.getElementById("gov-verdict-out").value = res.passes ? "Passes" : "Fails";
+      var quorumNote = res.quorumMet
+        ? "Quorum is met: " + res.cast + " cast against " + res.quorumNeeded + " needed (" + fmtAmt(res.quorumBps / 100) + "% of the " + res.supply + " supply; turnout " + fmtAmt(res.turnoutBps / 100) + "%)."
+        : "Quorum is NOT met: " + res.cast + " cast against " + res.quorumNeeded + " needed (" + fmtAmt(res.quorumBps / 100) + "% of the " + res.supply + " supply; turnout " + fmtAmt(res.turnoutBps / 100) + "%) - another " + res.quorumShortfall + " of votes must be cast, on any side including abstain, before the tally counts at all.";
+      var approvalNote = res.approvalActualBps === null
+        ? " Approval cannot be met: no for or against votes were cast - abstentions alone show up for quorum but decide nothing."
+        : (res.approvalMet
+          ? " Approval is met: for-votes are " + fmtAmt(res.approvalActualBps / 100) + "% of the decisive (for + against) votes, at or above the " + fmtAmt(res.approvalBps / 100) + "% threshold."
+          : " Approval is NOT met: for-votes are " + fmtAmt(res.approvalActualBps / 100) + "% of the decisive (for + against) votes, below the " + fmtAmt(res.approvalBps / 100) + "% threshold.");
+      var verdict = res.passes
+        ? " The proposal PASSES - both bars are cleared."
+        : " The proposal FAILS - " + (!res.quorumMet && !res.approvalMet ? "both bars are missed." : (!res.quorumMet ? "a tally can win the vote and still fail on turnout; that is this case." : "quorum alone does not carry a proposal the decisive votes reject."));
+      setText("gov-result", "Model output: " + quorumNote + approvalNote + verdict + " Abstentions count toward quorum and toward neither side of approval - the convention modelled here; a framework that weighs them differently, vote weights other than one-token-one-vote, and any live tally are not modelled, and no live proposal is read. An educational model of a governance vote, not a live tally. Not financial advice.");
     });
 
     /* catalogue filter */

@@ -1937,6 +1937,49 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>48. Governance quorum &amp; approval calculator — did the DAO vote actually pass?</h3>
+      <p>A token-governance proposal (Realms / SPL Governance and most Solana DAO frameworks) must clear <strong>two independent bars</strong>, and reading only the for/against split misses the one that kills most proposals. <strong>Quorum</strong>: enough of the governing supply must participate at all — votes cast (for + against + abstain) must reach the quorum share of supply, ceilinged at the smallest unit. <strong>Approval</strong>: of the decisive votes, the for-share — for ÷ (for + against), floored to a whole basis point — must reach the threshold. <strong>Abstentions count toward quorum but toward neither side of approval</strong> — the convention modelled here. Headline: a supply of <strong>10,000,000</strong> with <strong>600,000 for, 200,000 against and 100,000 abstaining</strong>, a 10% quorum and a 60% approval threshold — the for-share is a comfortable 75%, yet the proposal <strong>fails</strong>, because 900,000 cast is 100,000 short of the 1,000,000 quorum. Raise the for-votes to 700,000 and the same tally passes: cast reaches exactly 1,000,000 and the for-share is 77.77%. Votes cast above the supply are rejected — a one-token-one-vote tally cannot cast more than exists. An educational model of a governance vote, not a live tally. Not financial advice.</p>
+      <form id="gov-calc">
+        <div class="grid">
+          <div>
+            <label for="gov-supply">Governing supply (tokens)</label>
+            <input id="gov-supply" name="gov-supply" inputmode="decimal" value="10000000">
+          </div>
+          <div>
+            <label for="gov-for">Votes for</label>
+            <input id="gov-for" name="gov-for" inputmode="decimal" value="600000">
+          </div>
+          <div>
+            <label for="gov-against">Votes against</label>
+            <input id="gov-against" name="gov-against" inputmode="decimal" value="200000">
+          </div>
+          <div>
+            <label for="gov-abstain">Votes abstaining</label>
+            <input id="gov-abstain" name="gov-abstain" inputmode="decimal" value="100000">
+          </div>
+          <div>
+            <label for="gov-quorum">Quorum (basis points of supply)</label>
+            <input id="gov-quorum" name="gov-quorum" inputmode="numeric" value="1000">
+          </div>
+          <div>
+            <label for="gov-approval">Approval threshold (basis points of for + against)</label>
+            <input id="gov-approval" name="gov-approval" inputmode="numeric" value="6000">
+          </div>
+          <div>
+            <label for="gov-cast-out">Total votes cast (model)</label>
+            <input id="gov-cast-out" name="gov-cast-out" readonly>
+          </div>
+          <div>
+            <label for="gov-verdict-out">Verdict (model)</label>
+            <input id="gov-verdict-out" name="gov-verdict-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Judge the vote</button>
+        <p class="result" id="gov-result" aria-live="polite"></p>
+      </form>
+    </article>
+
 
   </section>
 
@@ -2080,6 +2123,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=44"></script>
+<script src="app.js?v=45"></script>
 </body>
 </html>
