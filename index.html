@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, stableswap pools — the Curve-style invariant behind stable pools, its invariant D and post-trade balance solved by integer Newton iteration, the amplification coefficient that holds the price near 1:1 while the pool stays balanced and bends back toward constant-product pricing as it unbalances, with the swap fee charged on the output, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, stableswap pools — the Curve-style invariant behind stable pools, its invariant D and post-trade balance solved by integer Newton iteration, the amplification coefficient that holds the price near 1:1 while the pool stays balanced and bends back toward constant-product pricing as it unbalances, with the swap fee charged on the output, two-hop swap routes - an aggregator's A to M to B path through two constant-product pools, the full intermediate amount swapped onward so the two fees and the two price impacts compound, priced against the route's spot value to give the route's total cost in basis points, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1565,6 +1565,57 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>39. Two-hop swap route model - what an aggregator's A &#8594; M &#8594; B route really returns</h3>
+      <p>Most Solana trades never touch a direct pool for the pair being traded: an aggregator such as Jupiter, or a DEX router, sends the trade <strong>A &#8594; M &#8594; B</strong> through two pools - first into an intermediate token (usually SOL or a stablecoin), then onward - because no deep direct A/B pool exists, or because the routed price beats it. Each hop is the constant-product swap of Tool 2 with its own fee on its own input, and the full intermediate amount is swapped onward, so the two fees and the two price impacts <strong>compound</strong>. The headline route - <strong>500,000 / 75,000,000</strong> on hop 1 and <strong>30,000,000 / 600,000</strong> on hop 2, both at <strong>25 bps</strong> - turns <strong>100 in</strong> into <strong>14,959.515576642</strong> of the intermediate token and finally <strong>298.293963175 out</strong>. At the pools' quoted spot prices that route is worth exactly <strong>300</strong>, so fees and impact together cost about <strong>0.57%</strong> of the spot value; set both fees to zero and the route still returns only 299.790146897, because the two impacts alone compound. Make the second pool ten times shallower (3,000,000 / 60,000, same prices) and the same trade returns 296.965219193 - depth on the second hop matters as much as the first. Two constant-product hops in exact scaled-BigInt. An educational model of a routed swap, not a live quote. Not financial advice.</p>
+      <form id="route-calc">
+        <div class="grid">
+          <div>
+            <label for="route-rin1">Hop 1 pool - reserve of the token you sell</label>
+            <input id="route-rin1" name="route-rin1" value="500000">
+          </div>
+          <div>
+            <label for="route-rmid1">Hop 1 pool - reserve of the intermediate token</label>
+            <input id="route-rmid1" name="route-rmid1" value="75000000">
+          </div>
+          <div>
+            <label for="route-rmid2">Hop 2 pool - reserve of the intermediate token</label>
+            <input id="route-rmid2" name="route-rmid2" value="30000000">
+          </div>
+          <div>
+            <label for="route-rout2">Hop 2 pool - reserve of the token you buy</label>
+            <input id="route-rout2" name="route-rout2" value="600000">
+          </div>
+          <div>
+            <label for="route-ain">Amount in (units of the token you sell)</label>
+            <input id="route-ain" name="route-ain" value="100">
+          </div>
+          <div>
+            <label for="route-fee1">Hop 1 swap fee, whole basis points (that pool's input)</label>
+            <input id="route-fee1" name="route-fee1" value="25">
+          </div>
+          <div>
+            <label for="route-fee2">Hop 2 swap fee, whole basis points (that pool's input)</label>
+            <input id="route-fee2" name="route-fee2" value="25">
+          </div>
+          <div>
+            <label for="route-mid-out">Intermediate token received from hop 1 (model)</label>
+            <input id="route-mid-out" name="route-mid-out" readonly>
+          </div>
+          <div>
+            <label for="route-out">Final token received from hop 2 (model)</label>
+            <input id="route-out" name="route-out" readonly>
+          </div>
+          <div>
+            <label for="route-spot-out">Value of the route at spot prices, before fees and impact (model)</label>
+            <input id="route-spot-out" name="route-spot-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the two-hop route</button>
+        <p class="result" id="route-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1707,6 +1758,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=35"></script>
+<script src="app.js?v=36"></script>
 </body>
 </html>

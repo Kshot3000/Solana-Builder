@@ -1776,6 +1776,48 @@ function liquidationMax(amountStr, priceStr, debtStr, bonusBpsStr, closeBpsStr) 
   };
 }
 
+/* ---------- Tool 39: two-hop swap route model ---------- */
+/* Most Solana trades do not hit a single pool: an aggregator (Jupiter, or a
+   DEX router) routes A -> M -> B through two constant-product pools when no
+   deep direct A/B pool exists, or when the routed price beats the direct one.
+   The route is exactly Tool 2 composed with itself: hop 1 swaps the input for
+   the intermediate token (fee on its input), and hop 2 swaps the FULL
+   intermediate amount onward (its own fee on its own input) - so the two fees
+   and the two price impacts compound rather than add. The honest comparison
+   is the route's SPOT value: amountIn x (mid1 / in1) x (out2 / mid2), the
+   output at quoted prices with no fees and no impact, floored once in exact
+   BigInt; the gap between it and the routed output is the route's total cost.
+   Each pool's fee is a whole number of basis points, as pools quote them. */
+function routeSwap(reserveIn1Str, reserveMid1Str, reserveMid2Str, reserveOut2Str, amountInStr, fee1BpsStr, fee2BpsStr) {
+  var r1 = parseScaled(reserveIn1Str), m1 = parseScaled(reserveMid1Str);
+  var m2 = parseScaled(reserveMid2Str), o2 = parseScaled(reserveOut2Str);
+  var aIn = parseScaled(amountInStr);
+  var f1s = parseScaled(fee1BpsStr), f2s = parseScaled(fee2BpsStr);
+  if (r1 === null || m1 === null || m2 === null || o2 === null || aIn === null || f1s === null || f2s === null) return null;
+  if (r1 <= 0n || m1 <= 0n || m2 <= 0n || o2 <= 0n || aIn <= 0n) return null;
+  if (f1s % SCALE !== 0n || f2s % SCALE !== 0n) return null;
+  var f1 = Number(f1s / SCALE), f2 = Number(f2s / SCALE);
+  if (!Number.isInteger(f1) || f1 < 0 || f1 >= 10000) return null;
+  if (!Number.isInteger(f2) || f2 < 0 || f2 >= 10000) return null;
+  var hop1 = cpSwap(reserveIn1Str, reserveMid1Str, amountInStr, f1);
+  if (hop1 === null) return null;
+  var hop2 = cpSwap(reserveMid2Str, reserveOut2Str, hop1.amountOut, f2);
+  if (hop2 === null) return null;
+  var spot = (aIn * m1 * o2) / (r1 * m2);
+  if (spot <= 0n) return null;
+  var out = parseScaled(hop2.amountOut);
+  return {
+    amountIn: formatScaled(aIn), fee1Bps: f1, fee2Bps: f2,
+    hop1Fee: hop1.fee, hop1EffectiveIn: hop1.effectiveIn, midAmount: hop1.amountOut,
+    hop1PriceImpactPct: hop1.priceImpactPct,
+    hop2Fee: hop2.fee, hop2EffectiveIn: hop2.effectiveIn,
+    hop2PriceImpactPct: hop2.priceImpactPct,
+    amountOut: hop2.amountOut, spotOut: formatScaled(spot),
+    totalCostBps: Number(((spot - out) * 10000n) / spot),
+    effectivePrice: Number(out) / Number(aIn)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2281,6 +2323,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpPosition, MAX_PERP_LEVERAGE,
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
+    routeSwap,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3084,6 +3127,23 @@ if (typeof document !== "undefined") {
         : " The liquidator seizes " + res.seizedAmount + " of collateral, worth " + res.seizedValue + " - a bonus profit of " + res.profitValue + " over the amount repaid, paid by the borrower - leaving " + res.remainingCollateral + " of collateral worth " + res.remainingCollateralValue + " against " + res.remainingDebt + " of remaining debt.";
       var closeNote = res.fullyRepaid ? " The debt is fully repaid by this liquidation." : "";
       setText("liqmax-result", "Model output: the position holds collateral worth " + res.collateralValue + " (" + res.amount + " at " + res.price + ") against a debt of " + res.debt + ". The close factor of " + res.closeFactorBps + " bps caps a single liquidation's repay at " + res.maxRepay + "." + seizeNote + closeNote + " This is the single-collateral liquidation model: bonus and close factor are the market's inputs (some markets allow a full close once health is low enough - enter a 10,000 bps close factor for that case), interest accrual, liquidation fees and partial-liquidation sequencing are not modelled, and no live market is read. An educational model of a lending liquidation, not a live quote. Not financial advice.");
+    });
+
+    var routeForm = document.getElementById("route-calc");
+    if (routeForm) routeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = routeSwap(val("route-rin1"), val("route-rmid1"), val("route-rmid2"), val("route-rout2"), val("route-ain"), val("route-fee1"), val("route-fee2"));
+      if (res === null) {
+        document.getElementById("route-mid-out").value = "Invalid";
+        document.getElementById("route-out").value = "Invalid";
+        document.getElementById("route-spot-out").value = "Invalid";
+        setText("route-result", "Check the inputs: every reserve and the amount in must be above zero (amounts may have up to 9 decimal places), and each hop's fee is a whole number of basis points from 0 up to (but not including) 10,000 - a trade so small that either hop's output floors to zero at this scale is rejected, as it would be by the pool.");
+        return;
+      }
+      document.getElementById("route-mid-out").value = res.midAmount;
+      document.getElementById("route-out").value = res.amountOut;
+      document.getElementById("route-spot-out").value = res.spotOut;
+      setText("route-result", "Model output: hop 1 takes " + res.amountIn + " in, withholds a fee of " + res.hop1Fee + " (at " + res.fee1Bps + " bps) and swaps the remaining " + res.hop1EffectiveIn + " for " + res.midAmount + " of the intermediate token (a price impact of " + res.hop1PriceImpactPct.toFixed(4) + "% on that hop). Hop 2 swaps the full " + res.midAmount + " onward: it withholds " + res.hop2Fee + " of the intermediate token (at " + res.fee2Bps + " bps) and returns " + res.amountOut + " of the final token (a price impact of " + res.hop2PriceImpactPct.toFixed(4) + "% on that hop) - an effective price of " + res.effectivePrice + " final per unit in. At the pools' quoted spot prices the same route would be worth " + res.spotOut + ", so the two fees and the two impacts together cost " + res.totalCostBps + " bps of the spot value: routing costs compound across hops, which is why an aggregator compares routes instead of assuming one. This is the two-hop constant-product route model: both hops are the hub's Tool 2 swap, longer routes, split routes across several pools, concentrated-liquidity hops and any aggregator or interface fee a venue adds on top are not modelled, and no live pool is read. An educational model of a routed swap, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
