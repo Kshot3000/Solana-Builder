@@ -1898,6 +1898,44 @@
         <p class="result" id="air-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>47. Dutch auction price calculator — what a decaying sale price is right now</h3>
+      <p>A <strong>Dutch auction</strong> sells to the first buyer who accepts the current price: the seller publishes a start price, a floor and a duration, and the price falls between them — linearly in the classic form modelled here. Headline: a sale from <strong>10 down to a floor of 1 over 3,600 seconds</strong> stands at <strong>7.75</strong> after 900 seconds (a quarter of the drop gone), 5.5 halfway, and exactly 1 the moment the duration ends — the ends are exact, never asymptotic. Many on-chain sales drop the price in <strong>steps</strong> instead of continuously: with a 600-second step the headline sale still shows <strong>8.5</strong> at 900 seconds and at 1,199 seconds, then steps to 7 at 1,200 — and a step that does not divide the duration is cut short at the end, so the price still finishes exactly on the floor rather than hovering above it. The buyer's whole decision lives in this schedule: pay now, or wait for a lower price and risk someone else taking it. A floor of zero is allowed (decay toward worthless); exponential decay schedules exist and fall faster early — that is a different form, not modelled here. An educational model of a Dutch auction's price schedule, not a live quote. Not financial advice.</p>
+      <form id="dutch-calc">
+        <div class="grid">
+          <div>
+            <label for="dutch-start">Start price</label>
+            <input id="dutch-start" name="dutch-start" inputmode="decimal" value="10">
+          </div>
+          <div>
+            <label for="dutch-floor">Floor price</label>
+            <input id="dutch-floor" name="dutch-floor" inputmode="decimal" value="1">
+          </div>
+          <div>
+            <label for="dutch-duration">Duration (seconds)</label>
+            <input id="dutch-duration" name="dutch-duration" inputmode="numeric" value="3600">
+          </div>
+          <div>
+            <label for="dutch-elapsed">Elapsed (seconds)</label>
+            <input id="dutch-elapsed" name="dutch-elapsed" inputmode="numeric" value="900">
+          </div>
+          <div>
+            <label for="dutch-step">Step (seconds, 0 = continuous)</label>
+            <input id="dutch-step" name="dutch-step" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="dutch-price-out">Price now (model)</label>
+            <input id="dutch-price-out" name="dutch-price-out" readonly>
+          </div>
+          <div>
+            <label for="dutch-drop-out">Dropped so far (model)</label>
+            <input id="dutch-drop-out" name="dutch-drop-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Read the current price</button>
+        <p class="result" id="dutch-result" aria-live="polite"></p>
+      </form>
+    </article>
 
 
   </section>
@@ -2042,6 +2080,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=43"></script>
+<script src="app.js?v=44"></script>
 </body>
 </html>

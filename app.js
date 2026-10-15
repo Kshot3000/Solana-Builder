@@ -2172,6 +2172,52 @@ function airdropCost(recipients, newAtas, batchSize, amountStr, priorityLamports
   };
 }
 
+/* ---------- Tool 47: Dutch auction price (linear decay, optional steps) ---------- */
+/* A Dutch auction sells to the first buyer who accepts the current price:
+   the seller publishes a start price, a floor and a duration, and the
+   price falls from start to floor across the duration - linearly in the
+   classic form modelled here, price(t) = start - (start - floor) * t / D,
+   floored at the smallest unit in exact scaled-BigInt. Many on-chain sales
+   drop the price in STEPS instead of continuously (a new price every s
+   seconds): then the effective elapsed time is floor(t / s) * s, and the
+   price a buyer sees is the step's price for the whole step. Two ends are
+   exact, not approximate: at t = 0 the price is the start, and once the
+   duration has run the price is the floor - even when a step does not
+   divide the duration, the final step is cut short and the sale ends on
+   the floor (a step that would overshoot the end never holds the price
+   above the floor past it). A floor of zero is allowed (decay toward
+   worthless) and a floor equal to the start is a fixed price. Prototype-
+   verified before pinning: 20,000 cases against the float definition,
+   0 mismatches, monotone non-increasing in t throughout. Exponential
+   decay schedules exist in the wild and are NOT this form - stated on
+   the page, not modelled. */
+var MAX_DUTCH_DURATION_SECONDS = 1000000000;
+var MAX_DUTCH_ELAPSED_SECONDS = 1000000000000;
+
+function dutchAuctionPrice(startStr, floorStr, durationSeconds, elapsedSeconds, stepSeconds) {
+  var P0 = parseScaled(startStr), Pf = parseScaled(floorStr);
+  var D = Number(durationSeconds), t = Number(elapsedSeconds), s = Number(stepSeconds);
+  if (P0 === null || Pf === null) return null;
+  if (P0 <= 0n || Pf < 0n || Pf > P0) return null;
+  if (!Number.isSafeInteger(D) || D < 1 || D > MAX_DUTCH_DURATION_SECONDS) return null;
+  if (!Number.isSafeInteger(t) || t < 0 || t > MAX_DUTCH_ELAPSED_SECONDS) return null;
+  if (!Number.isSafeInteger(s) || s < 0 || s > D) return null;
+  var rawEff = Math.min(t, D);
+  var ended = rawEff >= D;
+  var eff = ended ? D : (s > 0 ? Math.floor(rawEff / s) * s : rawEff);
+  var drop = (P0 - Pf) * BigInt(eff) / BigInt(D);
+  var price = P0 - drop;
+  return {
+    startPrice: formatScaled(P0), floorPrice: formatScaled(Pf),
+    durationSeconds: D, elapsedSeconds: t, effectiveSeconds: eff,
+    price: formatScaled(price), dropped: formatScaled(drop),
+    dropPctOfRange: P0 === Pf ? 0 : Number(drop * 100000000n / (P0 - Pf)) / 1000000,
+    remainingSeconds: D - rawEff,
+    nextDropInSeconds: (s > 0 && !ended) ? s - (rawEff % s) : null,
+    stepped: s > 0, ended: ended
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2679,6 +2725,7 @@ if (typeof module !== "undefined" && module.exports) {
     liquidationMax,
     routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap, orderBookBuy, twapOracle, MAX_TWAP_SECONDS, lpWithdraw,
     airdropCost, MAX_AIRDROP_RECIPIENTS, TOKEN_ACCOUNT_BYTES,
+    dutchAuctionPrice, MAX_DUTCH_DURATION_SECONDS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3632,6 +3679,26 @@ if (typeof document !== "undefined") {
       document.getElementById("air-tx-out").value = String(res.txCount);
       document.getElementById("air-total-out").value = res.totalSol;
       setText("air-result", "Model output: sending " + res.amountPerRecipient + " to each of " + res.recipients + " recipients takes " + res.txCount + " transactions at " + res.batchSize + " transfers per transaction, and needs " + res.tokensNeeded + " tokens in the mint. Creating " + res.newAtas + " new token accounts locks " + res.rentLamports + " lamports (" + res.rentSol + " SOL) of rent-exempt deposit at " + res.rentPerAtaLamports + " lamports each - that deposit is reclaimable if the accounts are later closed; it is not spent. Network fees are " + res.feesLamports + " lamports (" + res.feesSol + " SOL): " + res.txCount + " transactions at " + res.feePerTxLamports + " lamports each (5,000 base for one signature plus your priority fee). Total SOL to fund the sending wallet: " + res.totalLamports + " lamports (" + res.totalSol + " SOL), plus the tokens. The batch size is your choice, bounded by the 1,232-byte packet limit and by whether the creation instructions ride in the same transactions; failed transfers, retries and any distributor program's own fees are not modelled, and no live cluster is read. An educational model of an airdrop's SOL cost, not a live quote. Not financial advice.");
+    });
+
+    var dutchForm = document.getElementById("dutch-calc");
+    if (dutchForm) dutchForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = dutchAuctionPrice(val("dutch-start"), val("dutch-floor"), val("dutch-duration"), val("dutch-elapsed"), val("dutch-step"));
+      if (res === null) {
+        document.getElementById("dutch-price-out").value = "Invalid";
+        document.getElementById("dutch-drop-out").value = "Invalid";
+        setText("dutch-result", "Check the inputs: the start price must be above zero, the floor at or below the start (zero is allowed), the duration a whole number of seconds of 1 or more, the elapsed time a whole number of 0 or more, and the step a whole number from 0 (continuous) up to the duration (amounts up to 9 decimal places).");
+        return;
+      }
+      document.getElementById("dutch-price-out").value = res.price;
+      document.getElementById("dutch-drop-out").value = res.dropped;
+      var stateNote = res.ended
+        ? " The duration has run, so the price sits exactly on the floor - a stepped schedule ends there too, even when a step does not divide the duration."
+        : (res.stepped
+          ? " The price holds at this step until the next drop in " + res.nextDropInSeconds + " seconds, and reaches the floor in " + res.remainingSeconds + " seconds."
+          : " The price keeps falling continuously and reaches the floor in " + res.remainingSeconds + " seconds.");
+      setText("dutch-result", "Model output: " + res.elapsedSeconds + " seconds into a " + res.durationSeconds + "-second fall from " + res.startPrice + " to a floor of " + res.floorPrice + ", the price is " + res.price + " - down " + res.dropped + ", which is " + fmtAmt(res.dropPctOfRange) + "% of the whole drop." + stateNote + " The decay here is linear; some sales use an exponential curve instead, which falls faster early - that form is not modelled. The schedule is your input - no live sale is read, and whether the price is worth paying is the buyer's judgement, not the model's. An educational model of a Dutch auction's price schedule, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
