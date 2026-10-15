@@ -1690,6 +1690,56 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>42. CLMM swap model - a swap inside one tick range</h3>
+      <p>Tools 10, 17 and 25 price a concentrated-liquidity position; this one trades against it. Inside a single tick range a CLMM swap (Raydium CLMM, Orca Whirlpools) moves the square-root price against the range's active liquidity <strong>L</strong>: paying token0 pushes the price down - the pool takes <strong>L &#215; (1/&#8730;P<sub>new</sub> &#8722; 1/&#8730;P<sub>now</sub>)</strong> and pays <strong>L &#215; (&#8730;P<sub>now</sub> &#8722; &#8730;P<sub>new</sub>)</strong> of token1 - and paying token1 pushes it up by the mirror formulas. The headline range - <strong>L = 1,000,000</strong> over ticks <strong>-1,000 to 1,000</strong>, current tick <strong>0</strong> (price 1) - paying <strong>10,000 token0</strong> with <strong>no fee</strong> returns <strong>9,900.99009901 token1</strong> and moves the price to <strong>0.9802960494</strong>; paying token1 instead returns the same 9,900.99009901 of token0 and moves the price to 1.0201 exactly. At <strong>25 bps</strong> the same trade returns 9,876.482091141 - exactly Tool 2's output for a 1,000,000 / 1,000,000 pool, because inside one range a CLMM swap is a constant-product swap on the range's <strong>virtual reserves</strong> (L/&#8730;P and L&#215;&#8730;P, here 1,000,000 each). Shrink the range to -100 to 100 and the same 10,000 trade hits the bound: only 5,012.269623051 of it fits inside the range, paying 4,987.272070749 and stopping at the bound price - on-chain the rest would cross into the next tick range against different liquidity, which is stated here, not modelled. The fee is withheld from the gross input first; the price math is floating point like Tool 17 (on-chain it is Q64.64 fixed point). An educational model of a CLMM swap, not a live quote. Not financial advice.</p>
+      <form id="cswap-calc">
+        <div class="grid">
+          <div>
+            <label for="cswap-l">Active liquidity L in this tick range</label>
+            <input id="cswap-l" name="cswap-l" value="1000000">
+          </div>
+          <div>
+            <label for="cswap-lower">Lower tick of the range</label>
+            <input id="cswap-lower" name="cswap-lower" value="-1000">
+          </div>
+          <div>
+            <label for="cswap-upper">Upper tick of the range</label>
+            <input id="cswap-upper" name="cswap-upper" value="1000">
+          </div>
+          <div>
+            <label for="cswap-current">Current tick (must be inside the range)</label>
+            <input id="cswap-current" name="cswap-current" value="0">
+          </div>
+          <div>
+            <label for="cswap-dir">Token you pay</label>
+            <select id="cswap-dir" name="cswap-dir">
+              <option value="token0" selected>token0 (price moves down)</option>
+              <option value="token1">token1 (price moves up)</option>
+            </select>
+          </div>
+          <div>
+            <label for="cswap-ain">Amount in (units of the token you pay)</label>
+            <input id="cswap-ain" name="cswap-ain" value="10000">
+          </div>
+          <div>
+            <label for="cswap-fee">Swap fee, whole basis points (charged on the input)</label>
+            <input id="cswap-fee" name="cswap-fee" value="0">
+          </div>
+          <div>
+            <label for="cswap-out-out">Amount out of the other token (model)</label>
+            <input id="cswap-out-out" name="cswap-out-out" readonly>
+          </div>
+          <div>
+            <label for="cswap-price-out">Price after the swap, token1 per token0 (model)</label>
+            <input id="cswap-price-out" name="cswap-price-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the CLMM swap</button>
+        <p class="result" id="cswap-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1832,6 +1882,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=38"></script>
+<script src="app.js?v=39"></script>
 </body>
 </html>

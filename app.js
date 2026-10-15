@@ -1913,6 +1913,83 @@ function arbitrageTrade(reserveInStr, reserveOutStr, amountInStr, feeBpsStr, ext
   };
 }
 
+/* ---------- Tool 42: CLMM swap inside one tick range ---------- */
+/* A concentrated-liquidity swap does not trade against token reserves:
+   it trades against the ACTIVE liquidity L while the price stays inside
+   one tick range [sLower, sUpper] (s = sqrt(price), Tool 10). Paying
+   token0 moves the price DOWN: the pool takes amount0 = L * (1/sNew -
+   1/sCurrent) and pays amount1 = L * (sCurrent - sNew), so a given
+   effective input sets 1/sNew = 1/sCurrent + effectiveIn / L. Paying
+   token1 moves the price UP: sNew = sCurrent + effectiveIn / L and it
+   pays amount0 = L * (1/sCurrent - 1/sNew). The fee is withheld from the
+   gross input first, in exact scaled-BigInt like Tool 2; the price math
+   itself is floating point, like Tool 17, because square-root prices
+   are irrational - the on-chain programs carry them as Q64.64 fixed
+   point instead. Inside the range the formulas are exactly a constant-
+   product swap on the range's VIRTUAL reserves (L / sCurrent of the
+   input-side token, L * sCurrent of the other), which the test suite
+   pins against Tool 2 itself. A trade big enough to reach the range
+   bound STOPS there in this model: on-chain it would cross into the
+   next tick range, against whatever liquidity is active there - that
+   continuation is stated, not modelled - so the model reports the
+   output at the bound and the effective input the range never used.
+   The current tick must be inside the range (lower <= current <
+   upper): outside it this range's liquidity is inactive and a swap
+   here would trade against a different range's liquidity entirely. */
+function clmmSwap(liquidityStr, lower, upper, current, direction, amountInStr, feeBpsStr) {
+  var Lscaled = parseScaled(liquidityStr);
+  var aIn = parseScaled(amountInStr);
+  var fS = parseScaled(feeBpsStr);
+  var lo = Number(lower), hi = Number(upper), cur = Number(current);
+  if (Lscaled === null || aIn === null || fS === null) return null;
+  if (Lscaled <= 0n || aIn <= 0n) return null;
+  if (fS % SCALE !== 0n) return null;
+  var f = Number(fS / SCALE);
+  if (!Number.isInteger(f) || f < 0 || f >= 10000) return null;
+  if (!Number.isInteger(lo) || !Number.isInteger(hi) || !Number.isInteger(cur)) return null;
+  if (lo < MIN_TICK || hi > MAX_TICK || cur < MIN_TICK || cur > MAX_TICK) return null;
+  if (lo >= hi) return null;
+  if (!(lo <= cur && cur < hi)) return null;
+  if (direction !== "token0" && direction !== "token1") return null;
+  var fee = (aIn * BigInt(f)) / 10000n;
+  var eff = aIn - fee;
+  if (eff <= 0n) return null;
+  var L = Number(Lscaled) / 1e9;
+  var effIn = Number(eff) / 1e9;
+  var sLo = Math.sqrt(tickToPrice(lo)), sHi = Math.sqrt(tickToPrice(hi)), sCur = Math.sqrt(tickToPrice(cur));
+  var maxEff, used, sNew, out, bound = false;
+  if (direction === "token0") {
+    maxEff = L * (1 / sLo - 1 / sCur);
+    bound = effIn > maxEff;
+    used = bound ? maxEff : effIn;
+    sNew = bound ? sLo : 1 / (1 / sCur + used / L);
+    out = L * (sCur - sNew);
+  } else {
+    maxEff = L * (sHi - sCur);
+    bound = effIn > maxEff;
+    used = bound ? maxEff : effIn;
+    sNew = bound ? sHi : sCur + used / L;
+    out = L * (1 / sCur - 1 / sNew);
+  }
+  if (!(out > 0)) return null;
+  var priceCur = tickToPrice(cur);
+  var spot = direction === "token0" ? priceCur : 1 / priceCur;
+  var impactPct = (1 - (out / used) / spot) * 100;
+  return {
+    liquidity: formatScaled(Lscaled),
+    tickLower: lo, tickUpper: hi, tickCurrent: cur,
+    direction: direction,
+    amountIn: formatScaled(aIn), feeBps: f,
+    fee: formatScaled(fee), effectiveIn: formatScaled(eff),
+    usedEffectiveIn: used, unusedEffectiveIn: effIn - used, maxEffectiveIn: maxEff,
+    amountOut: out,
+    sqrtPriceCurrent: sCur, sqrtPriceAfter: sNew,
+    priceCurrent: priceCur, priceAfter: sNew * sNew,
+    reachedBound: bound, boundTick: bound ? (direction === "token0" ? lo : hi) : null,
+    priceImpactPct: impactPct
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2418,7 +2495,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpPosition, MAX_PERP_LEVERAGE,
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
-    routeSwap, cpSwapExactOut, arbitrageTrade,
+    routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3275,6 +3352,27 @@ if (typeof document !== "undefined") {
         ? "the trade profits by " + res.profit + " of the input token before any external cost"
         : "the trade does not profit - it returns " + res.profit + " of the input token, because the fee and the price impact together eat the gap";
       setText("arb-result", "Model output: the pool starts at a spot price of " + res.spotPrice + " input per output against an external price of " + res.externalPrice + ". Swapping " + res.amountIn + " in withholds a fee of " + res.fee + " (at " + res.feeBps + " bps), swaps the remaining " + res.effectiveIn + " and pays out " + res.amountOut + " (a price impact of " + res.priceImpactPct.toFixed(4) + "%). Sold at the external price that output is worth " + res.externalValue + ", so " + verdict + ". The trade leaves the pool's spot price at " + res.postSpotPrice + " - short of the external price when the fee closes the remaining gap, past it when the trade overshoots the alignment point, which is why the profitable size is the one that stops at alignment, not the largest one. This is the arbitrage model: the swap leg is the hub's Tool 2 swap, the external sale is assumed to fill in full at exactly the quoted price with no external fee, slippage, gas or priority fee modelled, the mirrored direction (selling into this pool) is the same model with the tokens swapped, and no live price or pool is read. An educational model of an arbitrage trade, not a live quote. Not financial advice.");
+    });
+
+    var cswapForm = document.getElementById("cswap-calc");
+    if (cswapForm) cswapForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = clmmSwap(val("cswap-l"), val("cswap-lower"), val("cswap-upper"), val("cswap-current"), val("cswap-dir"), val("cswap-ain"), val("cswap-fee"));
+      function fmtAmt(x) { return x === 0 ? "0" : (Math.abs(x) < 0.001 || Math.abs(x) >= 1e15 ? x.toExponential(6) : String(Number(x.toPrecision(10)))); }
+      if (res === null) {
+        document.getElementById("cswap-out-out").value = "Invalid";
+        document.getElementById("cswap-price-out").value = "Invalid";
+        setText("cswap-result", "Check the inputs: the liquidity and the amount in must be above zero (up to 9 decimal places), all ticks must be whole numbers from -443,636 to 443,636 with the lower tick below the upper tick, the current tick must be inside the range (lower <= current < upper - outside it this range's liquidity is inactive), and the fee is a whole number of basis points from 0 up to (but not including) 10,000.");
+        return;
+      }
+      document.getElementById("cswap-out-out").value = fmtAmt(res.amountOut);
+      document.getElementById("cswap-price-out").value = fmtAmt(res.priceAfter);
+      var inName = res.direction === "token0" ? "token0" : "token1";
+      var outName = res.direction === "token0" ? "token1" : "token0";
+      var boundNote = res.reachedBound
+        ? " The trade is large enough to push the price all the way to the range's " + (res.direction === "token0" ? "lower" : "upper") + " bound (tick " + res.boundTick + "), so it stops there in this model: only " + fmtAmt(res.usedEffectiveIn) + " of the effective input is used inside this range and " + fmtAmt(res.unusedEffectiveIn) + " is left over - on-chain the trade would continue into the next tick range, against whatever liquidity is active there, which is not modelled here."
+        : " The trade uses the full effective input inside this range, leaving " + fmtAmt(res.unusedEffectiveIn) + " unused.";
+      setText("cswap-result", "Model output: paying " + res.amountIn + " " + inName + " withholds a fee of " + res.fee + " (at " + res.feeBps + " bps) and swaps the remaining " + res.effectiveIn + " against active liquidity " + res.liquidity + " over ticks " + res.tickLower + " to " + res.tickUpper + " at the current tick " + res.tickCurrent + " (price " + fmtAmt(res.priceCurrent) + " token1 per token0). It pays out " + fmtAmt(res.amountOut) + " " + outName + " and moves the price to " + fmtAmt(res.priceAfter) + " (a price impact of " + res.priceImpactPct.toFixed(4) + "% against the starting spot)." + boundNote + " Inside one range this is the same trade as a constant-product swap on the range's virtual reserves, which is why the output matches Tool 2 at the matching reserves; tick crossing, the next range's liquidity and any interface fee a venue adds on top are not modelled, and no live pool is read. An educational model of a CLMM swap, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
