@@ -1339,6 +1339,70 @@ function pythConfidence(priceStr, confStr, expoStr, maxBpsStr) {
   };
 }
 
+/* ---------- Tool 33: bonding curve (launchpad virtual-reserve model) ---------- */
+/* A Solana launchpad token does not start on an AMM pool anyone funded.
+   The program prices every trade off a constant-product curve over
+   VIRTUAL reserves: a virtual SOL reserve and a virtual token reserve
+   whose ratio sets the starting price (price = virtualSol /
+   virtualToken) and whose product k never changes. The virtual SOL is a
+   pricing offset, not a balance - the SOL the curve actually holds is
+   the separate real raised figure buyers have paid in. A buy pays the
+   platform/creator fee on the input first (an input here; each venue
+   sets its own), then runs Tool 2's exact swap math against the virtual
+   reserves: tokensOut = effIn x virtualToken / (virtualSol + effIn),
+   floored like an on-chain division, which is why the buy quote below
+   agrees with cpSwap to the smallest unit. Every buy raises the virtual
+   SOL reserve and drains the virtual token reserve, so the price rises
+   along the curve; sells run the same math in reverse. Progress is the
+   real SOL raised against the graduation target: at the target the
+   curve completes and the real SOL plus the unsold tokens migrate to a
+   real AMM pool (Raydium, the venue's own AMM, or a LaunchLab pool,
+   depending on the venue), usually calibrated so the listing price
+   continues the curve's final price - while the DEPTH drops, because
+   the virtual offset does not migrate. Market cap here is the curve
+   price times the total supply, the figure launchpad interfaces quote;
+   it is a product of two model inputs, not a valuation anyone stands
+   behind. Prices are shown at the hub's 9-decimal scale, so a launch
+   price under 1e-9 SOL per token floors to 0 in display only - the
+   reserves and the quote stay exact. */
+function bondingCurve(vsolStr, vtokStr, supplyStr, raisedStr, targetStr, buyStr, feeBps) {
+  var vSol = parseScaled(vsolStr);
+  var vTok = parseScaled(vtokStr);
+  var supply = parseScaled(supplyStr);
+  var raised = parseScaled(raisedStr);
+  var target = parseScaled(targetStr);
+  var buy = parseScaled(buyStr);
+  var bps = Number(feeBps);
+  if (vSol === null || vTok === null || supply === null || raised === null || target === null || buy === null) return null;
+  if (vSol <= 0n || vTok <= 0n || supply <= 0n || target <= 0n || buy <= 0n || raised < 0n) return null;
+  if (!Number.isInteger(bps) || bps < 0 || bps >= 10000) return null;
+  var fee = (buy * BigInt(bps)) / 10000n;
+  var eff = buy - fee;
+  if (eff <= 0n) return null;
+  var out = (eff * vTok) / (vSol + eff);
+  if (out <= 0n || out >= vTok) return null;
+  var newVSol = vSol + eff;
+  var newVTok = vTok - out;
+  var spotScaled = (vSol * SCALE) / vTok;
+  var afterScaled = (newVSol * SCALE) / newVTok;
+  return {
+    virtualSol: formatScaled(vSol), virtualToken: formatScaled(vTok),
+    feeSol: formatScaled(fee), effectiveIn: formatScaled(eff),
+    tokensOut: formatScaled(out),
+    newVirtualSol: formatScaled(newVSol), newVirtualToken: formatScaled(newVTok),
+    spotPrice: formatScaled(spotScaled), priceAfter: formatScaled(afterScaled),
+    priceRisePct: (Number(newVSol) * Number(vTok)) / (Number(vSol) * Number(newVTok)) * 100 - 100,
+    avgPricePaid: formatScaled((buy * SCALE) / out),
+    mcapBefore: formatScaled((vSol * supply) / vTok),
+    mcapAfter: formatScaled((newVSol * supply) / newVTok),
+    raisedAfter: formatScaled(raised + eff),
+    progressBeforePct: Number(raised) * 100 / Number(target),
+    progressAfterPct: Number(raised + eff) * 100 / Number(target),
+    graduatesWithThisBuy: raised + eff >= target,
+    alreadyComplete: raised >= target
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1838,6 +1902,7 @@ if (typeof module !== "undefined" && module.exports) {
     tokenValuation,
     lookupTablePlan, ALT_META_BYTES, ALT_MAX_ADDRESSES,
     pythConfidence, formatRawExpo,
+    bondingCurve,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2507,6 +2572,26 @@ if (typeof document !== "undefined") {
         ? " A confidence of exactly 0 claims perfect certainty; real feeds essentially never publish it, so treat a zero here as a data problem, not as safety."
         : "";
       setText("pyth-result", "Model output: a feed value of " + res.priceRaw + " plus-or-minus " + res.confRaw + " at exponent " + res.expo + " is a price of " + res.priceUi + " plus-or-minus " + res.confUi + " - the one-standard-deviation band runs from " + res.low + " to " + res.high + " (the full band is " + res.fullWidthBps.toFixed(4) + " bps wide), and doubling the interval gives " + res.low2 + " to " + res.high2 + ", roughly a 95% band only if the errors were normally distributed. A cautious program values collateral at the low end, " + res.low + ", not at the mid price." + guardNote + zeroNote + confZeroNote + " Staleness is the feed's other safety check - a price this fresh-looking can still be too old - and is not modelled here; no live feed is read. An educational model of oracle price confidence, not live market data. Not financial advice.");
+    });
+
+    var curveForm = document.getElementById("curve-calc");
+    if (curveForm) curveForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = bondingCurve(val("curve-vsol"), val("curve-vtok"), val("curve-supply"), val("curve-raised"), val("curve-target"), val("curve-buy"), val("curve-fee"));
+      if (res === null) {
+        document.getElementById("curve-price-out").value = "Invalid";
+        document.getElementById("curve-tokens-out").value = "Invalid";
+        setText("curve-result", "Check the inputs: the virtual reserves, the total supply, the graduation target and the buy amount must all be above zero (amounts may have up to 9 decimal places), the real SOL raised may be zero but not negative, and the fee is a whole number of basis points from 0 to 9,999 - a buy so small it would receive zero tokens at this scale is rejected, exactly as the floored on-chain quote would pay nothing.");
+        return;
+      }
+      document.getElementById("curve-price-out").value = res.priceAfter;
+      document.getElementById("curve-tokens-out").value = res.tokensOut;
+      var gradNote = res.alreadyComplete
+        ? " The real SOL raised already meets the graduation target, so on a live launchpad this curve would already have completed and migrated - the quote above is the curve's own math worked anyway, not a trade that could still happen."
+        : (res.graduatesWithThisBuy
+          ? " This buy carries the real SOL raised to the graduation target: on a live launchpad the curve would complete here and the real SOL and unsold tokens would migrate to an AMM pool, with the depth dropping as the virtual offset stays behind."
+          : " The curve still stands short of its graduation target after this buy.");
+      setText("curve-result", "Model output: the curve prices the token at " + res.spotPrice + " SOL before the buy and " + res.priceAfter + " SOL after it (a rise of " + res.priceRisePct.toFixed(4) + "% along the curve; prices are shown at 9 decimal places). The buy pays " + res.feeSol + " SOL of fee first, so " + res.effectiveIn + " SOL enters the curve and receives " + res.tokensOut + " tokens - an average of " + res.avgPricePaid + " SOL per token once the fee is counted. The virtual reserves move to " + res.newVirtualSol + " SOL and " + res.newVirtualToken + " tokens, while the real SOL the curve actually holds rises to " + res.raisedAfter + " SOL: progress to graduation moves from " + res.progressBeforePct.toFixed(4) + "% to " + res.progressAfterPct.toFixed(4) + "% of the target. The market cap the interfaces would quote (curve price times total supply) moves from " + res.mcapBefore + " SOL to " + res.mcapAfter + " SOL." + gradNote + " The virtual reserves are a pricing offset, not balances, and the fee rate, target and reserves are inputs - each launchpad sets its own and no live curve is read. An educational model of a launchpad bonding curve, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
