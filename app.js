@@ -1273,6 +1273,72 @@ function lookupTablePlan(storedStr, writableStr, readonlyStr) {
   };
 }
 
+/* ---------- Tool 32: oracle price confidence (Pyth-style price/conf/expo) ---------- */
+/* A Pyth-style price feed does not publish one number; it publishes a
+   triple - price (i64), conf (u64) and expo - meaning price x 10^expo
+   plus-or-minus conf x 10^expo. The confidence interval is approximately
+   ONE STANDARD DEVIATION of the publishers' aggregate estimate of where
+   the true price is: the true price is expected to fall inside
+   price - conf .. price + conf roughly 68% of the time (and inside the
+   doubled band roughly 95% IF the errors were normally distributed -
+   an approximation, stated as such, not a guarantee the feed makes).
+   Protocols defend themselves with a width guard: REJECT the price when
+   conf exceeds a chosen share of the price (conf x 10000 > price x bps),
+   and value collateral at the LOW end of the band while valuing debt at
+   the price - which is why a wide band in a volatile minute is a risk
+   event, not a display detail. All math here is exact BigInt on the raw
+   integers the SDK reports; a non-positive aggregate price is rejected,
+   exactly as a consuming program should reject it. Staleness (the
+   publish time against a max age) is the feed's other safety check and
+   is NOT modelled - no timestamp is read here. */
+function formatRawExpo(v, expo) {
+  var neg = v < 0n;
+  var d = (neg ? -v : v).toString();
+  var s;
+  if (expo < 0) {
+    var k = -expo;
+    d = d.padStart(k + 1, "0");
+    s = d.slice(0, d.length - k) + "." + d.slice(d.length - k);
+    if (s.indexOf(".") !== -1) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  } else if (expo > 0) {
+    s = d + "0".repeat(expo);
+  } else {
+    s = d;
+  }
+  return (neg ? "-" : "") + s;
+}
+
+function parseRawInt(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s) || s.length > 30) return null;
+  return BigInt(s);
+}
+
+function pythConfidence(priceStr, confStr, expoStr, maxBpsStr) {
+  var price = parseRawInt(priceStr);
+  var conf = parseRawInt(confStr);
+  var expo = Number(expoStr);
+  var maxBps = Number(maxBpsStr);
+  if (price === null || conf === null) return null;
+  if (price <= 0n) return null;
+  if (!Number.isInteger(expo) || expo < -18 || expo > 18) return null;
+  if (!Number.isInteger(maxBps) || maxBps < 0 || maxBps > 10000) return null;
+  var low = price - conf, high = price + conf;
+  var low2 = price - 2n * conf, high2 = price + 2n * conf;
+  return {
+    priceRaw: price.toString(), confRaw: conf.toString(), expo: expo, maxBps: maxBps,
+    priceUi: formatRawExpo(price, expo), confUi: formatRawExpo(conf, expo),
+    low: formatRawExpo(low, expo), high: formatRawExpo(high, expo),
+    low2: formatRawExpo(low2, expo), high2: formatRawExpo(high2, expo),
+    widthBps: Number(conf) * 10000 / Number(price),
+    fullWidthBps: Number(conf) * 20000 / Number(price),
+    passesGuard: conf * 10000n <= price * BigInt(maxBps),
+    bandCrossesZero: low <= 0n,
+    confIsZero: conf === 0n
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1771,6 +1837,7 @@ if (typeof module !== "undefined" && module.exports) {
     createWithSeed, MAX_SEED_ADDRESS_SEED_BYTES, STAKE_PROGRAM_ID,
     tokenValuation,
     lookupTablePlan, ALT_META_BYTES, ALT_MAX_ADDRESSES,
+    pythConfidence, formatRawExpo,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2416,6 +2483,30 @@ if (typeof document !== "undefined") {
         ? " Loading so few addresses through a table costs " + (-res.savingBytes) + " bytes MORE than inlining them - the table reference is paid before the first index saves anything, which is why tables pay off only when a transaction loads many addresses (or the same table serves many transactions)."
         : " Loading those " + res.used + " addresses through the table costs " + res.lookupBytes + " bytes instead of " + res.staticBytes + " bytes of inline keys - a saving of " + res.savingBytes + " bytes in every transaction that loads them this way.";
       setText("alt-result", "Model output: a table storing " + res.stored + " addresses (" + res.fillPct.toFixed(4) + "% of the 256 cap) is a " + res.sizeBytes + "-byte account - 56 bytes of metadata plus " + res.addressBytes + " bytes of addresses - and locks a rent-exempt deposit of " + res.rentLamports + " lamports (" + res.rentSol + " SOL), " + res.perAddressLamports + " lamports per stored address." + savingNote + " The deposit comes back only by deactivating the table and waiting out the cooldown until its deactivation slot leaves the SlotHashes sysvar - stated, not modelled - and one table per transaction is modelled here. An educational model of the lookup-table layout, not a live account lookup. Not financial advice.");
+    });
+
+    var pythForm = document.getElementById("pyth-calc");
+    if (pythForm) pythForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = pythConfidence(val("pyth-price"), val("pyth-conf"), val("pyth-expo"), val("pyth-maxbps"));
+      if (res === null) {
+        document.getElementById("pyth-low-out").value = "Invalid";
+        document.getElementById("pyth-high-out").value = "Invalid";
+        setText("pyth-result", "Check the inputs: the price and the confidence interval are the raw integers a feed publishes (whole numbers, no decimal point, no sign), the price must be above zero (a non-positive aggregate price is a broken feed, not a price), the exponent is a whole number from -18 to 18 (most feeds use -8), and the guard width is a whole number of basis points from 0 to 10,000.");
+        return;
+      }
+      document.getElementById("pyth-low-out").value = res.low;
+      document.getElementById("pyth-high-out").value = res.high;
+      var guardNote = res.passesGuard
+        ? " The band passes your guard: at " + res.widthBps.toFixed(4) + " bps of the price it is inside the " + res.maxBps + " bps maximum you set."
+        : " The band FAILS your guard: at " + res.widthBps.toFixed(4) + " bps of the price it is wider than the " + res.maxBps + " bps maximum you set - a program with this guard would reject this price outright rather than trade or liquidate on it.";
+      var zeroNote = res.bandCrossesZero
+        ? " The one-sigma band reaches zero or below - the publishers' uncertainty is as large as the price itself, so the low end is no positive price at all."
+        : "";
+      var confZeroNote = res.confIsZero
+        ? " A confidence of exactly 0 claims perfect certainty; real feeds essentially never publish it, so treat a zero here as a data problem, not as safety."
+        : "";
+      setText("pyth-result", "Model output: a feed value of " + res.priceRaw + " plus-or-minus " + res.confRaw + " at exponent " + res.expo + " is a price of " + res.priceUi + " plus-or-minus " + res.confUi + " - the one-standard-deviation band runs from " + res.low + " to " + res.high + " (the full band is " + res.fullWidthBps.toFixed(4) + " bps wide), and doubling the interval gives " + res.low2 + " to " + res.high2 + ", roughly a 95% band only if the errors were normally distributed. A cautious program values collateral at the low end, " + res.low + ", not at the mid price." + guardNote + zeroNote + confZeroNote + " Staleness is the feed's other safety check - a price this fresh-looking can still be too old - and is not modelled here; no live feed is read. An educational model of oracle price confidence, not live market data. Not financial advice.");
     });
 
     /* catalogue filter */
