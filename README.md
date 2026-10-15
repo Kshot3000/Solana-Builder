@@ -73,3 +73,4 @@ node tests/test-site.js
 - Ecosystem thanks: [@solana-foundation](https://github.com/solana-foundation) / [@solana](https://x.com/solana), [@raydium-io](https://github.com/raydium-io) / [@Raydium](https://x.com/Raydium)
 
 I am an independent builder — not affiliated with the Solana Foundation, Raydium, or any catalogued project, and not a member of any of their teams.
+50. **Quadratic voting cost calculator** — voice priced as the square of votes: casting v votes on a proposal costs v² credits from a fixed budget, the marginal cost of the next vote is 2v + 1, and the most votes one proposal can take is floor(√budget) in exact BigInt (headline: 6 and 8 votes on a 100-credit budget cost 36 + 64 = 100 exactly — 14 votes in total — while concentrating the whole budget buys at most 10 votes on one proposal). Over-budget ballots are reported with the overshoot, not trimmed; three proposals and whole votes are modelled, and no live ballot is read.

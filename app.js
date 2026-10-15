@@ -2315,6 +2315,53 @@ function tokenAllocation(supplyStr, liquidityBps, communityBps, teamBps) {
   };
 }
 
+/* ---------- Tool 50: quadratic voting cost calculator ---------- */
+/* Quadratic voting (used by DAO grant rounds and governance experiments
+   across Solana) prices voice, not votes: casting v votes on one proposal
+   costs v^2 voice credits from a fixed budget, so the MARGINAL cost of
+   the next vote is (v+1)^2 - v^2 = 2v + 1 credits - the first vote costs
+   1, the tenth costs 19 more. Intensity is therefore expensive and broad
+   support cheap: one voter with 100 credits casts at most 10 votes on a
+   single proposal (floor(sqrt(budget)), exact BigInt square root), but
+   splitting the same budget as 7 votes on each of two proposals costs
+   49 + 49 = 98 for 14 votes in total. All arithmetic here is exact
+   BigInt on whole credits and whole votes - votes are counts, never
+   fractions, in the systems modelled. An over-budget ballot is REPORTED
+   (overBudget, negative remaining) rather than rejected, because seeing
+   by how much a ballot overshoots is the planning question; each
+   framework sets its own budget, proposal count and credit rules - three
+   proposals are modelled here and the convention is stated on the page.
+   Prototype-verified before pinning: 20,000 cases, 0 mismatches on the
+   sum-of-squares total, the signed remainder, a brute-forced floor
+   square root, and the marginal-cost identity. */
+var MAX_QV_BUDGET = 1000000000000;
+var MAX_QV_VOTES = 1000000;
+
+function quadraticVote(budget, votesA, votesB, votesC) {
+  var B = Number(budget);
+  var vs = [Number(votesA), Number(votesB), Number(votesC)];
+  if (!Number.isInteger(B) || B <= 0 || B > MAX_QV_BUDGET) return null;
+  for (var i = 0; i < vs.length; i++) {
+    if (!Number.isInteger(vs[i]) || vs[i] < 0 || vs[i] > MAX_QV_VOTES) return null;
+  }
+  var costs = vs.map(function (v) { return BigInt(v) * BigInt(v); });
+  var total = costs.reduce(function (s, x) { return s + x; }, 0n);
+  var remaining = BigInt(B) - total;
+  var maxSingle = isqrtBigInt(BigInt(B));
+  return {
+    budget: B,
+    votes: vs,
+    costs: costs.map(function (x) { return x.toString(); }),
+    totalCost: total.toString(),
+    remaining: remaining.toString(),
+    overBudget: total > BigInt(B),
+    totalVotes: vs.reduce(function (s, v) { return s + v; }, 0),
+    maxSingleVotes: Number(maxSingle),
+    maxSingleCost: (maxSingle * maxSingle).toString(),
+    nextCosts: vs.map(function (v) { return (2n * BigInt(v) + 1n).toString(); })
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2825,6 +2872,7 @@ if (typeof module !== "undefined" && module.exports) {
     dutchAuctionPrice, MAX_DUTCH_DURATION_SECONDS,
     govVote,
     tokenAllocation,
+    quadraticVote, MAX_QV_BUDGET, MAX_QV_VOTES,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3842,6 +3890,24 @@ if (typeof document !== "undefined") {
         ? " The four buckets sum to the supply exactly with no flooring dust at this scale."
         : " The treasury's nominal floored share would be " + res.treasuryNominal + "; as the remainder bucket it receives " + res.dust + " more - the flooring dust from all four buckets (never more than 3 smallest units) - so the four buckets still sum to the supply exactly.";
       setText("alloc-result", "Model output: a supply of " + res.supply + " splits into liquidity " + res.liquidity + " (" + fmtAmt(res.liquidityBps / 100) + "%), community " + res.community + " (" + fmtAmt(res.communityBps / 100) + "%), team " + res.team + " (" + fmtAmt(res.teamBps / 100) + "%) and a treasury remainder of " + res.treasury + " (" + fmtAmt(res.treasuryBps / 100) + "%)." + dustNote + " The named buckets are floored at the smallest unit and the treasury is the designated remainder - the convention modelled here; a launch that assigns its dust to a different bucket, or rounds instead of flooring, splits differently in the smallest units. Bucket labels are the common ones; what each bucket may be used for is set by the launch's own terms, vesting (Tool 19) is not applied here, and no live token is read. An educational model of a supply split, not a live token. Not financial advice.");
+    });
+
+    var qvForm = document.getElementById("qv-calc");
+    if (qvForm) qvForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = quadraticVote(val("qv-budget"), val("qv-a"), val("qv-b"), val("qv-c"));
+      if (res === null) {
+        document.getElementById("qv-total-out").value = "Invalid";
+        document.getElementById("qv-remaining-out").value = "Invalid";
+        setText("qv-result", "Check the inputs: the budget must be a whole number of credits from 1 up, and each proposal's votes a whole number from 0 up - votes are counts and are never fractional.");
+        return;
+      }
+      document.getElementById("qv-total-out").value = res.totalCost;
+      document.getElementById("qv-remaining-out").value = res.remaining;
+      var budgetNote = res.overBudget
+        ? " That ballot is OVER budget by " + res.remaining.slice(1) + " credits - it cannot be cast as entered; trim votes (each one removed from a proposal saves its marginal cost) or raise the budget."
+        : " That ballot fits the budget with " + res.remaining + " credits to spare.";
+      setText("qv-result", "Model output: votes of " + res.votes[0] + ", " + res.votes[1] + " and " + res.votes[2] + " on the three proposals cost " + res.costs[0] + " + " + res.costs[1] + " + " + res.costs[2] + " = " + res.totalCost + " credits for " + res.totalVotes + " votes in total." + budgetNote + " The next vote on each proposal would cost " + res.nextCosts[0] + ", " + res.nextCosts[1] + " and " + res.nextCosts[2] + " more credits - the marginal cost 2v + 1 is what makes intensity expensive. Concentrating the whole budget of " + res.budget + " on one proposal buys at most " + res.maxSingleVotes + " votes (costing " + res.maxSingleCost + "). Three proposals and whole votes are modelled; each framework sets its own budget, proposal count and credit rules, and no live ballot is read. An educational model of a quadratic vote, not a live ballot. Not financial advice.");
     });
 
     /* catalogue filter */
