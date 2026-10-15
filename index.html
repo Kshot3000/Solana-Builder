@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1184,6 +1184,40 @@
         <p class="result" id="seed-result" aria-live="polite"></p>
       </form>
     </article>
+    <article class="tool">
+      <h3>30. Token valuation calculator — market cap &amp; fully diluted valuation (FDV)</h3>
+      <p>Every token page quotes two valuations from the same price: <strong>market cap = price × circulating supply</strong> — the supply actually trading today — and the <strong>fully diluted valuation (FDV) = price × max supply</strong> — what the token would value at if every token that will ever exist already did, at today's price. Between them sits the total minted supply: minted but not circulating (locked, treasury, still vesting — Tool 19) is the unlock overhang, and max minus total is not yet minted at all. The FDV ÷ market cap multiple is a pure supply ratio (max ÷ circulating — the price cancels), so it measures dilution still to come, not price. Headline: at a price of 2.5, a circulating supply of 400,000,000 against a total of 800,000,000 and a max of 1,000,000,000 gives a market cap of 1,000,000,000 and an FDV of 2,500,000,000 — 2.5× the market cap, with only 40% of the max supply circulating. All products floor in exact integer math, and the two gap values are differences of the floored valuations so the parts sum exactly to the FDV. The price and supplies are your inputs — no live price or mint is read. An educational model of token valuation, not live market data. Not financial advice.</p>
+      <form id="mcap-calc">
+        <div class="grid">
+          <div>
+            <label for="mcap-price">Token price (quote per token, your input)</label>
+            <input id="mcap-price" name="mcap-price" value="2.5">
+          </div>
+          <div>
+            <label for="mcap-circ">Circulating supply (tokens trading today)</label>
+            <input id="mcap-circ" name="mcap-circ" value="400000000">
+          </div>
+          <div>
+            <label for="mcap-total">Total supply (tokens minted so far)</label>
+            <input id="mcap-total" name="mcap-total" value="800000000">
+          </div>
+          <div>
+            <label for="mcap-max">Max supply (the minting cap)</label>
+            <input id="mcap-max" name="mcap-max" value="1000000000">
+          </div>
+          <div>
+            <label for="mcap-out">Market cap (price × circulating, model)</label>
+            <input id="mcap-out" name="mcap-out" readonly>
+          </div>
+          <div>
+            <label for="mcap-fdv-out">FDV (price × max supply, model)</label>
+            <input id="mcap-fdv-out" name="mcap-fdv-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Value the token</button>
+        <p class="result" id="mcap-result" aria-live="polite"></p>
+      </form>
+    </article>
 
   </section>
 
@@ -1293,6 +1327,7 @@
       <li><strong>Price dilution from the schedule, not from headlines</strong> (Tool 26 above): new SOL is issued at max(1.5%, 8% × 0.85<sup>years</sup>) — at year 5 that is 3.5496%, and the 1.5% terminal floor arrives at year ≈10.30, so issuance never stops, it just slows to the floor. The rate glides per epoch (the year is fractional on-chain), and a governance-adopted doubling of the disinflation rate to 30% is not a live parameter until the validator implements it — model it at 3,000 bps, don't quote it as current.</li>
       <li><strong>Budget a compressed NFT collection by its tree, not per asset</strong> (Tool 28 above): a cNFT collection's on-chain cost is one concurrent Merkle tree account — 56 bytes of header, 64 fixed, a changelog ring of buffer × (40 + 32 × depth) bytes, 32 × depth of rightmost proof, plus any canopy — and the ring is almost all of it: a depth-14, buffer-64 tree is 31,800 bytes and 222,218,880 lamports of rent for 16,384 assets, of which 31,232 bytes are changelog. Depth sets capacity (2<sup>depth</sup>), the buffer (a power of two) sets how many concurrent updates the tree absorbs, and a canopy trades more rent up front for fewer proof hashes on every later transfer.</li>
       <li><strong>Derive a seeded address when a signer — not a program — needs many accounts</strong> (Tool 29 above): a seeded address is <code>SHA-256(base ‖ seed ‖ owner)</code> — no marker, no bump, no curve check, so an on-curve result is valid (the hub's donation address with seed <code>0</code> under the Stake program derives <code>4z22cSCVREYe519iEet4xdqBSrTDx9muhtRR3fcRxpod</code>). Reach for a PDA (Tool 16) when a program must sign; reach for a seed when a base keypair creates a family of accounts, one seed per member, and signs their creation itself. The seed is a single string of at most 32 UTF-8 bytes, used byte-for-byte.</li>
+      <li><strong>Read a token's valuation by which supply it multiplies</strong> (Tool 30 above): market cap is price × circulating supply, FDV is price × max supply, and the multiple between them is max ÷ circulating — the price cancels, so it is pure dilution still to come. At a price of 2.5 with 400,000,000 circulating of a 1,000,000,000 max, the market cap is 1,000,000,000 and the FDV 2,500,000,000: only 40% of the supply trades today, and the FDV assumes today's price survives the rest arriving.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1319,6 +1354,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=26"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>

@@ -1181,6 +1181,56 @@ function createWithSeed(baseStr, seedStr, ownerStr) {
   };
 }
 
+/* ---------- Tool 30: token valuation — market cap & FDV ---------- */
+/* Every token page quotes two valuations from the same price:
+     market cap        = price x circulating supply
+     total valuation   = price x total supply (minted so far)
+     FDV               = price x max supply (the cap, if every token existed)
+   Circulating is what trades today; the gap to total is minted but not
+   circulating (locked, treasury, unvested — Tool 19), and the gap to max
+   is not yet minted at all. All three products floor in exact scaled-
+   BigInt, like an on-chain division. The two gap values are taken as
+   DIFFERENCES of the floored valuations (totalValuation - marketCap,
+   fdv - totalValuation) rather than floored products of the gap
+   supplies, so the three parts always sum exactly to the FDV — the
+   remainder convention of Tool 23's sale split. The FDV/market-cap
+   multiple is max / circulating: the price cancels, so the multiple is
+   a pure supply ratio — how many times today's float the fully diluted
+   supply is. Supplies must nest (circulating <= total <= max) or the
+   figures describe no real mint and are rejected. A token whose max
+   equals its circulating supply is fully diluted: all three valuations
+   coincide. Price and supplies are user inputs — this tool reads no
+   live price and no live mint. */
+function tokenValuation(priceStr, circStr, totalStr, maxStr) {
+  var price = parseScaled(priceStr);
+  var circ = parseScaled(circStr);
+  var total = parseScaled(totalStr);
+  var max = parseScaled(maxStr);
+  if (price === null || circ === null || total === null || max === null) return null;
+  if (price <= 0n || circ <= 0n || total < circ || max < total) return null;
+  var mcap = (price * circ) / SCALE;
+  var tval = (price * total) / SCALE;
+  var fdv = (price * max) / SCALE;
+  return {
+    price: formatScaled(price),
+    circulating: formatScaled(circ),
+    total: formatScaled(total),
+    max: formatScaled(max),
+    marketCap: formatScaled(mcap),
+    totalValuation: formatScaled(tval),
+    fdv: formatScaled(fdv),
+    nonCirculating: formatScaled(total - circ),
+    unissued: formatScaled(max - total),
+    nonCirculatingValue: formatScaled(tval - mcap),
+    unissuedValue: formatScaled(fdv - tval),
+    circPctOfTotal: Number(circ) * 100 / Number(total),
+    circPctOfMax: Number(circ) * 100 / Number(max),
+    fdvMultiple: Number(max) / Number(circ),
+    fullyDiluted: circ === max,
+    marketCapIsZero: mcap === 0n
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -1677,6 +1727,7 @@ if (typeof module !== "undefined" && module.exports) {
     associatedTokenAddress, ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
     merkleTreePlan, CMT_HEADER_BYTES, CMT_FIXED_BYTES, CMT_MAX_DEPTH, CMT_MAX_BUFFER_SIZE,
     createWithSeed, MAX_SEED_ADDRESS_SEED_BYTES, STAKE_PROGRAM_ID,
+    tokenValuation,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -2283,6 +2334,27 @@ if (typeof document !== "undefined") {
         ? " This result lands ON the ed25519 curve - and is still a valid seeded address: unlike a PDA there is no curve check and no bump scan here, because nobody needs a private key for it and nobody could know one (the bytes are a hash output)."
         : " This result happens to land off the ed25519 curve - which is not required here: unlike a PDA there is no curve check and no bump scan, and an on-curve result would be just as valid.";
       setText("seed-result", "Model output: SHA-256 of the base " + res.base + ", the " + res.seedByteLen + "-byte seed and the owner " + res.owner + " derives the seeded address " + res.address + "." + curveNote + " The derivation is pure math - whether that account has been created on-chain yet (creation is a system-program instruction the base signs, paying the account's rent) is a separate question this tool does not read. An educational model of seeded-address derivation, not a live account lookup. Not financial advice.");
+    });
+
+    var mcapForm = document.getElementById("mcap-calc");
+    if (mcapForm) mcapForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = tokenValuation(val("mcap-price"), val("mcap-circ"), val("mcap-total"), val("mcap-max"));
+      if (res === null) {
+        document.getElementById("mcap-out").value = "Invalid";
+        document.getElementById("mcap-fdv-out").value = "Invalid";
+        setText("mcap-result", "Check the inputs: the price must be above zero and every supply above zero, each with at most 9 decimal places, and the supplies must nest — circulating no more than total, and total no more than max. A set of supplies that does not nest describes no real mint.");
+        return;
+      }
+      document.getElementById("mcap-out").value = res.marketCap;
+      document.getElementById("mcap-fdv-out").value = res.fdv;
+      var dilutedNote = res.fullyDiluted
+        ? " The circulating supply equals the max supply, so this token is fully diluted: market cap and FDV are the same number, and no future minting or unlock can dilute holders at this supply."
+        : " Only " + res.circPctOfMax.toFixed(4) + "% of the max supply circulates today, so the FDV is " + res.fdvMultiple.toFixed(4) + "x the market cap — that multiple is a pure supply ratio (max divided by circulating; the price cancels). The minted-but-not-circulating " + res.nonCirculating + " tokens are worth " + res.nonCirculatingValue + " at this price if they unlock and sell, and the " + res.unissued + " not yet minted are worth " + res.unissuedValue + " more at this price — FDV assumes today's price survives that supply arriving, which is an assumption, not a forecast.";
+      var zeroNote = res.marketCapIsZero
+        ? " Note the market cap floors to exactly 0 at this precision: the price times the circulating supply is under one smallest unit of the quote, so 0 is the exact floored figure, not a missing value."
+        : "";
+      setText("mcap-result", "Model output: at a price of " + res.price + " per token, a circulating supply of " + res.circulating + " gives a market cap of " + res.marketCap + "; the total minted supply of " + res.total + " values at " + res.totalValuation + ", and the max supply of " + res.max + " gives a fully diluted valuation (FDV) of " + res.fdv + ". Circulating is " + res.circPctOfTotal.toFixed(4) + "% of the total supply." + dilutedNote + zeroNote + " The price and supplies are your inputs — no live price or mint is read, and a data site's circulating figure is that site's own accounting of locked and treasury wallets. An educational model of token valuation, not live market data. Not financial advice.");
     });
 
     /* catalogue filter */
