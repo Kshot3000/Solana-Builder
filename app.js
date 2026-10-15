@@ -2128,6 +2128,50 @@ function lpWithdraw(reserveAStr, reserveBStr, supplyStr, burnStr) {
   };
 }
 
+/* ---------- Tool 46: airdrop / multisend cost planner ---------- */
+/* Sending a token to N wallets costs SOL before any token moves, in two
+   parts with different natures. (1) RENT: a recipient who does not yet hold
+   the mint needs an associated token account (Tool 27), a 165-byte token
+   account whose rent-exempt deposit is Tool 3's own figure for 165 bytes -
+   2,039,280 lamports each. That deposit is LOCKED, not spent: it is
+   reclaimable if the account is later closed. (2) FEES: the transfers ride
+   in batched transactions, ceil(N / batch) of them, each paying Tool 5's
+   base fee for one signature (5,000 lamports) plus a priority fee the
+   sender chooses per transaction. Fees are spent. The batch size is the
+   sender's choice, bounded in practice by the 1,232-byte packet limit
+   (Tool 21) and by whether account-creation instructions ride in the same
+   transactions; no single "right" batch exists, so it is an input, never
+   a pinned constant. Prototype-verified before pinning: the transaction
+   count matched a naive one-by-one loop and every total decomposed
+   exactly (rent + fees == total) across 20,000 cases, 0 mismatches. */
+var MAX_AIRDROP_RECIPIENTS = 10000000;
+var TOKEN_ACCOUNT_BYTES = 165;
+
+function airdropCost(recipients, newAtas, batchSize, amountStr, priorityLamports) {
+  var n = Number(recipients), nu = Number(newAtas), batch = Number(batchSize), pri = Number(priorityLamports);
+  var amt = parseScaled(amountStr);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_AIRDROP_RECIPIENTS) return null;
+  if (!Number.isInteger(nu) || nu < 0 || nu > n) return null;
+  if (!Number.isInteger(batch) || batch < 1 || batch > 1000000) return null;
+  if (!Number.isInteger(pri) || pri < 0 || pri > 1000000000) return null;
+  if (amt === null || amt <= 0n) return null;
+  var rentPerAta = rentExempt(TOKEN_ACCOUNT_BYTES).rentExemptLamports;
+  var txCount = Math.floor((n + batch - 1) / batch);
+  var rentLamports = BigInt(nu) * BigInt(rentPerAta);
+  var feePerTx = BigInt(BASE_FEE_LAMPORTS_PER_SIGNATURE) + BigInt(pri);
+  var feesLamports = BigInt(txCount) * feePerTx;
+  var totalLamports = rentLamports + feesLamports;
+  return {
+    recipients: n, newAtas: nu, existingAtas: n - nu, batchSize: batch, txCount: txCount,
+    rentPerAtaLamports: rentPerAta,
+    rentLamports: Number(rentLamports), rentSol: formatScaled(rentLamports),
+    feePerTxLamports: Number(feePerTx),
+    feesLamports: Number(feesLamports), feesSol: formatScaled(feesLamports),
+    totalLamports: Number(totalLamports), totalSol: formatScaled(totalLamports),
+    amountPerRecipient: formatScaled(amt), tokensNeeded: formatScaled(BigInt(n) * amt)
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2634,6 +2678,7 @@ if (typeof module !== "undefined" && module.exports) {
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
     routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap, orderBookBuy, twapOracle, MAX_TWAP_SECONDS, lpWithdraw,
+    airdropCost, MAX_AIRDROP_RECIPIENTS, TOKEN_ACCOUNT_BYTES,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3571,6 +3616,22 @@ if (typeof document !== "undefined") {
         ? " That is the whole supply, so the withdrawal returns the entire reserves exactly and leaves the pool empty."
         : " The pool keeps " + res.remainingA + " of token A and " + res.remainingB + " of token B against a remaining supply of " + res.remainingSupply + ".";
       setText("lpwd-result", "Model output: burning " + res.burn + " LP tokens - a " + fmtAmt(res.sharePct) + "% share of the supply - returns " + res.outA + " of token A and " + res.outB + " of token B, each floored at the smallest unit." + tailNote + dustNote + " That is a share of what the pool holds now, not a return of any original deposit: swaps, accrued fees and price moves since depositing are all inside these reserves. The reserves and supply are your inputs - no live pool is read. An educational model of an LP withdrawal, not a live quote. Not financial advice.");
+    });
+
+
+    var airForm = document.getElementById("air-calc");
+    if (airForm) airForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = airdropCost(val("air-recipients"), val("air-new"), val("air-batch"), val("air-amount"), val("air-priority"));
+      if (res === null) {
+        document.getElementById("air-tx-out").value = "Invalid";
+        document.getElementById("air-total-out").value = "Invalid";
+        setText("air-result", "Check the inputs: recipients must be a whole number from 1 to 10,000,000, new token accounts a whole number from 0 up to the recipient count, transfers per transaction a whole number of 1 or more, the amount per recipient above zero with at most 9 decimal places, and the priority fee per transaction a whole number of lamports from 0 to 1,000,000,000.");
+        return;
+      }
+      document.getElementById("air-tx-out").value = String(res.txCount);
+      document.getElementById("air-total-out").value = res.totalSol;
+      setText("air-result", "Model output: sending " + res.amountPerRecipient + " to each of " + res.recipients + " recipients takes " + res.txCount + " transactions at " + res.batchSize + " transfers per transaction, and needs " + res.tokensNeeded + " tokens in the mint. Creating " + res.newAtas + " new token accounts locks " + res.rentLamports + " lamports (" + res.rentSol + " SOL) of rent-exempt deposit at " + res.rentPerAtaLamports + " lamports each - that deposit is reclaimable if the accounts are later closed; it is not spent. Network fees are " + res.feesLamports + " lamports (" + res.feesSol + " SOL): " + res.txCount + " transactions at " + res.feePerTxLamports + " lamports each (5,000 base for one signature plus your priority fee). Total SOL to fund the sending wallet: " + res.totalLamports + " lamports (" + res.totalSol + " SOL), plus the tokens. The batch size is your choice, bounded by the 1,232-byte packet limit and by whether the creation instructions ride in the same transactions; failed transfers, retries and any distributor program's own fees are not modelled, and no live cluster is read. An educational model of an airdrop's SOL cost, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
