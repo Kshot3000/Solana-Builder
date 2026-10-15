@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solana Ecosystem Builder — tools, catalogue and guides for building on Solana</title>
-<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, stableswap pools — the Curve-style invariant behind stable pools, its invariant D and post-trade balance solved by integer Newton iteration, the amplification coefficient that holds the price near 1:1 while the pool stays balanced and bends back toward constant-product pricing as it unbalances, with the swap fee charged on the output, two-hop swap routes - an aggregator's A to M to B path through two constant-product pools, the full intermediate amount swapped onward so the two fees and the two price impacts compound, priced against the route's spot value to give the route's total cost in basis points, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
+<meta name="description" content="An independent builder hub for the whole Solana ecosystem: honestly labelled educational tools (lamports, constant-product swaps, rent, impermanent loss, transaction and priority fees, SPL token decimals, base58 address format checking, staking rewards by epoch, Solana Pay transfer-request URLs, CLMM tick and price ranges, slippage tolerance and minimum received, the epoch schedule with its warmup epochs, Token-2022 transfer fees withheld on transfer, sandwich attacks and MEV extraction, program-derived addresses (PDAs) derived from seeds with the full SHA-256 and ed25519 curve check, CLMM position amounts from a liquidity amount and tick range, token vesting schedules with a cliff and linear unlock, lending health factors, loan-to-value and liquidation prices, serialized transaction sizes against the 1,232-byte packet limit, with address-lookup-table savings, Anchor account space priced as its rent-exempt deposit, marketplace and escrow sale splits into a platform fee, a creator royalty and the seller's remainder, stake activation and cooldown timing under the network's 9% warmup/cooldown rate shared pro-rata by everything moving, CLMM uncollected fees computed from the position's X64 fee-growth counters with wrapping u128 subtraction, the inflation schedule that issues new SOL (8% initial, 15% disinflation, 1.5% terminal, gliding per epoch), associated token account (ATA) addresses derived as the PDA of wallet, token program and mint under the ATA program, compressed NFT tree planning — the concurrent Merkle tree account size and rent-exempt deposit for a chosen depth, changelog buffer and canopy, and why the changelog ring is almost all of the account, seeded account addresses derived with createWithSeed as SHA-256 of a base, one seed string and the owner program — with no marker, no bump and no ed25519 curve check, unlike a PDA, token valuations — market cap as price times circulating supply and the fully diluted valuation (FDV) as price times max supply, with the minted-but-not-circulating and not-yet-minted gaps valued separately), address lookup table planning — the 56-byte metadata plus 32 bytes per stored address (256 maximum), the rent-exempt deposit that locks, and the per-transaction bytes a table saves against inlining full keys, oracle price confidence — reading a Pyth-style feed's price, conf and expo as a one-standard-deviation band, its width in basis points of the price, and the width guard a program applies before trusting it, launchpad bonding curves — a token priced off virtual SOL and virtual token reserves on a constant-product curve before any real pool exists, the real SOL raised counted separately toward a graduation target at which the real funds and unsold tokens migrate to an AMM, perpetual funding payments — the periodic payment that anchors a perpetual future to spot, notional times a signed rate in basis points per hour times the hours held, longs paying shorts at a positive rate and shorts paying longs at a negative one, stableswap pools — the Curve-style invariant behind stable pools, its invariant D and post-trade balance solved by integer Newton iteration, the amplification coefficient that holds the price near 1:1 while the pool stays balanced and bends back toward constant-product pricing as it unbalances, with the swap fee charged on the output, two-hop swap routes - an aggregator's A to M to B path through two constant-product pools, the full intermediate amount swapped onward so the two fees and the two price impacts compound, priced against the route's spot value to give the route's total cost in basis points, limit-order book walks - a market buy filling against resting asks level by level at each order's own price, its volume-weighted average price, the extra cost over the best ask, and the unfilled remainder when the visible book runs out, a verified project catalogue, and a getting-started guide. By Kyle Cox (@kshot9000).">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
 <body>
@@ -1740,6 +1740,57 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>43. Limit-order book walk - what a market buy actually pays</h3>
+      <p>Every other swap tool on this hub prices against a pool curve. A central limit order book (Phoenix, OpenBook and Manifest on Solana) works the other way: traders rest limit orders at their own prices, and a market buy <strong>walks the ask side</strong> - it fills at the best (lowest) ask first, then the next, at each resting order's own price, until the buy is filled or the book runs out. The headline book - <strong>50 at 100</strong>, <strong>100 at 101</strong>, <strong>200 at 103</strong> - fills a buy of <strong>120</strong> as 50 at 100 plus 70 at 101, for a total cost of <strong>12,070</strong> and a volume-weighted average price (VWAP) of <strong>100.583333333</strong>: exactly <strong>70</strong> more than the 12,000 the same fill would cost if the whole book sat at the best ask. Ask for 1,000 and the book honestly runs out - it fills only its full depth of 350 (for 35,700, a VWAP of exactly 102) and reports <strong>650 unfilled</strong> rather than inventing deeper liquidity. Each level's cost floors at the smallest unit in exact scaled-BigInt. Three ask levels are modelled; a live book has many more, orders ahead of yours in time priority, and venue taker fees, which are stated here as not modelled. An educational model of an order-book fill, not a live quote. Not financial advice.</p>
+      <form id="book-calc">
+        <div class="grid">
+          <div>
+            <label for="book-p1">Best ask price (quote per base)</label>
+            <input id="book-p1" name="book-p1" value="100">
+          </div>
+          <div>
+            <label for="book-q1">Quantity resting at the best ask</label>
+            <input id="book-q1" name="book-q1" value="50">
+          </div>
+          <div>
+            <label for="book-p2">Second ask price (must be above the best)</label>
+            <input id="book-p2" name="book-p2" value="101">
+          </div>
+          <div>
+            <label for="book-q2">Quantity resting at the second ask</label>
+            <input id="book-q2" name="book-q2" value="100">
+          </div>
+          <div>
+            <label for="book-p3">Third ask price (must be above the second)</label>
+            <input id="book-p3" name="book-p3" value="103">
+          </div>
+          <div>
+            <label for="book-q3">Quantity resting at the third ask</label>
+            <input id="book-q3" name="book-q3" value="200">
+          </div>
+          <div>
+            <label for="book-buy">Market buy quantity (base units)</label>
+            <input id="book-buy" name="book-buy" value="120">
+          </div>
+          <div>
+            <label for="book-filled-out">Quantity filled (model)</label>
+            <input id="book-filled-out" name="book-filled-out" readonly>
+          </div>
+          <div>
+            <label for="book-cost-out">Total cost in the quote asset (model)</label>
+            <input id="book-cost-out" name="book-cost-out" readonly>
+          </div>
+          <div>
+            <label for="book-vwap-out">Volume-weighted average price paid (model)</label>
+            <input id="book-vwap-out" name="book-vwap-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Walk the book</button>
+        <p class="result" id="book-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1882,6 +1933,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=39"></script>
+<script src="app.js?v=40"></script>
 </body>
 </html>

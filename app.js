@@ -1990,6 +1990,56 @@ function clmmSwap(liquidityStr, lower, upper, current, direction, amountInStr, f
   };
 }
 
+/* ---------- Tool 43: limit-order book walk (market buy against resting asks) ---------- */
+/* A central limit order book (Phoenix, OpenBook, Manifest on Solana) holds
+   resting limit orders; a market buy does not trade at one price - it walks
+   the ask side from the best (lowest) price upward, filling at each resting
+   order's own price until the buy is filled or the book runs out. Each
+   level's cost floors at the smallest unit in exact scaled-BigInt
+   (taken x price), the total is the sum of the level costs, and the volume-
+   weighted average price (VWAP) = total cost / filled quantity. The honest
+   figures are the ones an AMM quote hides: how much of the book the trade
+   consumed, the extra cost over filling entirely at the best ask, and the
+   unfilled remainder when the visible book is too shallow - a market order
+   cannot invent liquidity that is not resting there. Three ask levels are
+   modelled; venue taker fees are stated as not modelled. */
+function orderBookBuy(p1Str, q1Str, p2Str, q2Str, p3Str, q3Str, buyStr) {
+  var ps = [parseScaled(p1Str), parseScaled(p2Str), parseScaled(p3Str)];
+  var qs = [parseScaled(q1Str), parseScaled(q2Str), parseScaled(q3Str)];
+  var buy = parseScaled(buyStr);
+  if (buy === null || buy <= 0n) return null;
+  for (var i = 0; i < 3; i++) {
+    if (ps[i] === null || qs[i] === null || ps[i] <= 0n || qs[i] <= 0n) return null;
+  }
+  if (!(ps[0] < ps[1] && ps[1] < ps[2])) return null;
+  var remaining = buy, totalCost = 0n, filled = 0n, takes = [];
+  for (var j = 0; j < 3; j++) {
+    var take = qs[j] < remaining ? qs[j] : remaining;
+    if (take <= 0n) { takes.push({ price: formatScaled(ps[j]), taken: "0", cost: "0" }); continue; }
+    var cost = (take * ps[j]) / SCALE;
+    totalCost += cost; filled += take; remaining -= take;
+    takes.push({ price: formatScaled(ps[j]), taken: formatScaled(take), cost: formatScaled(cost) });
+  }
+  var depth = qs[0] + qs[1] + qs[2];
+  var costAtBest = (filled * ps[0]) / SCALE;
+  var vwap = filled > 0n ? Number(totalCost) / Number(filled) : 0;
+  var best = Number(ps[0]) / 1e9;
+  return {
+    takes: takes,
+    buy: formatScaled(buy),
+    filled: formatScaled(filled),
+    remaining: formatScaled(remaining),
+    fullyFilled: remaining === 0n,
+    bookDepth: formatScaled(depth),
+    totalCost: formatScaled(totalCost),
+    vwap: vwap,
+    bestPrice: formatScaled(ps[0]),
+    costAtBest: formatScaled(costAtBest),
+    extraCost: formatScaled(totalCost - costAtBest),
+    slippagePct: filled > 0n ? ((vwap - best) / best) * 100 : 0
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2495,7 +2545,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpPosition, MAX_PERP_LEVERAGE,
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
-    routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap,
+    routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap, orderBookBuy,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3373,6 +3423,26 @@ if (typeof document !== "undefined") {
         ? " The trade is large enough to push the price all the way to the range's " + (res.direction === "token0" ? "lower" : "upper") + " bound (tick " + res.boundTick + "), so it stops there in this model: only " + fmtAmt(res.usedEffectiveIn) + " of the effective input is used inside this range and " + fmtAmt(res.unusedEffectiveIn) + " is left over - on-chain the trade would continue into the next tick range, against whatever liquidity is active there, which is not modelled here."
         : " The trade uses the full effective input inside this range, leaving " + fmtAmt(res.unusedEffectiveIn) + " unused.";
       setText("cswap-result", "Model output: paying " + res.amountIn + " " + inName + " withholds a fee of " + res.fee + " (at " + res.feeBps + " bps) and swaps the remaining " + res.effectiveIn + " against active liquidity " + res.liquidity + " over ticks " + res.tickLower + " to " + res.tickUpper + " at the current tick " + res.tickCurrent + " (price " + fmtAmt(res.priceCurrent) + " token1 per token0). It pays out " + fmtAmt(res.amountOut) + " " + outName + " and moves the price to " + fmtAmt(res.priceAfter) + " (a price impact of " + res.priceImpactPct.toFixed(4) + "% against the starting spot)." + boundNote + " Inside one range this is the same trade as a constant-product swap on the range's virtual reserves, which is why the output matches Tool 2 at the matching reserves; tick crossing, the next range's liquidity and any interface fee a venue adds on top are not modelled, and no live pool is read. An educational model of a CLMM swap, not a live quote. Not financial advice.");
+    });
+
+    var bookForm = document.getElementById("book-calc");
+    if (bookForm) bookForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = orderBookBuy(val("book-p1"), val("book-q1"), val("book-p2"), val("book-q2"), val("book-p3"), val("book-q3"), val("book-buy"));
+      if (res === null) {
+        document.getElementById("book-filled-out").value = "Invalid";
+        document.getElementById("book-cost-out").value = "Invalid";
+        document.getElementById("book-vwap-out").value = "Invalid";
+        setText("book-result", "Check the inputs: every price, quantity and the buy amount must be above zero (up to 9 decimal places), and the three ask prices must strictly increase - a book's asks are sorted best (lowest) first.");
+        return;
+      }
+      document.getElementById("book-filled-out").value = res.filled;
+      document.getElementById("book-cost-out").value = res.totalCost;
+      document.getElementById("book-vwap-out").value = fmtAmt(res.vwap);
+      var fillNote = res.fullyFilled
+        ? " The buy filled in full against the three levels shown."
+        : " The visible book held only " + res.bookDepth + " in total, so " + res.remaining + " of the buy could not fill at any of these prices - on a live book it would fill deeper, wait as a limit order, or be cancelled, depending on the order type.";
+      setText("book-result", "Model output: buying " + res.buy + " walks the asks in order - " + res.takes.map(function (t) { return t.taken + " at " + t.price + " (cost " + t.cost + ")"; }).join(", ") + " - filling " + res.filled + " for a total cost of " + res.totalCost + ", a volume-weighted average price of " + fmtAmt(res.vwap) + ". Filling entirely at the best ask of " + res.bestPrice + " would have cost " + res.costAtBest + ", so walking the book cost an extra " + res.extraCost + " (a slippage of " + res.slippagePct.toFixed(4) + "% against the best ask)." + fillNote + " Three ask levels are modelled and venue taker fees are not modelled; no live book is read. An educational model of an order-book fill, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
