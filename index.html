@@ -1374,6 +1374,61 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>35. Lending interest-rate model — the kinked curve that prices a borrow</h3>
+      <p>Solana lending markets (Kamino, Marginfi, Drift, Save and others) do not set borrow rates by hand: they read them off a <strong>kinked curve</strong> of <strong>utilization</strong> — borrowed ÷ supplied. Below the <strong>optimal utilization</strong> the annual rate climbs gently (<strong>base + slope1 × U ÷ Uopt</strong>); past it a steep <strong>slope2</strong> takes over, pricing scarce liquidity hard to pull deposits in and borrows down. Suppliers earn <strong>borrow rate × U × (1 − reserve factor)</strong> — only the borrowed share of the pool earns, and the protocol keeps the reserve factor of it. The headline market holds <strong>1,000,000 supplied and 800,000 borrowed</strong> — utilization exactly on its 80% kink — so the borrow rate is exactly <strong>6%</strong> (2% base + 4% first slope), suppliers earn <strong>4.32%</strong>, and the borrowed total accrues <strong>49,465.048542105</strong> of interest over 365 days compounded daily. Push borrowed to 900,000 and the second slope lifts the borrow rate to 36%. Interest here compounds daily at a frozen utilization — real markets accrue continuously or per-slot and the rate moves as utilization moves — and every market sets (and governance changes) its own parameters, so all of them are inputs and no live market is read. An educational model of a lending rate curve, not a live quote. Not financial advice.</p>
+      <form id="irate-calc">
+        <div class="grid">
+          <div>
+            <label for="irate-supplied">Total supplied to the market (asset units)</label>
+            <input id="irate-supplied" name="irate-supplied" value="1000000">
+          </div>
+          <div>
+            <label for="irate-borrowed">Total borrowed from the market (same asset)</label>
+            <input id="irate-borrowed" name="irate-borrowed" value="800000">
+          </div>
+          <div>
+            <label for="irate-base">Base rate, annual basis points (the rate at zero utilization)</label>
+            <input id="irate-base" name="irate-base" value="200">
+          </div>
+          <div>
+            <label for="irate-slope1">First slope, annual basis points (added by the optimal utilization)</label>
+            <input id="irate-slope1" name="irate-slope1" value="400">
+          </div>
+          <div>
+            <label for="irate-uopt">Optimal utilization, percent (the kink)</label>
+            <input id="irate-uopt" name="irate-uopt" value="80">
+          </div>
+          <div>
+            <label for="irate-slope2">Second slope, annual basis points (added between the kink and 100% utilization)</label>
+            <input id="irate-slope2" name="irate-slope2" value="6000">
+          </div>
+          <div>
+            <label for="irate-reserve">Reserve factor, basis points of the interest kept by the protocol</label>
+            <input id="irate-reserve" name="irate-reserve" value="1000">
+          </div>
+          <div>
+            <label for="irate-days">Days to accrue interest on the borrowed total (whole days, compounded daily)</label>
+            <input id="irate-days" name="irate-days" value="365">
+          </div>
+          <div>
+            <label for="irate-borrow-out">Borrow rate, annual (model)</label>
+            <input id="irate-borrow-out" name="irate-borrow-out" readonly>
+          </div>
+          <div>
+            <label for="irate-supply-out">Supply rate, annual, after the reserve factor (model)</label>
+            <input id="irate-supply-out" name="irate-supply-out" readonly>
+          </div>
+          <div>
+            <label for="irate-interest-out">Interest accrued on the borrowed total over the days (model)</label>
+            <input id="irate-interest-out" name="irate-interest-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the borrow</button>
+        <p class="result" id="irate-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1487,6 +1542,7 @@
       <li><strong>Read an oracle price as a band, never a point</strong> (Tool 32 above): a Pyth-style feed publishes price ± conf at one exponent, conf being roughly one standard deviation — so judge a price by its band width in basis points of the price (150.00 ± 0.075 is 5 bps and passes a 1% guard; 67,890 ± 680 is 100.16 bps and fails that same guard), value collateral at the band's low end, and check staleness separately before trusting any of it.</li>
       <li><strong>Price a launchpad token off its virtual reserves, not its vault</strong> (Tool 33 above): a bonding curve's price is virtual SOL ÷ virtual token on a constant-product curve — the virtual SOL is a pricing offset, while the SOL the curve actually holds is the real raised figure that counts toward graduation. Every buy moves the price along the curve (3 SOL into the headline curve receives 90,081,892.62966333 tokens and lifts the price 20.78%), and at graduation the real SOL and unsold tokens migrate to an AMM at a continuous price but with the virtual depth left behind.</li>
       <li><strong>Price the funding before the leverage</strong> (Tool 34 above): a perpetual charges (or pays) funding every interval — payment = notional × rate × time, longs paying shorts at a positive rate and shorts paying longs at a negative one. A 100-unit long at 150 pays 1.5 per hour at just 1 bp per hour — 36 over a day — and that rate annualises to 87.6%, so a funding rate that looks like a rounding error is a real carry cost on any hold longer than a scalp; the rate resets every interval, which is why the annualised figure is a quote, never a forecast.</li>
+      <li><strong>Read a lending rate off its curve, not its headline</strong> (Tool 35 above): a borrow rate is a kinked function of utilization — borrowed ÷ supplied — climbing gently to the optimal utilization, then steeply past it, and suppliers earn the borrow rate × utilization × (1 − reserve factor). A market at exactly its 80% kink with a 2% base and 4% first slope charges 6% and pays suppliers 4.32%; the same market at 90% charges 36%. A quoted supply yield is only as durable as the utilization under it, and every parameter is governance-set, so check the curve before trusting either rate.</li>
       <li><strong>Install Anchor</strong> from <a href="https://www.anchor-lang.com">anchor-lang.com</a> and run <code>anchor init</code>: you get a Rust program, an IDL and TypeScript tests in one scaffold.</li>
       <li><strong>Read a real swap before writing one:</strong> run Tool 2 with a big amount in and watch price impact grow — that curve is what every AMM on Solana prices against.</li>
       <li><strong>Test on devnet, then localnet:</strong> <code>anchor test</code> spins up a local validator; deploy to devnet only when tests pass. Never learn on mainnet with real funds.</li>
@@ -1513,6 +1569,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>
