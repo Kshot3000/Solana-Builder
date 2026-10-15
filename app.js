@@ -2040,6 +2040,64 @@ function orderBookBuy(p1Str, q1Str, p2Str, q2Str, p3Str, q3Str, buyStr) {
   };
 }
 
+/* ---------- Tool 44: TWAP oracle (tick-cumulative time-weighted average price) ---------- */
+/* A concentrated-liquidity pool's oracle does not store prices - it stores
+   a running tick cumulative: every second, the current tick is added to a
+   signed 64-bit counter. The time-weighted average price over a window is
+   recovered from two readings of that counter: averageTick =
+   (cumulativeEnd - cumulativeStart) / elapsedSeconds, and the TWAP price =
+   1.0001 ^ averageTick. The division is integer division TRUNCATING TOWARD
+   ZERO (the on-chain and Solidity/Rust convention), not a floor: a delta
+   of -100 over 3 seconds averages tick -33, not -34, and the leftover
+   remainder (-1 tick-second here) is discarded, which the model reports.
+   Because the average is over TIME, a price that holds for one second of
+   an hour-long window moves the TWAP by only its tick's worth for that
+   second - the lag that makes a TWAP harder to manipulate than the spot
+   price, and slower to follow a real move, both stated on the page. The
+   average tick must sit inside the pool tick range; the price conversion
+   is floating point, like Tool 10. */
+var MAX_TWAP_SECONDS = 1000000000;
+var I64_BOUND = 9223372036854775807n;
+
+function parseTickCumulative(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^-?\d+$/.test(s)) return null;
+  var v = BigInt(s);
+  if (v > I64_BOUND || v < -I64_BOUND) return null;
+  return v;
+}
+
+function twapOracle(startStr, endStr, secondsStr, spotStr) {
+  var start = parseTickCumulative(startStr);
+  var end = parseTickCumulative(endStr);
+  if (start === null || end === null) return null;
+  if (typeof secondsStr !== "string" || !/^\d+$/.test(secondsStr.trim())) return null;
+  var seconds = BigInt(secondsStr.trim());
+  if (seconds <= 0n || seconds > BigInt(MAX_TWAP_SECONDS)) return null;
+  var spot = parseScaled(spotStr);
+  if (spot === null || spot <= 0n) return null;
+  var delta = end - start;
+  var avg = delta / seconds; /* BigInt division truncates toward zero */
+  if (avg < BigInt(MIN_TICK) || avg > BigInt(MAX_TICK)) return null;
+  var avgTick = Number(avg);
+  var remainder = delta - avg * seconds;
+  var price = tickToPrice(avgTick);
+  var spotPrice = Number(spot) / 1e9;
+  return {
+    startCumulative: start.toString(),
+    endCumulative: end.toString(),
+    elapsedSeconds: Number(seconds),
+    deltaTicks: delta.toString(),
+    avgTick: avgTick,
+    remainderTicks: remainder.toString(),
+    twapPrice: price,
+    spotPrice: formatScaled(spot),
+    deviationBps: (price / spotPrice - 1) * 10000,
+    deviationPct: (price / spotPrice - 1) * 100
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -2545,7 +2603,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpPosition, MAX_PERP_LEVERAGE,
     stableSwap, stableInvariantD, stableSolveY, MAX_STABLE_AMP,
     liquidationMax,
-    routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap, orderBookBuy,
+    routeSwap, cpSwapExactOut, arbitrageTrade, clmmSwap, orderBookBuy, twapOracle, MAX_TWAP_SECONDS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3443,6 +3501,24 @@ if (typeof document !== "undefined") {
         ? " The buy filled in full against the three levels shown."
         : " The visible book held only " + res.bookDepth + " in total, so " + res.remaining + " of the buy could not fill at any of these prices - on a live book it would fill deeper, wait as a limit order, or be cancelled, depending on the order type.";
       setText("book-result", "Model output: buying " + res.buy + " walks the asks in order - " + res.takes.map(function (t) { return t.taken + " at " + t.price + " (cost " + t.cost + ")"; }).join(", ") + " - filling " + res.filled + " for a total cost of " + res.totalCost + ", a volume-weighted average price of " + fmtAmt(res.vwap) + ". Filling entirely at the best ask of " + res.bestPrice + " would have cost " + res.costAtBest + ", so walking the book cost an extra " + res.extraCost + " (a slippage of " + res.slippagePct.toFixed(4) + "% against the best ask)." + fillNote + " Three ask levels are modelled and venue taker fees are not modelled; no live book is read. An educational model of an order-book fill, not a live quote. Not financial advice.");
+    });
+
+    var twapForm = document.getElementById("twap-calc");
+    if (twapForm) twapForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = twapOracle(val("twap-start"), val("twap-end"), val("twap-seconds"), val("twap-spot"));
+      if (res === null) {
+        document.getElementById("twap-avg-out").value = "Invalid";
+        document.getElementById("twap-price-out").value = "Invalid";
+        setText("twap-result", "Check the inputs: both tick cumulatives must be whole numbers (negative allowed, inside the signed 64-bit range), the window must be a whole number of seconds above zero, the spot price must be above zero (up to 9 decimal places), and the average tick the window implies must sit inside the pool tick range (-443,636 to 443,636).");
+        return;
+      }
+      document.getElementById("twap-avg-out").value = String(res.avgTick);
+      document.getElementById("twap-price-out").value = fmtAmt(res.twapPrice);
+      var devNote = res.deviationBps >= 0
+        ? "above the spot price you entered (" + res.spotPrice + ")"
+        : "below the spot price you entered (" + res.spotPrice + ")";
+      setText("twap-result", "Model output: the tick cumulative moved " + res.deltaTicks + " tick-seconds over " + res.elapsedSeconds + " seconds, an average tick of " + res.avgTick + " (the division truncates toward zero and discards a remainder of " + res.remainderTicks + " tick-seconds), so the time-weighted average price is " + fmtAmt(res.twapPrice) + " - " + fmtAmt(Math.abs(res.deviationBps)) + " bps " + devNote + ". That gap is the TWAP's lag: it prices where the pool has been over the whole window, not where it is now, which is what makes it expensive to manipulate and slow to follow a real move. The cumulatives and spot are your inputs from a pool's oracle account or an explorer - no live pool or oracle is read. An educational model of a TWAP oracle, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

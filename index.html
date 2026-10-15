@@ -1791,6 +1791,41 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>44. TWAP oracle calculator - the time-weighted average price</h3>
+      <p>A lending market or a cautious swap program rarely trusts a pool's spot price - one trade can move it. What it reads instead is the pool's <strong>TWAP oracle</strong>: the pool adds its current tick to a running <strong>tick cumulative</strong> counter every second, and the time-weighted average price over any window is <strong>1.0001^(cumulative change &divide; seconds)</strong>. The headline window - a cumulative that moves from <strong>0</strong> to <strong>360,000</strong> over <strong>3,600</strong> seconds - averages tick <strong>100</strong>, a TWAP of <strong>1.010049662</strong>, sitting <strong>97.55 bps below</strong> a spot price of 1.02: that gap is the lag, the price the pool <em>has been at</em> rather than the price it is at now. The division truncates toward zero, as the on-chain integer math does - a falling market averaging -33 ticks from a -100 change over 3 seconds, not -34 - and the discarded remainder is reported, not hidden. A longer window smooths a spike further and lags a real move longer; that trade-off is the whole design. The cumulatives and the spot are your inputs, as a pool's oracle account or an explorer reports them. An educational model of a TWAP oracle, not a live quote. Not financial advice.</p>
+      <form id="twap-calc">
+        <div class="grid">
+          <div>
+            <label for="twap-start">Tick cumulative at the window start (whole number, may be negative)</label>
+            <input id="twap-start" name="twap-start" value="0">
+          </div>
+          <div>
+            <label for="twap-end">Tick cumulative at the window end (whole number, may be negative)</label>
+            <input id="twap-end" name="twap-end" value="360000">
+          </div>
+          <div>
+            <label for="twap-seconds">Window length in seconds</label>
+            <input id="twap-seconds" name="twap-seconds" value="3600">
+          </div>
+          <div>
+            <label for="twap-spot">Current spot price, token1 per token0 (for the lag comparison)</label>
+            <input id="twap-spot" name="twap-spot" value="1.02">
+          </div>
+          <div>
+            <label for="twap-avg-out">Average tick over the window (model)</label>
+            <input id="twap-avg-out" name="twap-avg-out" readonly>
+          </div>
+          <div>
+            <label for="twap-price-out">Time-weighted average price (model)</label>
+            <input id="twap-price-out" name="twap-price-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Read the TWAP</button>
+        <p class="result" id="twap-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -1933,6 +1968,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=40"></script>
+<script src="app.js?v=41"></script>
 </body>
 </html>
