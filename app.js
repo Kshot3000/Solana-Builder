@@ -2377,6 +2377,41 @@ function quadraticVote(budget, votesA, votesB, votesC) {
    none is modelled or implied here. Prototype-verified before pinning:
    20,000 cases, 0 mismatches against the Fraction definitions of the
    three floored shares, and the holder's share never fell. */
+/* ---------- Tool 52: Merkle airdrop proof planner ---------- */
+/* An airdrop or allowlist with N recipients is commonly committed as a
+   Merkle tree: each recipient is a leaf, pairs hash upward to ONE root,
+   and only that 32-byte root goes on-chain. A claim supplies a PROOF -
+   one sibling hash per tree level - and the program hashes the leaf up
+   the proof and checks it lands on the stored root, so a claim is
+   verified without storing any other recipient on-chain. The tree is a
+   full binary tree over the next power of two at or above N: depth is
+   the smallest d with 2^d >= N (0 for a single recipient, whose leaf IS
+   the root and whose proof is empty), padded leaves are 2^d, total
+   nodes are 2 * 2^d - 1 and the proof is depth hashes of 32 bytes each.
+   The step is the teaching point: 16,384 recipients fit depth 14
+   exactly, and recipient 16,385 pushes the whole tree to depth 15 and
+   every proof from 448 to 480 bytes. Counts here are exact BigInt; the
+   leaf contents, hash function choice and any claim program are not
+   modelled. Prototype-verified before pinning: 20,000 cases, 0
+   mismatches against a naive level-by-level node count, with the
+   minimality property 2^(d-1) < N <= 2^d holding throughout. */
+var MAX_MERKLE_RECIPIENTS = 100000000;
+
+function merkleProof(recipients) {
+  var n = Number(recipients);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_MERKLE_RECIPIENTS) return null;
+  var N = BigInt(n);
+  var padded = 1n;
+  var depth = 0;
+  while (padded < N) { padded *= 2n; depth++; }
+  return {
+    recipients: n, depth: depth,
+    paddedLeaves: padded.toString(), emptyLeaves: (padded - N).toString(),
+    totalNodes: (2n * padded - 1n).toString(), internalNodes: (padded - 1n).toString(),
+    proofHashes: depth, proofBytes: depth * 32, rootBytes: 32
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -2907,6 +2942,7 @@ if (typeof module !== "undefined" && module.exports) {
     tokenAllocation,
     quadraticVote, MAX_QV_BUDGET, MAX_QV_VOTES,
     burnShare,
+    merkleProof, MAX_MERKLE_RECIPIENTS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -3960,6 +3996,26 @@ if (typeof document !== "undefined") {
         ? " The burn destroys the entire supply, so no share remains to own."
         : " The holder's share rises from " + fmtAmt(res.beforeBps / 100) + "% to " + fmtAmt(res.afterBps / 100) + "% (+" + res.gainBps + " whole basis points at the floored precision) while their balance stays exactly " + res.holder + " - a bigger share of a smaller supply, not more tokens.";
       setText("burn-result", "Model output: burning " + res.burn + " (" + fmtAmt(res.burnBps / 100) + "% of the supply) takes the supply from " + res.supply + " to " + res.newSupply + "." + endNote + " Shares are floored to whole basis points, so a dust balance can show 0% before and after even though its rational share did rise. A burn does not by itself set or raise a price, and no price, live supply or live burn is read. An educational model of a token burn, not a live token. Not financial advice.");
+    });
+
+    var merkForm = document.getElementById("merk-calc");
+    if (merkForm) merkForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = merkleProof(val("merk-recipients"));
+      if (res === null) {
+        document.getElementById("merk-depth-out").value = "Invalid";
+        document.getElementById("merk-proof-out").value = "Invalid";
+        setText("merk-result", "Check the input: the recipient count must be a whole number from 1 to 100,000,000.");
+        return;
+      }
+      document.getElementById("merk-depth-out").value = String(res.depth);
+      document.getElementById("merk-proof-out").value = res.proofBytes + " bytes";
+      var stepNote = res.recipients === 1
+        ? " A single recipient needs no proof at all: the leaf is the root."
+        : (res.emptyLeaves === "0"
+          ? " The recipient count is an exact power of two, so no leaf slots are left empty."
+          : " The tree is padded to " + res.paddedLeaves + " leaves, so " + res.emptyLeaves + " leaf slots stand empty - padding changes no proof, it only completes the tree.");
+      setText("merk-result", "Model output: " + (res.recipients === 1 ? "1 recipient commits" : res.recipients + " recipients commit") + " to a Merkle tree of depth " + res.depth + " with " + res.totalNodes + (res.totalNodes === "1" ? " node" : " nodes") + " in total. Only the 32-byte root goes on-chain; each claim supplies a proof of " + res.proofHashes + " sibling hashes (" + res.proofBytes + " bytes) and the program hashes the claim up those levels to check it against the root." + stepNote + " One recipient past a power of two pushes every proof up a level, so proof size moves in steps, not smoothly. Leaf contents, the hash function and any claim program are not modelled, and no live tree or airdrop is read. An educational model of a Merkle proof, not a live airdrop. Not financial advice.");
     });
 
     /* catalogue filter */

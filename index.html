@@ -2082,6 +2082,29 @@
     </article>
 
 
+    <article class="tool">
+      <h3>52. Merkle airdrop proof planner — one root on-chain, a proof per claim</h3>
+      <p>An airdrop or allowlist does not store every recipient on-chain: each recipient is a <strong>leaf</strong> in a Merkle tree, pairs of hashes combine upward to a single <strong>root</strong>, and only that <strong>32-byte root</strong> goes on-chain. A claim then supplies a <strong>proof</strong> — one sibling hash for each level of the tree — and the program hashes the claim up the proof and checks that it lands on the stored root. The tree is completed to the next power of two: <strong>10,000 recipients</strong> need a tree of <strong>depth 14</strong> padded to 16,384 leaves (32,767 nodes in total), and every claim carries a proof of <strong>14 hashes, 448 bytes</strong>. Proof size moves in steps, not smoothly: 16,384 recipients still fit depth 14 exactly, while recipient 16,385 pushes the whole tree to depth 15 and every proof to 480 bytes. A single recipient is the degenerate case — the leaf is the root and the proof is empty. This model counts the tree and the proof; the leaf contents, the hash function and any claim program are not modelled, and a compressed-NFT tree (Tool 28), which stores its tree on-chain, is a different structure. An educational model of a Merkle proof, not a live airdrop. Not financial advice.</p>
+      <form id="merk-calc">
+        <div class="grid">
+          <div>
+            <label for="merk-recipients">Recipients (leaves)</label>
+            <input id="merk-recipients" name="merk-recipients" inputmode="numeric" value="10000">
+          </div>
+          <div>
+            <label for="merk-depth-out">Tree depth (model)</label>
+            <input id="merk-depth-out" name="merk-depth-out" readonly>
+          </div>
+          <div>
+            <label for="merk-proof-out">Proof size (model)</label>
+            <input id="merk-proof-out" name="merk-proof-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the tree</button>
+        <p class="result" id="merk-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2224,6 +2247,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=48"></script>
+<script src="app.js?v=49"></script>
 </body>
 </html>
