@@ -2285,6 +2285,33 @@
       </form>
     </article>
 
+    <article class="card">
+      <h3>58. Classic NFT mint cost planner — the four accounts every mint funds</h3>
+      <p>A classic (non-compressed) Metaplex NFT is not one thing on-chain: it is <strong>four accounts</strong>, each funded rent-exempt when the mint is created — the <strong>mint</strong> itself (82 bytes, <strong>1,461,600 lamports</strong>), the holder's <strong>token account</strong> (165 bytes, <strong>2,039,280</strong>), the <strong>metadata</strong> account (allocated at its 679-byte maximum, <strong>5,616,720</strong>) and, when one is created, the <strong>master edition</strong> account (282 bytes, <strong>2,853,600</strong>). Every figure is Tool 3's rent run verbatim on those sizes, so the tools cannot disagree. The full recipe is <strong>11,971,200 lamports (0.0119712 SOL) per NFT</strong> — the origin of the rule of thumb that a Solana NFT costs about 0.012 SOL before fees — and minting <strong>100</strong> of them locks <strong>1,197,120,000 lamports (1.19712 SOL)</strong> across 120,800 bytes of accounts. The deposits are locked, not spent: closing an account reclaims its deposit, but the minter must hold the full amount up front, which is why large drops stage their funding. This is the classic structure; a compressed NFT (Tool 28) stores its state in one shared tree account instead and is a different cost entirely. An educational model of a classic NFT mint's rent, not a live quote. Not financial advice.</p>
+      <form id="nft-calc">
+        <div class="grid">
+          <div>
+            <label for="nft-count">NFTs to mint</label>
+            <input id="nft-count" name="nft-count" inputmode="numeric" value="100">
+          </div>
+          <div>
+            <label for="nft-editions">Of those, with a master edition account</label>
+            <input id="nft-editions" name="nft-editions" inputmode="numeric" value="100">
+          </div>
+          <div>
+            <label for="nft-total-out">Total rent-exempt lamports locked (model)</label>
+            <input id="nft-total-out" name="nft-total-out" readonly>
+          </div>
+          <div>
+            <label for="nft-per-out">Lamports per NFT with an edition (model)</label>
+            <input id="nft-per-out" name="nft-per-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the mint cost</button>
+        <p class="result" id="nft-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2427,6 +2454,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=54"></script>
+<script src="app.js?v=55"></script>
 </body>
 </html>

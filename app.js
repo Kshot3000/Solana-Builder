@@ -2697,6 +2697,46 @@ function dlmmBins(stepBps, binId, width) {
   };
 }
 
+/* ---------- Tool 58: classic NFT mint cost (Metaplex account recipe) ---------- */
+/* A classic (non-compressed) Metaplex NFT is four accounts, each funded
+   rent-exempt at creation: the mint (82 bytes), the holder's token account
+   (165 bytes), the metadata account (allocated at its 679-byte maximum) and,
+   when one is created, the master edition account (282 bytes). Every figure
+   is Tool 3's rentExempt run verbatim, so the tools cannot disagree. The
+   deposits are locked, not spent - closing an account reclaims its deposit -
+   but the minter must hold them up front. Marketplace and program mint fees
+   and the transaction fees are separate and not modelled. */
+var NFT_MINT_BYTES = 82;
+var NFT_TOKEN_ACCOUNT_BYTES = 165;
+var NFT_METADATA_BYTES = 679;
+var NFT_EDITION_BYTES = 282;
+var MAX_NFT_COUNT = 100000;
+
+function nftMintCost(count, editions) {
+  var n = Number(count);
+  var e = Number(editions);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_NFT_COUNT) return null;
+  if (!Number.isInteger(e) || e < 0 || e > n) return null;
+  var mintRent = rentExempt(NFT_MINT_BYTES).rentExemptLamports;
+  var tokenRent = rentExempt(NFT_TOKEN_ACCOUNT_BYTES).rentExemptLamports;
+  var metadataRent = rentExempt(NFT_METADATA_BYTES).rentExemptLamports;
+  var editionRent = rentExempt(NFT_EDITION_BYTES).rentExemptLamports;
+  var perNft = mintRent + tokenRent + metadataRent;
+  var perNftWithEdition = perNft + editionRent;
+  var totalBytes = BigInt(n) * BigInt(NFT_MINT_BYTES + NFT_TOKEN_ACCOUNT_BYTES + NFT_METADATA_BYTES) + BigInt(e) * BigInt(NFT_EDITION_BYTES);
+  var total = BigInt(n) * BigInt(perNft) + BigInt(e) * BigInt(editionRent);
+  return {
+    count: n, editions: e,
+    mintRentLamports: mintRent, tokenRentLamports: tokenRent,
+    metadataRentLamports: metadataRent, editionRentLamports: editionRent,
+    perNftLamports: perNft, perNftWithEditionLamports: perNftWithEdition,
+    totalBytes: totalBytes.toString(),
+    totalLamports: total.toString(),
+    totalSol: formatScaled(total),
+    perNftSol: formatScaled(BigInt(perNftWithEdition))
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3233,6 +3273,7 @@ if (typeof module !== "undefined" && module.exports) {
     escrowRelease,
     dcaPlan, MAX_DCA_ORDERS, MAX_DCA_TX_FEE_LAMPORTS,
     dlmmBins, MAX_DLMM_BIN_ID, MAX_DLMM_WIDTH,
+    nftMintCost, NFT_MINT_BYTES, NFT_TOKEN_ACCOUNT_BYTES, NFT_METADATA_BYTES, NFT_EDITION_BYTES, MAX_NFT_COUNT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4408,6 +4449,25 @@ if (typeof document !== "undefined") {
         ? " At least one of these prices is below the 9-decimal display precision and reads 0 - the ladder reaches it only at the extreme bin shown."
         : "";
       setText("dlmm-result", "Model output: at a bin step of " + res.stepBps + " bps (" + fmtAmt(res.stepPct) + "% per bin), bin " + res.binId + " prices at " + res.activePrice + " quote per base. A position " + res.width + (res.width === 1 ? " bin" : " bins") + " either side runs from bin " + res.lowerId + " at " + res.lowerPrice + " to bin " + res.upperId + " at " + res.upperPrice + " - a range multiplier of " + res.rangeMultiplier + " (a span of " + fmtAmt(res.spanPct) + "%), and that multiplier depends only on the step and the width, never on where the position sits. The price doubles every " + res.binsToDouble + (res.binsToDouble === 1 ? " bin" : " bins") + " at this step, and halves in the same count, by the ladder's reciprocal symmetry." + zeroNote + " Liquidity per bin, the position's token amounts, DLMM's variable volatility fee and any live pool are not modelled, and no live pool is read. An educational model of a DLMM bin ladder, not a live pool. Not financial advice.");
+    });
+
+
+    var nftForm = document.getElementById("nft-calc");
+    if (nftForm) nftForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = nftMintCost(val("nft-count"), val("nft-editions"));
+      if (res === null) {
+        document.getElementById("nft-total-out").value = "Invalid";
+        document.getElementById("nft-per-out").value = "Invalid";
+        setText("nft-result", "Check the inputs: the NFT count must be a whole number from 1 to 100000, and the master-edition count a whole number from 0 up to the NFT count.");
+        return;
+      }
+      document.getElementById("nft-total-out").value = res.totalLamports;
+      document.getElementById("nft-per-out").value = String(res.perNftWithEditionLamports);
+      var edNote = res.editions === 0
+        ? " No master editions are created, so each NFT is three accounts and " + res.perNftLamports + " lamports."
+        : " The " + res.editions + (res.editions === 1 ? " master edition adds" : " master editions add") + " a 282-byte account at " + res.editionRentLamports + " lamports each" + (res.editions === res.count ? ", so every NFT carries the full four-account recipe at " + res.perNftWithEditionLamports + " lamports (" + res.perNftSol + " SOL) each." : ".");
+      setText("nft-result", "Model output: minting " + res.count + (res.count === 1 ? " NFT" : " NFTs") + " creates " + res.totalBytes + " bytes of accounts - per NFT a mint at " + res.mintRentLamports + " lamports, a token account at " + res.tokenRentLamports + " and metadata at " + res.metadataRentLamports + " - and locks " + res.totalLamports + " lamports (" + res.totalSol + " SOL) of rent-exempt deposits in total." + edNote + " The deposits are locked, not spent: closing an account reclaims its deposit. Transaction fees, any marketplace or mint-program fee, candy-machine or guard costs and compressed NFTs (Tool 28, a different structure) are not modelled, and no live mint is read. An educational model of a classic NFT mint's rent, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
