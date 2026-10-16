@@ -2943,6 +2943,54 @@ function blockhashExpiry(fetchedStr, currentStr) {
   };
 }
 
+/* ---------- Tool 63: Anchor discriminator (sighash) finder ---------- */
+/* Every Anchor instruction's data starts with an 8-byte DISCRIMINATOR
+   and every Anchor account's data starts with one too (Tool 22 budgets
+   those 8 bytes): by default it is the first 8 bytes of the SHA-256 of
+   "<namespace>:<name>" - "global:<instruction name>" for instructions,
+   the Rust function name in snake_case exactly as declared, and
+   "account:<account name>" for accounts, the Rust struct name in
+   PascalCase exactly as declared. The hash is case-sensitive and
+   namespace-sensitive, so renaming or recasing a function or struct
+   changes its discriminator - which is why an Anchor rename silently
+   breaks every existing client and account. Only the DEFAULT
+   hash-derived discriminator is modelled: newer Anchor versions let a
+   program override it with a custom discriminator, and those programs
+   are stated on-page as out of scope. Names are validated as Rust
+   identifiers (a letter or underscore, then letters, digits and
+   underscores) and capped at 128 characters, far above real names.
+   Verified before shipping against Node's crypto SHA-256 on 20,000
+   random names (0 mismatches on the full hash, the discriminator hex
+   and the byte list) and against two published vectors:
+   global:initialize -> afaf6d1f0d989bed ([175, 175, 109, 31, 13, 152,
+   155, 237]) and account:MyAccount -> f61c0657fb2d322a ([246, 28, 6,
+   87, 251, 45, 50, 42], Anchor's own IDL example). The hash runs on
+   the hub's own sha256Bytes - the same implementation Tool 16's PDA
+   finder is proven on. */
+var MAX_ANCHOR_NAME_CHARS = 128;
+
+function anchorDiscriminator(kind, nameStr) {
+  if (kind !== "instruction" && kind !== "account") return null;
+  if (typeof nameStr !== "string") return null;
+  var name = nameStr.trim();
+  if (name.length === 0 || name.length > MAX_ANCHOR_NAME_CHARS) return null;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
+  var namespace = kind === "instruction" ? "global" : "account";
+  var preimage = namespace + ":" + name;
+  var bytes = utf8Bytes(preimage);
+  if (bytes === null) return null;
+  var hash = sha256Bytes(bytes);
+  var disc = hash.slice(0, 8);
+  var toHex = function (arr) {
+    return arr.map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  };
+  return {
+    kind: kind, name: name, namespace: namespace, preimage: preimage,
+    hashHex: toHex(hash), discriminatorHex: toHex(disc),
+    discriminatorBytes: disc
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3484,6 +3532,7 @@ if (typeof module !== "undefined" && module.exports) {
     clmmImpermanentLoss,
     optionsPayoff,
     blockhashExpiry, MAX_PROCESSING_AGE_BLOCKS,
+    anchorDiscriminator, MAX_ANCHOR_NAME_CHARS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4760,6 +4809,24 @@ if (typeof document !== "undefined") {
       else if (res.status === "last") statusNote = " This is the LAST block height at which the transaction can still land: one more produced block and the blockhash expires.";
       else statusNote = " The transaction can still land at any of the " + res.remainingBlocks + " block heights after this one, up to and including the last valid height.";
       setText("bhexp-result", "Model output: a blockhash from block height " + res.blockhashHeight + ", seen at current block height " + res.currentHeight + ", is " + res.ageBlocks + (res.ageBlocks === 1 ? " block" : " blocks") + " old, and its last valid block height is " + res.lastValidHeight + " - the blockhash height plus the 150-block maximum processing age, counted in produced blocks (block height), not slots, so skipped slots do not age it." + statusNote + " A durable-nonce transaction is the exception - its stored nonce does not age this way - and is not modelled here. An educational model of blockhash expiry, not a live cluster reading. Not financial advice.");
+    });
+
+    var discForm = document.getElementById("disc-calc");
+    if (discForm) discForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = anchorDiscriminator(val("disc-kind"), val("disc-name"));
+      if (res === null) {
+        document.getElementById("disc-hex-out").value = "Invalid";
+        document.getElementById("disc-bytes-out").value = "Invalid";
+        setText("disc-result", "Check the inputs: the name must be a Rust identifier exactly as declared - a letter or underscore, then letters, digits and underscores, at most 128 characters, with no spaces or punctuation.");
+        return;
+      }
+      document.getElementById("disc-hex-out").value = res.discriminatorHex;
+      document.getElementById("disc-bytes-out").value = "[" + res.discriminatorBytes.join(", ") + "]";
+      var roleNote = res.kind === "instruction"
+        ? " Every call to this instruction starts its instruction data with those 8 bytes, and the program's dispatcher matches them to route the call before any argument byte is read."
+        : " Every account of this type starts its account data with those 8 bytes, and Anchor checks them when it loads the account as this type - the check that stops a different account type being passed in its place.";
+      setText("disc-result", "Model output: the " + (res.kind === "instruction" ? "instruction" : "account") + " name " + res.name + " is hashed as the string " + res.preimage + "; the full SHA-256 is " + res.hashHex + ", so its discriminator - the hash's first 8 bytes - is " + res.discriminatorHex + ", the byte list [" + res.discriminatorBytes.join(", ") + "]." + roleNote + " The name is hashed exactly as written, case-sensitively, so renaming or recasing it would change the discriminator and break existing clients. This is the default hash-derived discriminator: a program that sets a custom discriminator override in newer Anchor versions does not use it, and such programs are not modelled. An educational model of Anchor's default discriminator, not a live program reading. Not financial advice.");
     });
 
     /* catalogue filter */

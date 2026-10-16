@@ -2451,6 +2451,36 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>63. Anchor discriminator finder — the 8 bytes that name an instruction or account</h3>
+      <p>An <strong>Anchor</strong> program never dispatches on a name string: every instruction call's data begins with an <strong>8-byte discriminator</strong> — the first 8 bytes of the SHA-256 hash of <code>global:&lt;name&gt;</code>, where the name is the Rust function name in snake_case, exactly as declared — and every Anchor account's data begins with the same construction over <code>account:&lt;name&gt;</code>, the Rust struct name in PascalCase (Tool 22 budgets those 8 bytes at the front of every account). The headline instruction, <strong>initialize</strong> — the first instruction of nearly every Anchor program — hashes to <strong>afaf6d1f0d989bed</strong>, the byte list <strong>[175, 175, 109, 31, 13, 152, 155, 237]</strong>. The hash is case-sensitive: <code>Initialize</code> is a different discriminator, so renaming or recasing a function or struct silently changes it and breaks every existing client and account — the discriminator is part of a program's public interface, not an internal detail. Only the <strong>default</strong> hash-derived discriminator is modelled: newer Anchor versions let a program set a custom discriminator override instead, and those programs do not use this hash. An educational model of Anchor's default discriminator, not a live program reading. Not financial advice.</p>
+      <form id="disc-calc">
+        <div class="grid">
+          <div>
+            <label for="disc-kind">What is being named</label>
+            <select id="disc-kind" name="disc-kind">
+              <option value="instruction" selected>Instruction (global namespace)</option>
+              <option value="account">Account (account namespace)</option>
+            </select>
+          </div>
+          <div>
+            <label for="disc-name">Name exactly as declared in Rust (instructions are snake_case, accounts are PascalCase)</label>
+            <input id="disc-name" name="disc-name" value="initialize">
+          </div>
+          <div>
+            <label for="disc-hex-out">Discriminator in hex (first 8 bytes of the SHA-256, model)</label>
+            <input id="disc-hex-out" name="disc-hex-out" readonly>
+          </div>
+          <div>
+            <label for="disc-bytes-out">Discriminator as a byte list (the form an IDL shows, model)</label>
+            <input id="disc-bytes-out" name="disc-bytes-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Find the discriminator</button>
+        <p class="result" id="disc-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2593,6 +2623,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=59"></script>
+<script src="app.js?v=60"></script>
 </body>
 </html>
