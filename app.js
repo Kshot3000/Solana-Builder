@@ -2785,6 +2785,58 @@ function programDeployCost(elfBytes, maxBytes) {
   };
 }
 
+/* ---------- Tool 60: CLMM impermanent loss (position vs holding) ---------- */
+/* Tool 4 prices impermanent loss for a full-range constant-product
+   position; a concentrated position behaves differently, and the
+   difference is the range. This model composes Tool 17 verbatim at two
+   ticks with the same liquidity and range: the amounts the position
+   holds at the ENTRY tick are the "just hold" portfolio, the amounts
+   at the EXIT tick are the position, and both are valued in token1 at
+   the exit price (price = token1 per token0, Tool 10):
+     holdValue     = entryAmount0 * priceExit + entryAmount1
+     positionValue = exitAmount0 * priceExit + exitAmount1
+     ilPct         = (positionValue / holdValue - 1) * 100
+   The position rebalances along its curve as the price moves, selling
+   the appreciating asset into the depreciating one, so the position
+   value never exceeds the hold value and the two agree exactly when
+   the exit tick is the entry tick. Once the price leaves the range the
+   position stops rebalancing - above the range it is entirely token1,
+   below it entirely token0 - while the held portfolio keeps moving
+   with the price, so the gap keeps widening outside the range. As the
+   range widens toward the full tick range the result converges to
+   Tool 4's constant-product figure for the same price move (asserted
+   in the test suite). Swap fees the position earns are excluded -
+   they are Tool 25's figures and are what offsets this loss in
+   practice; a position can be net positive after fees while this
+   figure is negative. Amounts and values are floats like Tool 17's,
+   in raw token units. */
+function clmmImpermanentLoss(liquidityStr, lower, upper, entryTick, exitTick) {
+  var entry = clmmPosition(liquidityStr, lower, upper, entryTick);
+  if (entry === null) return null;
+  var exitPos = clmmPosition(liquidityStr, lower, upper, exitTick);
+  if (exitPos === null) return null;
+  var priceEntry = entry.priceCurrent;
+  var priceExit = exitPos.priceCurrent;
+  var holdValue = entry.amount0 * priceExit + entry.amount1;
+  var positionValue = exitPos.valueInToken1;
+  return {
+    liquidity: entry.liquidity,
+    tickLower: entry.tickLower, tickUpper: entry.tickUpper,
+    tickEntry: entry.tickCurrent, tickExit: exitPos.tickCurrent,
+    priceEntry: priceEntry, priceExit: priceExit,
+    priceRatio: priceExit / priceEntry,
+    entryAmount0: entry.amount0, entryAmount1: entry.amount1,
+    exitAmount0: exitPos.amount0, exitAmount1: exitPos.amount1,
+    entryStatus: entry.status, exitStatus: exitPos.status,
+    inRangeAtExit: exitPos.inRange,
+    entryValueToken1: entry.valueInToken1,
+    holdValueToken1: holdValue,
+    positionValueToken1: positionValue,
+    shortfallToken1: holdValue - positionValue,
+    ilPct: (positionValue / holdValue - 1) * 100
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3323,6 +3375,7 @@ if (typeof module !== "undefined" && module.exports) {
     dlmmBins, MAX_DLMM_BIN_ID, MAX_DLMM_WIDTH,
     nftMintCost, NFT_MINT_BYTES, NFT_TOKEN_ACCOUNT_BYTES, NFT_METADATA_BYTES, NFT_EDITION_BYTES, MAX_NFT_COUNT,
     programDeployCost, PROGRAM_ACCOUNT_BYTES, PROGRAMDATA_HEADER_BYTES, BUFFER_HEADER_BYTES, MAX_PROGRAM_BYTES,
+    clmmImpermanentLoss,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4535,6 +4588,26 @@ if (typeof document !== "undefined") {
         ? " The maximum is the program size exactly, so an upgrade that grows the program must first extend the account - at the same 6,960 lamports per added byte."
         : " The maximum leaves " + res.headroomBytes + " bytes of headroom over today's program, and that reserved space is " + res.headroomRentLamports + " lamports of the locked total - exactly what extending by those bytes later would cost, paid now instead.";
       setText("deploy-result", "Model output: deploying a " + res.elfBytes + "-byte program at a " + res.maxBytes + "-byte maximum locks " + res.lockedLamports + " lamports (" + res.lockedSol + " SOL) permanently - a 36-byte program account at " + res.programRentLamports + " lamports and a " + res.programDataBytes + "-byte programdata account at " + res.programDataRentLamports + " - and the deployer must hold " + res.peakLamports + " lamports (" + res.peakSol + " SOL) at the peak, because the upload buffer (a " + res.bufferBytes + "-byte account at " + res.bufferRentLamports + " lamports) is funded too and reclaimed when the deploy completes." + headNote + " The deposits are locked, not spent: closing a program reclaims them. The transaction fees for the chunked upload writes, any IDL account and program testing are not modelled, and no live program is read. An educational model of a program deploy's rent, not a live quote. Not financial advice.");
+    });
+
+    var cilForm = document.getElementById("cil-calc");
+    if (cilForm) cilForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = clmmImpermanentLoss(val("cil-l"), val("cil-lower"), val("cil-upper"), val("cil-entry"), val("cil-exit"));
+      if (res === null) {
+        document.getElementById("cil-pos-out").value = "Invalid";
+        document.getElementById("cil-il-out").value = "Invalid";
+        setText("cil-result", "Check the inputs: the liquidity must be a positive amount at up to 9 decimal places, the range ticks must be whole numbers inside -443636 to 443636 with the lower below the upper, and the entry and exit ticks whole numbers in the same bounds.");
+        return;
+      }
+      document.getElementById("cil-pos-out").value = res.positionValueToken1.toFixed(9);
+      document.getElementById("cil-il-out").value = res.ilPct.toFixed(6) + "%";
+      var moveNote;
+      if (res.tickExit === res.tickEntry) moveNote = " The exit tick is the entry tick, so nothing has rebalanced: the position and the held portfolio are the same amounts and the loss is exactly zero.";
+      else if (res.exitStatus === "above") moveNote = " At the exit tick the price is at or above the range top, so the position holds only token1 - it stopped rebalancing at the upper tick - while the held portfolio's token0 kept appreciating, which is why the gap keeps widening past the range.";
+      else if (res.exitStatus === "below") moveNote = " At the exit tick the price is at or below the range bottom, so the position holds only token0 - it stopped rebalancing at the lower tick - while the held portfolio kept its token1, which is why the gap keeps widening past the range.";
+      else moveNote = " At the exit tick the position is still inside its range and still earning fees; the loss is the cost of the rebalancing it did on the way there.";
+      setText("cil-result", "Model output: a position of liquidity " + res.liquidity + " over ticks " + res.tickLower + " to " + res.tickUpper + " entered at tick " + res.tickEntry + " (price " + res.priceEntry.toFixed(9) + ") holds " + res.entryAmount0.toFixed(9) + " of token0 and " + res.entryAmount1.toFixed(9) + " of token1. At the exit tick " + res.tickExit + " (price " + res.priceExit.toFixed(9) + ", " + res.priceRatio.toFixed(9) + "x the entry price) the position holds " + res.exitAmount0.toFixed(9) + " of token0 and " + res.exitAmount1.toFixed(9) + " of token1, worth " + res.positionValueToken1.toFixed(9) + " in token1 terms, while simply holding the entry amounts is worth " + res.holdValueToken1.toFixed(9) + " - a shortfall of " + res.shortfallToken1.toFixed(9) + ", an impermanent loss of " + Math.abs(res.ilPct).toFixed(6) + "% against holding." + moveNote + " Swap fees the position earns are not included - they are Tool 25's figures and are what offsets this loss in practice. An educational model of a concentrated position against holding, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

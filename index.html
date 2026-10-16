@@ -2339,6 +2339,45 @@
       </form>
     </article>
 
+    <article class="card">
+      <h3>60. CLMM impermanent-loss calculator — a concentrated position against just holding</h3>
+      <p>Tool 4 prices impermanent loss for a full-range pool; a <strong>concentrated</strong> position (Raydium CLMM, Orca Whirlpools) loses differently, because it only rebalances inside its tick range. This model runs Tool 17 at two ticks with the same liquidity and range: the amounts held at the <strong>entry tick</strong> are the just-hold portfolio, the amounts at the <strong>exit tick</strong> are the position, and both are valued in token1 at the exit price. A position of liquidity <strong>1,000,000</strong> over ticks <strong>-600 to 600</strong>, entered at tick 0 holding <strong>29,553.010879134 of each token</strong>, is worth <strong>60,005.999255043</strong> in token1 terms if the price leaves the top and reaches tick 1,200 (price 1.127490087), while holding the entry amounts is worth <strong>62,873.737688415</strong> — an impermanent loss of <strong>4.561107%</strong>, and it keeps widening past the range because the position, now entirely token1, stopped rebalancing at the upper tick while the held token0 kept appreciating. An exit exactly at either range bound loses 1.521965% either way, no price move loses exactly zero, and as the range widens toward the full tick range the figure converges to Tool 4's constant-product loss for the same price move. Swap fees the position earns are not included — they are Tool 25's figures, and they are what offsets this loss in practice. An educational model of a concentrated position against holding, not a live quote. Not financial advice.</p>
+      <form id="cil-calc">
+        <div class="grid">
+          <div>
+            <label for="cil-l">Liquidity amount L</label>
+            <input id="cil-l" name="cil-l" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="cil-lower">Lower tick of the range</label>
+            <input id="cil-lower" name="cil-lower" inputmode="numeric" value="-600">
+          </div>
+          <div>
+            <label for="cil-upper">Upper tick of the range</label>
+            <input id="cil-upper" name="cil-upper" inputmode="numeric" value="600">
+          </div>
+          <div>
+            <label for="cil-entry">Entry tick (position opened)</label>
+            <input id="cil-entry" name="cil-entry" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="cil-exit">Exit tick (priced here)</label>
+            <input id="cil-exit" name="cil-exit" inputmode="numeric" value="1200">
+          </div>
+          <div>
+            <label for="cil-pos-out">Position value in token1 at the exit price (model)</label>
+            <input id="cil-pos-out" name="cil-pos-out" readonly>
+          </div>
+          <div>
+            <label for="cil-il-out">Impermanent loss vs holding (model)</label>
+            <input id="cil-il-out" name="cil-il-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the position against holding</button>
+        <p class="result" id="cil-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2481,6 +2520,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=56"></script>
+<script src="app.js?v=57"></script>
 </body>
 </html>
