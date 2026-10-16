@@ -3045,6 +3045,41 @@ function reallocPlan(currentStr, targetStr) {
   };
 }
 
+/* Tool 65 - durable nonce planner. A durable-nonce transaction replaces
+   the recent blockhash (Tool 62's 150-block window) with the blockhash
+   stored in a nonce account, so it stays landable until that account's
+   nonce is advanced. The account's state is NONCE_ACCOUNT_BYTES = 80
+   bytes (version + state + authority + stored blockhash + fee
+   calculator) and it must be rent-exempt, so each account locks
+   rentExempt(80) = 1,447,680 lamports, composed from Tool 3 verbatim.
+   A transaction's first instruction must be AdvanceNonceAccount, which
+   replaces the stored value - so each stored value backs exactly one
+   transaction. Transactions that may land in any order each need their
+   own account; an ordered chain can share one account, because each
+   transaction's advance produces exactly the value the next one signed
+   against, but the chain must then land strictly in signing order. */
+var NONCE_ACCOUNT_BYTES = 80;
+var MAX_NONCE_TRANSACTIONS = 10000;
+
+function durableNoncePlan(countStr, mode) {
+  if (typeof countStr !== "string") return null;
+  var s = countStr.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var count = Number(s);
+  if (!Number.isInteger(count) || count < 1 || count > MAX_NONCE_TRANSACTIONS) return null;
+  if (mode !== "independent" && mode !== "ordered") return null;
+  var rent = rentExempt(NONCE_ACCOUNT_BYTES);
+  if (rent === null) return null;
+  var accounts = mode === "independent" ? count : 1;
+  var total = BigInt(rent.rentExemptLamports) * BigInt(accounts);
+  return {
+    transactions: count, mode: mode, accounts: accounts,
+    accountBytes: NONCE_ACCOUNT_BYTES,
+    rentPerAccountLamports: rent.rentExemptLamports,
+    totalRentLamports: total.toString(), totalRentSol: formatScaled(total)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3588,6 +3623,7 @@ if (typeof module !== "undefined" && module.exports) {
     blockhashExpiry, MAX_PROCESSING_AGE_BLOCKS,
     anchorDiscriminator, MAX_ANCHOR_NAME_CHARS,
     reallocPlan, MAX_PERMITTED_DATA_INCREASE, MAX_ACCOUNT_DATA_LEN,
+    durableNoncePlan, NONCE_ACCOUNT_BYTES, MAX_NONCE_TRANSACTIONS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4906,6 +4942,27 @@ if (typeof document !== "undefined") {
         moveNote = " The target equals the current length, so no realloc call and no rent movement is needed.";
       }
       setText("realloc-result", "Model output: an account of " + Number(res.currentBytes).toLocaleString("en-US") + " bytes (rent-exempt at " + res.oldRentLamports.toLocaleString("en-US") + " lamports) resized to " + Number(res.targetBytes).toLocaleString("en-US") + " bytes (rent-exempt at " + res.newRentLamports.toLocaleString("en-US") + " lamports)." + moveNote + " An educational model of account reallocation, not a live account reading. Not financial advice.");
+    });
+
+    var nonceForm = document.getElementById("nonce-calc");
+    if (nonceForm) nonceForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = durableNoncePlan(val("nonce-count"), val("nonce-mode"));
+      if (res === null) {
+        document.getElementById("nonce-accounts-out").value = "Invalid";
+        document.getElementById("nonce-rent-out").value = "Invalid";
+        setText("nonce-result", "Check the inputs: the transaction count is a whole number from 1 to 10,000.");
+        return;
+      }
+      document.getElementById("nonce-accounts-out").value = res.accounts.toLocaleString("en-US");
+      document.getElementById("nonce-rent-out").value = res.totalRentLamports.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      var modeNote;
+      if (res.mode === "independent") {
+        modeNote = " Each transaction may land in any order, so each needs its own nonce account: one stored value backs exactly one transaction, because the AdvanceNonceAccount instruction that must come first replaces the value the moment the transaction lands.";
+      } else {
+        modeNote = " Ordered mode chains them on a single account: each transaction's opening advance produces exactly the stored value the next transaction signed against, so the chain must land strictly in signing order - any one landing out of order, or the authority advancing the nonce by hand, breaks every transaction after it.";
+      }
+      setText("nonce-result", "Model output: " + res.transactions.toLocaleString("en-US") + (res.transactions === 1 ? " pre-signed transaction needs " : " pre-signed transactions need ") + res.accounts.toLocaleString("en-US") + (res.accounts === 1 ? " nonce account" : " nonce accounts") + ", locking " + res.totalRentLamports.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " lamports (" + res.totalRentSol + " SOL) of rent-exempt deposits - " + res.rentPerAccountLamports.toLocaleString("en-US") + " lamports per 80-byte account, Tool 3's figure, locked rather than spent and reclaimed when an account is closed and withdrawn." + modeNote + " Unlike a recent blockhash (Tool 62), a stored nonce value carries no block-height expiry: a transaction signed against it stays landable until the nonce advances. An educational model of durable-nonce planning, not a live account reading. Not financial advice.");
     });
 
     /* catalogue filter */

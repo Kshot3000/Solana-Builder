@@ -2506,6 +2506,34 @@
         <button type="submit">Plan the resize</button>
         <p class="result" id="realloc-result" aria-live="polite"></p>
       </form>
+
+      <h3>65. Durable nonce planner — pre-signing transactions that do not expire in 150 blocks</h3>
+      <p>A normal transaction dies 150 blocks after its blockhash (Tool 62). A <strong>durable nonce</strong> transaction signs against the blockhash stored in a <strong>nonce account</strong> instead, and its first instruction must be <strong>AdvanceNonceAccount</strong> — which replaces the stored value the moment the transaction lands, so <strong>each stored value backs exactly one transaction</strong> and the transaction carries <strong>no block-height expiry</strong> until the nonce advances. The account's state is <strong>80 bytes</strong> and must be rent-exempt, so each account locks <strong>1,447,680 lamports</strong> (Tool 3's figure for 80 bytes) — locked, not spent, and reclaimed when the account is closed. Pre-signing <strong>10 transactions that may land in any order takes 10 nonce accounts</strong>, locking <strong>14,476,800 lamports</strong> (0.0144768 SOL); an ordered chain can share one account, because each advance produces exactly the value the next transaction signed against, but it must then land strictly in signing order. The nonce authority must sign the advance, and an account's stored value can also be advanced by hand, which invalidates anything signed against the old value. An educational model of durable-nonce planning, not a live account reading. Not financial advice.</p>
+      <form id="nonce-calc">
+        <div class="grid">
+          <div>
+            <label for="nonce-count">Transactions to pre-sign</label>
+            <input id="nonce-count" name="nonce-count" inputmode="numeric" value="10">
+          </div>
+          <div>
+            <label for="nonce-mode">Landing order</label>
+            <select id="nonce-mode" name="nonce-mode">
+              <option value="independent" selected>Any order — one account each</option>
+              <option value="ordered">Strictly in signing order — one shared account</option>
+            </select>
+          </div>
+          <div>
+            <label for="nonce-accounts-out">Nonce accounts needed (model)</label>
+            <input id="nonce-accounts-out" name="nonce-accounts-out" readonly>
+          </div>
+          <div>
+            <label for="nonce-rent-out">Total rent locked, lamports (model)</label>
+            <input id="nonce-rent-out" name="nonce-rent-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the nonce accounts</button>
+        <p class="result" id="nonce-result" aria-live="polite"></p>
+      </form>
     </article>
 
   </section>
@@ -2650,6 +2678,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=61"></script>
+<script src="app.js?v=62"></script>
 </body>
 </html>
