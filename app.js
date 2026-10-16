@@ -3296,6 +3296,91 @@ function interestBearingAmount(amountStr, prevRateStr, prevDaysStr, rateStr, day
   };
 }
 
+/* Tool 70 - Scaled UI amount display calculator. A Token-2022 mint with
+   the scaled UI amount extension carries a multiplier on the mint (an
+   f64 stored in its ScaledUiAmountConfig, alongside an authority), and
+   what a wallet displays is raw x multiplier - the raw amount in every
+   token account is untouched, so the extension is how rebasing tokens
+   and stock-split-style adjustments are modelled: a 2-for-1 split is a
+   multiplier doubling, not a mint to every holder. The authority may
+   schedule a NEW multiplier with an effective unix timestamp; the
+   config stores both, and a reader uses the new multiplier from the
+   moment the clock reaches that timestamp - the reference client SDK's
+   selection is `timestamp >= newMultiplierEffectiveTimestamp`, a >=
+   comparison with no other condition. The program accepts only a
+   positive, normal f64 as a multiplier (its processor rejects zero,
+   negative, NaN and subnormal values), so this model does the same,
+   with a practical cap. The forward conversion is the reference's own:
+   displayed = trunc(raw x multiplier) at the smallest unit, computed
+   in doubles because the reference computes in doubles. The reverse
+   conversion - what a user typing a displayed amount into a transfer
+   actually sends - is the reference's division by
+   (multiplier / 10^decimals), also in doubles and truncated; that
+   division order can land exactly one smallest unit BELOW the
+   exact-decimal figure (63,146 displayed at multiplier 2 converts
+   back to 31,572.999999999 raw, not 31,573), so the model also
+   computes the exact-decimal reverse from the multiplier as typed and
+   reports the shortfall rather than hiding it - it is why the
+   integration guidance tells apps to round down and leave the dust,
+   and to send the full raw balance on "max". Amounts here are token
+   amounts at the hub's 9-decimal scale, capped at 1,000,000 tokens so
+   the scaled figures stay in the doubles' precise range, and the
+   reading time is a user-supplied timestamp: this tool reads no clock
+   and no mint. */
+var MAX_SUA_TOKENS = 1000000;
+var MAX_SUA_MULTIPLIER = 1000000;
+var MAX_SUA_TIMESTAMP = 253402300799;
+
+function suaMultiplier(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(s)) return null;
+  var n = Number(s);
+  return (Number.isFinite(n) && n > 0 && n <= MAX_SUA_MULTIPLIER) ? n : null;
+}
+
+function suaTimestamp(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var n = Number(s);
+  return (Number.isSafeInteger(n) && n <= MAX_SUA_TIMESTAMP) ? n : null;
+}
+
+function scaledUiAmount(rawStr, multStr, newMultStr, effTsStr, readTsStr, sendStr) {
+  var raw = parseScaled(rawStr);
+  if (raw === null || raw <= 0n || raw > BigInt(MAX_SUA_TOKENS) * SCALE) return null;
+  var mult = suaMultiplier(multStr), newMult = suaMultiplier(newMultStr);
+  var effTs = suaTimestamp(effTsStr), readTs = suaTimestamp(readTsStr);
+  var send = parseScaled(sendStr);
+  if (mult === null || newMult === null || effTs === null || readTs === null) return null;
+  if (send === null || send <= 0n || send > BigInt(MAX_SUA_TOKENS) * SCALE) return null;
+  var switched = readTs >= effTs;
+  var effMult = switched ? newMult : mult;
+  var dispCur = BigInt(Math.trunc(Number(raw) * mult));
+  var dispNew = BigInt(Math.trunc(Number(raw) * newMult));
+  var displayed = switched ? dispNew : dispCur;
+  var sendRaw = BigInt(Math.trunc((Number(send) / 1e9) / (effMult / 1e9)));
+  var effStr = (switched ? newMultStr : multStr).trim();
+  var dotParts = effStr.replace(/^\./, "0.").split(".");
+  var eNum = BigInt(dotParts[0] + (dotParts[1] || ""));
+  var eDen = 10n ** BigInt((dotParts[1] || "").length);
+  var sendRawExact = (send * eDen) / eNum;
+  return {
+    raw: formatScaled(raw), multiplier: mult, newMultiplier: newMult,
+    effectiveTimestamp: effTs, readTimestamp: readTs, switched: switched,
+    effectiveMultiplier: effMult,
+    displayed: formatScaled(displayed),
+    displayedCurrent: formatScaled(dispCur),
+    displayedNew: formatScaled(dispNew),
+    changeOnSwitch: formatScaled(dispNew - dispCur),
+    sendUi: formatScaled(send), sendRaw: formatScaled(sendRaw),
+    sendRawExact: formatScaled(sendRawExact),
+    sendRawShortfallUnits: (sendRawExact - sendRaw).toString(),
+    sendRawZero: sendRaw === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3844,6 +3929,7 @@ if (typeof module !== "undefined" && module.exports) {
     token2022AccountSpace, T22_ACCOUNT_BASE_BYTES, T22_ACCOUNT_EXTENSION_BYTES,
     computeBudgetPlan, DEFAULT_CU_PER_INSTRUCTION,
     interestBearingAmount, IB_SECONDS_PER_YEAR, MAX_IB_DAYS,
+    scaledUiAmount, MAX_SUA_MULTIPLIER, MAX_SUA_TIMESTAMP,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5284,6 +5370,36 @@ if (typeof document !== "undefined") {
         note += " Two rates applied: the pre-update average of " + res.prevRateBps + " bps covered the first " + res.prevDays + (res.prevDays === 1 ? " day" : " days") + " (a factor of " + res.factorPrev.toFixed(9) + ") and the current " + res.rateBps + " bps the " + res.days + (res.days === 1 ? " day" : " days") + " since the last update (a factor of " + res.factorCurrent.toFixed(9) + "); the mint stores that average precisely so a rate change never rewrites history.";
       }
       setText("ib-result", "Model output: a raw balance of " + res.amount + " on an interest-bearing mint displays as " + res.grown + " - interest of " + res.interest + " - after compounding at " + res.rateBps + " basis points a year for " + res.days + (res.days === 1 ? " day" : " days") + (res.prevDays > 0 ? " on top of the earlier stretch" : "") + ", a total factor of " + res.factor.toFixed(9) + ". The year in the exponent is 365.24 days (31,556,736 seconds), so 365 days is slightly less than a full year of accrual, and the grown figure is truncated at the smallest unit, never rounded." + note + " An educational model of the interest-bearing display conversion, not a live mint reading. Not financial advice.");
+    });
+
+    var suaForm = document.getElementById("sua-calc");
+    if (suaForm) suaForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = scaledUiAmount(val("sua-raw"), val("sua-mult"), val("sua-new-mult"), val("sua-eff-ts"), val("sua-read-ts"), val("sua-send"));
+      if (res === null) {
+        document.getElementById("sua-disp-out").value = "Invalid";
+        document.getElementById("sua-sendraw-out").value = "Invalid";
+        setText("sua-result", "Check the inputs: the raw balance and the amount to send must each be more than 0 and at most 1,000,000 tokens at up to 9 decimal places, each multiplier a plain decimal number (no exponent notation) above 0 and at most 1,000,000 - the program itself accepts only a positive, normal float - and each timestamp a whole number of seconds from 0 up.");
+        return;
+      }
+      document.getElementById("sua-disp-out").value = res.displayed;
+      document.getElementById("sua-sendraw-out").value = res.sendRaw;
+      var note = "";
+      if (res.switched) {
+        note = " The reading time is at or past the effective timestamp " + res.effectiveTimestamp + ", so the scheduled multiplier is the one in force: the switch is a >= comparison against the clock, and it happened with no transfer, mint or burn - only the stored multiplier changed.";
+      } else if (res.newMultiplier !== res.multiplier) {
+        note = " A change is already scheduled: from timestamp " + res.effectiveTimestamp + " the same raw balance will display as " + res.displayedNew + " (a change of " + res.changeOnSwitch + ") with no transfer, mint or burn - only the stored multiplier changes, which is how these mints model a stock split or a rebase.";
+      } else {
+        note = " The scheduled multiplier equals the current one, so the effective timestamp changes nothing when it passes.";
+      }
+      if (res.sendRawZero) {
+        note += " The amount to send converts back to ZERO raw units at the multiplier in force: it is smaller than one smallest raw unit, so there is nothing a transfer could move - entered display amounts are converted by dividing by the multiplier and truncating, and dust does not survive it.";
+      } else if (res.sendRawShortfallUnits === "1") {
+        note += " The amount to send converts back to " + res.sendRaw + " raw units - one smallest unit below the exact-decimal figure of " + res.sendRawExact + ", because the reference conversion divides by (multiplier / 10^decimals) in floating point before truncating; that is why apps are told to round down and leave the dust rather than risk a failing transfer, and to send the full raw balance when the user asks for the maximum.";
+      } else {
+        note += " The amount to send converts back to " + res.sendRaw + " raw units: entered display amounts are divided by the multiplier and truncated at the smallest unit, never rounded up, so a transfer never moves more raw than the display promises.";
+      }
+      setText("sua-result", "Model output: a raw balance of " + res.raw + " on a scaled-UI-amount mint displays as " + res.displayed + " when read at timestamp " + res.readTimestamp + ", because the multiplier in force there is " + res.effectiveMultiplier + " (current " + res.multiplier + ", scheduled " + res.newMultiplier + " from timestamp " + res.effectiveTimestamp + "): the displayed amount is the raw amount x the multiplier in force, truncated at the smallest unit. The raw balance never moved and a transfer still moves raw amounts - the multiplier exists only in this conversion, which every wallet and explorer reading the mint performs." + note + " An educational model of the scaled-UI display conversion, not a live mint reading. Not financial advice.");
     });
 
     /* catalogue filter */

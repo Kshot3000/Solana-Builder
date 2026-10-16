@@ -2751,6 +2751,49 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>70. Scaled UI amount display calculator — the balance a multiplier rewrites</h3>
+      <p>A Token-2022 mint with the <strong>scaled UI amount extension</strong> carries a <strong>multiplier</strong> on the mint, and wallets display <strong>raw × multiplier</strong> instead of the raw amount — the raw balance in the account never changes, which is how these mints model <strong>rebasing tokens and stock splits</strong>: a 2-for-1 split is the multiplier doubling, not a mint to every holder. The multiplier authority can also <strong>schedule a new multiplier</strong> with an effective timestamp: reads before it use the stored multiplier, reads <strong>at or after</strong> it use the new one, a &gt;= comparison against the clock. Below, a raw 10,000 at a multiplier of 2 displays as <strong>20,000</strong>, and from timestamp 1767225600 the scheduled multiplier of 3 displays the same raw balance as <strong>30,000</strong> — no transfer, mint or burn happened in between. Both conversions <strong>truncate</strong> at the smallest unit. The way back matters as much: a user entering a displayed amount to send is converted to raw by dividing by the multiplier, and because the reference conversion does that division in floating point it can land <strong>one smallest unit short</strong> — 63,146 displayed at a multiplier of 2 converts back to <strong>31,572.999999999</strong> raw, not the exact-decimal 31,573 — which is why apps are told to round down, leave the dust, and send the full raw balance on “max”. The program accepts only a positive, normal float as a multiplier. An educational model of the scaled-UI display conversion, not a live mint reading. Not financial advice.</p>
+      <form id="sua-calc">
+        <div class="grid">
+          <div>
+            <label for="sua-raw">Raw token balance (what the account actually holds)</label>
+            <input id="sua-raw" name="sua-raw" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="sua-mult">Current multiplier stored on the mint</label>
+            <input id="sua-mult" name="sua-mult" inputmode="decimal" value="2">
+          </div>
+          <div>
+            <label for="sua-new-mult">Scheduled new multiplier</label>
+            <input id="sua-new-mult" name="sua-new-mult" inputmode="decimal" value="3">
+          </div>
+          <div>
+            <label for="sua-eff-ts">New multiplier takes effect at (unix timestamp, seconds)</label>
+            <input id="sua-eff-ts" name="sua-eff-ts" inputmode="numeric" value="1767225600">
+          </div>
+          <div>
+            <label for="sua-read-ts">Read the balance at (unix timestamp, seconds)</label>
+            <input id="sua-read-ts" name="sua-read-ts" inputmode="numeric" value="1750000000">
+          </div>
+          <div>
+            <label for="sua-send">Amount to send, in displayed units</label>
+            <input id="sua-send" name="sua-send" inputmode="decimal" value="50">
+          </div>
+          <div>
+            <label for="sua-disp-out">Displayed balance at the reading time (model)</label>
+            <input id="sua-disp-out" name="sua-disp-out" readonly>
+          </div>
+          <div>
+            <label for="sua-sendraw-out">Raw amount that transfer moves (model)</label>
+            <input id="sua-sendraw-out" name="sua-sendraw-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Convert the balance</button>
+        <p class="result" id="sua-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2893,6 +2936,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=66"></script>
+<script src="app.js?v=67"></script>
 </body>
 </html>
