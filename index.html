@@ -2254,6 +2254,37 @@
       </form>
     </article>
 
+    <article class="card">
+      <h3>57. DLMM bin price planner — the ladder a discrete-bin pool prices on</h3>
+      <p>A discrete liquidity market maker (Meteora's DLMM is the common Solana form) does not slide along a curve: it splits the price range into <strong>bins</strong>, each holding one fixed price, and the price at bin <em>id</em> is <code>(1 + binStep ÷ 10000) ^ id</code> — adjacent bins differ by exactly the bin step, so the ladder is purely geometric. Bin 0 prices at exactly 1, positive ids multiply up, and negative ids divide down (the price at −id is the exact reciprocal of the price at id). At the headline step of <strong>25 bps</strong> (0.25% per bin), bin <strong>100</strong> prices at <strong>1.283624888</strong>, and a position 20 bins either side runs from bin 80 at 1.221097953 to bin 120 at 1.349353547 — a range multiplier of <strong>1.10503301</strong> that depends only on the step and the width, never on where the position sits; the price doubles every <strong>278</strong> bins at this step, and halves in the same count. This is not Tool 10's CLMM tick math: a tick scales the <em>square root</em> of the price by 1.0001 per tick, a bin scales the price itself by (1 + step) per bin. An educational model of a DLMM bin ladder, not a live pool. Not financial advice.</p>
+      <form id="dlmm-calc">
+        <div class="grid">
+          <div>
+            <label for="dlmm-step">Bin step (basis points)</label>
+            <input id="dlmm-step" name="dlmm-step" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="dlmm-bin">Active bin id</label>
+            <input id="dlmm-bin" name="dlmm-bin" inputmode="numeric" value="100">
+          </div>
+          <div>
+            <label for="dlmm-width">Range half-width (bins each side)</label>
+            <input id="dlmm-width" name="dlmm-width" inputmode="numeric" value="20">
+          </div>
+          <div>
+            <label for="dlmm-price-out">Price at the active bin (model)</label>
+            <input id="dlmm-price-out" name="dlmm-price-out" readonly>
+          </div>
+          <div>
+            <label for="dlmm-mult-out">Range multiplier, lower to upper (model)</label>
+            <input id="dlmm-mult-out" name="dlmm-mult-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the bin range</button>
+        <p class="result" id="dlmm-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2396,6 +2427,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=53"></script>
+<script src="app.js?v=54"></script>
 </body>
 </html>

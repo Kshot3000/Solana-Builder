@@ -2623,6 +2623,80 @@ function dcaPlan(reserveInStr, reserveOutStr, totalInStr, feeBps, orders, txFeeL
   };
 }
 
+/* ---------- Tool 57: DLMM bin price planner ---------- */
+/* A discrete liquidity market maker (Meteora's DLMM is the common
+   Solana form) does not slide along a curve: it splits the price range
+   into BINS, and every bin has one fixed price. The price at bin id is
+   (1 + binStep / 10000) ^ binId, where the bin step is in basis points
+   - so adjacent bins differ by exactly the step percentage, and the
+   price is a pure geometric ladder in the bin id. Bin 0 is price 1 by
+   construction, positive ids multiply up, negative ids divide down
+   (price at -id is the exact reciprocal of price at id). This is NOT
+   Tool 10's CLMM tick math: a tick scales the SQUARE ROOT of the price
+   by 1.0001 per tick, a bin scales the price itself by (1 + step) per
+   bin. Everything here is exact BigInt rational arithmetic - the price
+   is ((10000 + step) ^ id) / (10000 ^ id), or its reciprocal for
+   negative ids, floored at the 9th decimal like an on-chain fixed
+   point read. The range multiplier across a symmetric position of
+   half-width w bins is ((1 + step) ^ (2w)) and does NOT depend on
+   where the position sits - only the step and the width set the span.
+   Bins to double is the smallest n with (1 + step) ^ n >= 2, found by
+   a float estimate corrected with exact BigInt power comparisons; by
+   the reciprocal symmetry it is also the bins to halve. A price can
+   floor to zero at this display precision only at extreme negative
+   ids with a huge step (2 ^ -2000); that is flagged, not hidden.
+   Liquidity per bin, the bin step's fee behaviour, DLMM's variable
+   volatility fee and any live pool are not modelled.
+   Prototype-verified before pinning: exact Fraction arithmetic on the
+   headline and four further vectors, a bins-to-double table for steps
+   1..10000 bps (6932 at 1 bps, 278 at 25 bps, 1 at 10000 bps), and a
+   3,000-case exact sweep (each bin's price is the previous bin's price
+   times the step ratio exactly; prices strictly increase with id). */
+var MAX_DLMM_BIN_ID = 2000;
+var MAX_DLMM_WIDTH = 500;
+
+function dlmmPriceScaled(stepBps, binId) {
+  var up = 10000n + BigInt(stepBps);
+  var a = binId < 0 ? -binId : binId;
+  var num, den;
+  if (binId >= 0) { num = up ** BigInt(a); den = 10000n ** BigInt(a); }
+  else { num = 10000n ** BigInt(a); den = up ** BigInt(a); }
+  return (num * SCALE) / den;
+}
+
+function dlmmBins(stepBps, binId, width) {
+  var s = Number(stepBps);
+  var id = Number(binId);
+  var w = Number(width);
+  if (!Number.isInteger(s) || s < 1 || s > 10000) return null;
+  if (!Number.isInteger(id) || id < -MAX_DLMM_BIN_ID || id > MAX_DLMM_BIN_ID) return null;
+  if (!Number.isInteger(w) || w < 1 || w > MAX_DLMM_WIDTH) return null;
+  var lowerId = id - w, upperId = id + w;
+  var active = dlmmPriceScaled(s, id);
+  var lower = dlmmPriceScaled(s, lowerId);
+  var upper = dlmmPriceScaled(s, upperId);
+  var up = 10000n + BigInt(s);
+  var mult = ((up ** BigInt(2 * w)) * SCALE) / (10000n ** BigInt(2 * w));
+  /* bins to double: smallest n >= 1 with (10000 + s)^n >= 2 * 10000^n */
+  var n = Math.max(1, Math.ceil(Math.log(2) / Math.log1p(s / 10000)));
+  var powCmp = function (k) {
+    return (up ** BigInt(k)) >= 2n * (10000n ** BigInt(k));
+  };
+  while (!powCmp(n)) n++;
+  while (n > 1 && powCmp(n - 1)) n--;
+  return {
+    stepBps: s, stepPct: s / 100,
+    binId: id, width: w, lowerId: lowerId, upperId: upperId,
+    activePrice: formatScaled(active),
+    lowerPrice: formatScaled(lower),
+    upperPrice: formatScaled(upper),
+    rangeMultiplier: formatScaled(mult),
+    spanPct: (Number(mult) / Number(SCALE) - 1) * 100,
+    binsToDouble: n,
+    floorsToZero: active === 0n || lower === 0n || upper === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3158,6 +3232,7 @@ if (typeof module !== "undefined" && module.exports) {
     buybackBurn,
     escrowRelease,
     dcaPlan, MAX_DCA_ORDERS, MAX_DCA_TX_FEE_LAMPORTS,
+    dlmmBins, MAX_DLMM_BIN_ID, MAX_DLMM_WIDTH,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4315,6 +4390,24 @@ if (typeof document !== "undefined") {
         ? " A single order is the lump buy itself, run once."
         : " The " + res.orders + " orders of " + res.tranche + " each" + (res.remainderUnits === "0" ? "" : " (the first " + res.remainderUnits + (res.remainderUnits === "1" ? " order carries" : " orders carry") + " one extra smallest unit, so the orders sum to the total exactly)") + " run back to back against the reserves each previous order leaves.";
       setText("dca-result", "Model output:" + splitNote + dustNote + " Pool fees total " + res.dcaFees + " across the split against " + res.lumpFee + " on the lump buy, and the transaction fees are the certain extra cost: " + res.orders + (res.orders === 1 ? " order" : " orders") + " at " + res.txFeePerOrder + " lamports each is " + res.txFeesLamports + " lamports (" + res.txFeesSol + " SOL). Against this frozen pool the average price is " + fmtAmt(res.avgPriceDca) + " split against " + fmtAmt(res.avgPriceLump) + " lump. What splitting buys in reality - exposure to different prices at different times - is not modelled and cannot be promised; between-order price movement, program fees beyond the per-order transaction fee and any live DCA program are not modelled, and no live pool is read. An educational model of a DCA split, not a live program. Not financial advice.");
+    });
+
+    var dlmmForm = document.getElementById("dlmm-calc");
+    if (dlmmForm) dlmmForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = dlmmBins(val("dlmm-step"), val("dlmm-bin"), val("dlmm-width"));
+      if (res === null) {
+        document.getElementById("dlmm-price-out").value = "Invalid";
+        document.getElementById("dlmm-mult-out").value = "Invalid";
+        setText("dlmm-result", "Check the inputs: the bin step must be a whole number of basis points from 1 to 10000, the active bin id a whole number from -2000 to 2000, and the range half-width a whole number of bins from 1 to 500.");
+        return;
+      }
+      document.getElementById("dlmm-price-out").value = res.activePrice;
+      document.getElementById("dlmm-mult-out").value = res.rangeMultiplier;
+      var zeroNote = res.floorsToZero
+        ? " At least one of these prices is below the 9-decimal display precision and reads 0 - the ladder reaches it only at the extreme bin shown."
+        : "";
+      setText("dlmm-result", "Model output: at a bin step of " + res.stepBps + " bps (" + fmtAmt(res.stepPct) + "% per bin), bin " + res.binId + " prices at " + res.activePrice + " quote per base. A position " + res.width + (res.width === 1 ? " bin" : " bins") + " either side runs from bin " + res.lowerId + " at " + res.lowerPrice + " to bin " + res.upperId + " at " + res.upperPrice + " - a range multiplier of " + res.rangeMultiplier + " (a span of " + fmtAmt(res.spanPct) + "%), and that multiplier depends only on the step and the width, never on where the position sits. The price doubles every " + res.binsToDouble + (res.binsToDouble === 1 ? " bin" : " bins") + " at this step, and halves in the same count, by the ladder's reciprocal symmetry." + zeroNote + " Liquidity per bin, the position's token amounts, DLMM's variable volatility fee and any live pool are not modelled, and no live pool is read. An educational model of a DLMM bin ladder, not a live pool. Not financial advice.");
     });
 
     /* catalogue filter */
