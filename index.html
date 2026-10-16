@@ -2378,6 +2378,52 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>61. Options payoff calculator — what a long call or put is worth at expiry</h3>
+      <p>Beside the perpetuals of Tools 34 and 36, Solana derivatives venues (Drift, Zeta) trade <strong>options</strong>: a long <strong>call</strong> pays <strong>max(expiry price − strike, 0)</strong> per unit at expiry, a long <strong>put</strong> pays <strong>max(strike − expiry price, 0)</strong>, and the buyer paid the <strong>premium</strong> up front — so the net is payoff minus premium and the most a long option can ever lose is exactly that premium. The headline long call, <strong>strike 150, premium 5, over 100 units</strong>, at an expiry price of 180 pays <strong>3,000</strong> against a <strong>500</strong> premium — a net of <strong>+2,500</strong>, +500% on the premium — and breaks even at exactly <strong>155</strong>, the strike plus the premium (a put breaks even at strike minus premium: the mirror put at an expiry of 120 nets the same +2,500 and breaks even at 145). At or beyond the wrong side of the strike the payoff is zero and the whole premium is lost; a put's payoff is capped at the strike (an expiry of zero pays 15,000 on the headline terms, a net of 14,500), and a put whose premium exceeds its strike has <strong>no break-even at or above zero</strong> at all — even a zero expiry pays less than it cost. Only the long side at expiry is modelled: no time value, volatility, early exercise or trading fees, and a short position's profile is the mirror image with margin on top. An educational model of an option's expiry payoff, not a live quote. Not financial advice.</p>
+      <form id="opt-calc">
+        <div class="grid">
+          <div>
+            <label for="opt-kind">Option type (long — the buyer's side)</label>
+            <select id="opt-kind" name="opt-kind">
+              <option value="call" selected>Call — pays when the expiry price is above the strike</option>
+              <option value="put">Put — pays when the expiry price is below the strike</option>
+            </select>
+          </div>
+          <div>
+            <label for="opt-strike">Strike price (quote currency per unit)</label>
+            <input id="opt-strike" name="opt-strike" inputmode="decimal" value="150">
+          </div>
+          <div>
+            <label for="opt-premium">Premium paid per unit (quote currency)</label>
+            <input id="opt-premium" name="opt-premium" inputmode="decimal" value="5">
+          </div>
+          <div>
+            <label for="opt-expiry">Underlying price at expiry (quote currency per unit)</label>
+            <input id="opt-expiry" name="opt-expiry" inputmode="decimal" value="180">
+          </div>
+          <div>
+            <label for="opt-qty">Quantity (underlying units the option covers)</label>
+            <input id="opt-qty" name="opt-qty" inputmode="decimal" value="100">
+          </div>
+          <div>
+            <label for="opt-payoff-out">Payoff at expiry, total (model)</label>
+            <input id="opt-payoff-out" name="opt-payoff-out" readonly>
+          </div>
+          <div>
+            <label for="opt-pnl-out">Net after the premium: positive profits, negative loses (model)</label>
+            <input id="opt-pnl-out" name="opt-pnl-out" readonly>
+          </div>
+          <div>
+            <label for="opt-be-out">Break-even expiry price (model)</label>
+            <input id="opt-be-out" name="opt-be-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the option at expiry</button>
+        <p class="result" id="opt-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2520,6 +2566,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=57"></script>
+<script src="app.js?v=58"></script>
 </body>
 </html>

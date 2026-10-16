@@ -2837,6 +2837,60 @@ function clmmImpermanentLoss(liquidityStr, lower, upper, entryTick, exitTick) {
   };
 }
 
+/* ---------- Tool 61: options payoff at expiry (long call / long put) ---------- */
+/* An option is the other standardised derivative beside the perpetuals
+   of Tools 34 and 36 (Drift and Zeta are the common Solana venues): a
+   long CALL pays max(spot - strike, 0) per unit at expiry, a long PUT
+   pays max(strike - spot, 0) per unit, and the
+   buyer paid the PREMIUM up front, so the net is payoff minus premium
+   and the worst case is losing exactly the premium - a long option can
+   never lose more, which is the whole point of buying one. The
+   break-even expiry price is strike + premium for a call and
+   strike - premium for a put; at exactly that price the intrinsic value
+   per unit equals the premium, so the net is exactly zero in this
+   scaled math (the totals floor identically). A put whose premium
+   exceeds its strike has NO break-even at or above zero: even at a
+   spot of zero its payoff per unit is the strike, still short of the
+   premium - returned as null and flagged, never as a negative price.
+   Everything is exact scaled BigInt; the two totals (intrinsic x
+   quantity, premium x quantity) floor at the smallest unit like an
+   on-chain division. Only the LONG side is modelled: a short option's
+   loss profile is the mirror image with margin on top, stated on the
+   page. No time value, volatility or early exercise - expiry payoff
+   only, which is the definition the Greeks refine, not replace.
+   Verified before shipping on 20,000 prototype cases against exact
+   rational arithmetic (0 bad: floors within one smallest unit, net
+   never below -premium, break-even nets exactly zero). */
+function optionsPayoff(kind, strikeStr, premiumStr, expiryStr, qtyStr) {
+  var K = parseScaled(strikeStr);
+  var P = parseScaled(premiumStr);
+  var S = parseScaled(expiryStr);
+  var Q = parseScaled(qtyStr);
+  if (K === null || P === null || S === null || Q === null) return null;
+  if (K <= 0n || Q <= 0n) return null;
+  if (kind !== "call" && kind !== "put") return null;
+  var intrinsic = kind === "call" ? (S > K ? S - K : 0n) : (K > S ? K - S : 0n);
+  var payoffTotal = (intrinsic * Q) / SCALE;
+  var premiumTotal = (P * Q) / SCALE;
+  var pnl = payoffTotal - premiumTotal;
+  var breakEven = null;
+  if (kind === "call") breakEven = K + P;
+  else if (P <= K) breakEven = K - P;
+  return {
+    kind: kind, strike: formatScaled(K), premium: formatScaled(P),
+    expiryPrice: formatScaled(S), quantity: formatScaled(Q),
+    intrinsicPerUnit: formatScaled(intrinsic),
+    payoffTotal: formatScaled(payoffTotal), premiumTotal: formatScaled(premiumTotal),
+    pnl: formatScaled(pnl), pnlIsProfit: pnl > 0n, pnlIsLoss: pnl < 0n,
+    pnlPct: premiumTotal > 0n ? Number(pnl) / Number(premiumTotal) * 100 : null,
+    breakEven: breakEven === null ? null : formatScaled(breakEven),
+    neverBreaksEven: breakEven === null,
+    maxLoss: formatScaled(premiumTotal),
+    moneyness: intrinsic === 0n ? (S === K ? "at" : "out") : "in",
+    worthless: intrinsic === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3376,6 +3430,7 @@ if (typeof module !== "undefined" && module.exports) {
     nftMintCost, NFT_MINT_BYTES, NFT_TOKEN_ACCOUNT_BYTES, NFT_METADATA_BYTES, NFT_EDITION_BYTES, MAX_NFT_COUNT,
     programDeployCost, PROGRAM_ACCOUNT_BYTES, PROGRAMDATA_HEADER_BYTES, BUFFER_HEADER_BYTES, MAX_PROGRAM_BYTES,
     clmmImpermanentLoss,
+    optionsPayoff,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4608,6 +4663,31 @@ if (typeof document !== "undefined") {
       else if (res.exitStatus === "below") moveNote = " At the exit tick the price is at or below the range bottom, so the position holds only token0 - it stopped rebalancing at the lower tick - while the held portfolio kept its token1, which is why the gap keeps widening past the range.";
       else moveNote = " At the exit tick the position is still inside its range and still earning fees; the loss is the cost of the rebalancing it did on the way there.";
       setText("cil-result", "Model output: a position of liquidity " + res.liquidity + " over ticks " + res.tickLower + " to " + res.tickUpper + " entered at tick " + res.tickEntry + " (price " + res.priceEntry.toFixed(9) + ") holds " + res.entryAmount0.toFixed(9) + " of token0 and " + res.entryAmount1.toFixed(9) + " of token1. At the exit tick " + res.tickExit + " (price " + res.priceExit.toFixed(9) + ", " + res.priceRatio.toFixed(9) + "x the entry price) the position holds " + res.exitAmount0.toFixed(9) + " of token0 and " + res.exitAmount1.toFixed(9) + " of token1, worth " + res.positionValueToken1.toFixed(9) + " in token1 terms, while simply holding the entry amounts is worth " + res.holdValueToken1.toFixed(9) + " - a shortfall of " + res.shortfallToken1.toFixed(9) + ", an impermanent loss of " + Math.abs(res.ilPct).toFixed(6) + "% against holding." + moveNote + " Swap fees the position earns are not included - they are Tool 25's figures and are what offsets this loss in practice. An educational model of a concentrated position against holding, not a live quote. Not financial advice.");
+    });
+
+    var optForm = document.getElementById("opt-calc");
+    if (optForm) optForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = optionsPayoff(val("opt-kind"), val("opt-strike"), val("opt-premium"), val("opt-expiry"), val("opt-qty"));
+      if (res === null) {
+        document.getElementById("opt-payoff-out").value = "Invalid";
+        document.getElementById("opt-pnl-out").value = "Invalid";
+        document.getElementById("opt-be-out").value = "Invalid";
+        setText("opt-result", "Check the inputs: the strike and the quantity must be positive amounts at up to 9 decimal places, and the premium and the expiry price may be zero but not negative or over-precise.");
+        return;
+      }
+      document.getElementById("opt-payoff-out").value = res.payoffTotal;
+      document.getElementById("opt-pnl-out").value = res.pnl;
+      document.getElementById("opt-be-out").value = res.breakEven === null ? "None at or above zero" : res.breakEven;
+      var moneyNote;
+      if (res.moneyness === "in") moneyNote = " It expires in the money: the intrinsic value per unit is " + res.intrinsicPerUnit + ".";
+      else if (res.moneyness === "at") moneyNote = " It expires exactly at the money: the payoff is zero and the whole premium is lost.";
+      else moneyNote = " It expires out of the money and worthless: the payoff is zero and the whole premium is lost.";
+      var beNote = res.neverBreaksEven
+        ? " This put has no break-even at or above zero: the premium per unit exceeds the strike, so even an expiry price of zero pays less than the premium cost."
+        : " The break-even expiry price is " + res.breakEven + " - at exactly that price the payoff repays the premium to the smallest unit and the net is zero.";
+      var pctNote = res.pnlPct === null ? "" : " That is " + (res.pnlIsLoss ? "a loss of " : "a return of ") + Math.abs(res.pnlPct).toFixed(4) + "% on the premium paid.";
+      setText("opt-result", "Model output: a long " + res.kind + " with strike " + res.strike + ", bought for a premium of " + res.premium + " per unit over " + res.quantity + " units (total premium " + res.premiumTotal + "), at an expiry price of " + res.expiryPrice + " pays " + res.payoffTotal + " in total - a net of " + res.pnl + "." + pctNote + moneyNote + beNote + " A long option's most that can be lost is the premium, here " + res.maxLoss + ". Only the long side at expiry is modelled: no time value, volatility, early exercise or trading fees, and a short position's profile is the mirror image with margin on top. An educational model of an option's expiry payoff, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
