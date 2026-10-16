@@ -2481,6 +2481,33 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>64. Account reallocation planner — growing an account 10,240 bytes at a time</h3>
+      <p>A program can resize its own account with <strong>realloc</strong>, but the runtime caps each single growth at <strong>10,240 bytes</strong> (10 KiB) — growing by more takes that many separate realloc calls — while shrinking in one call is uncapped, and no account may exceed <strong>10 MiB</strong> (10,485,760 bytes) of data. The account must stay rent-exempt at its new length, so growth needs a top-up of exactly the rent difference (Tool 3's figures at the two lengths, <strong>6,960 lamports per added byte</strong>), and shrinking releases the same figure back. Growing a <strong>1,024-byte</strong> account to <strong>100,000 bytes</strong> is 98,976 bytes of growth: <strong>10 realloc calls</strong> (the last grows the remaining 6,816 bytes) and a top-up of <strong>688,872,960 lamports</strong> (0.68887296 SOL). An educational model of account reallocation, not a live account reading. Not financial advice.</p>
+      <form id="realloc-calc">
+        <div class="grid">
+          <div>
+            <label for="realloc-current">Current account data length (bytes)</label>
+            <input id="realloc-current" name="realloc-current" inputmode="numeric" value="1024">
+          </div>
+          <div>
+            <label for="realloc-target">Target account data length (bytes)</label>
+            <input id="realloc-target" name="realloc-target" inputmode="numeric" value="100000">
+          </div>
+          <div>
+            <label for="realloc-steps-out">Realloc calls the growth takes (model)</label>
+            <input id="realloc-steps-out" name="realloc-steps-out" readonly>
+          </div>
+          <div>
+            <label for="realloc-topup-out">Rent top-up (+) or release (−), lamports (model)</label>
+            <input id="realloc-topup-out" name="realloc-topup-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the resize</button>
+        <p class="result" id="realloc-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2623,6 +2650,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=60"></script>
+<script src="app.js?v=61"></script>
 </body>
 </html>
