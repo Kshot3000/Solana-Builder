@@ -3188,6 +3188,47 @@ function token2022AccountSpace(ext1, ext2, ext3) {
   };
 }
 
+/* Tool 68 - Compute budget planner. A transaction that never sets a
+   compute-unit limit is given one by default: 200,000 CU per instruction,
+   capped at the runtime maximum of 1,400,000 CU per transaction (Tool 5's
+   MAX_COMPUTE_UNIT_LIMIT). That default matters twice over. Execution
+   fails the moment usage passes the limit, so a transaction whose real
+   usage (measured by simulating it) exceeds the default dies unless it
+   asks for more; and the prioritization fee of Tool 5 is charged on the
+   REQUESTED limit, not on usage, so every unused unit of an oversized
+   limit is paid for. The planner's recommendation is the measured usage
+   grossed up by a user-chosen headroom percentage, ceilinged in whole
+   compute units: at or below the cap it always covers the measured usage,
+   and its priority fee is Tool 5's own run at that limit, so the two
+   tools cannot disagree. Usage above the 1,400,000 maximum is feasible
+   in no single transaction - the work must be split - and headroom that
+   would push the recommendation past the maximum is capped there and
+   flagged, because the transaction then carries no spare room at all. */
+var DEFAULT_CU_PER_INSTRUCTION = 200000;
+
+function computeBudgetPlan(ixCount, usedCu, headroomPct, cuPriceMicro) {
+  var ix = Number(ixCount), used = Number(usedCu), head = Number(headroomPct), price = Number(cuPriceMicro);
+  if (!Number.isInteger(ix) || ix < 1 || ix > 256) return null;
+  if (!Number.isInteger(used) || used < 1 || used > 100000000) return null;
+  if (!Number.isInteger(head) || head < 0 || head > 900) return null;
+  if (!Number.isInteger(price) || price < 0 || price > 1000000000) return null;
+  var defaultLimit = Math.min(ix * DEFAULT_CU_PER_INSTRUCTION, MAX_COMPUTE_UNIT_LIMIT);
+  var feasible = used <= MAX_COMPUTE_UNIT_LIMIT;
+  var rawRecommended = Math.ceil(used * (100 + head) / 100);
+  var headroomCapped = feasible && rawRecommended > MAX_COMPUTE_UNIT_LIMIT;
+  var recommendedLimit = feasible ? Math.min(rawRecommended, MAX_COMPUTE_UNIT_LIMIT) : null;
+  function prio(limit) { var f = txFee(1, limit, price); return f === null ? null : f.priorityFeeLamports; }
+  return {
+    instructionCount: ix, usedCu: used, headroomPct: head, cuPriceMicro: price,
+    defaultLimit: defaultLimit, fitsDefault: used <= defaultLimit,
+    feasible: feasible, recommendedLimit: recommendedLimit, headroomCapped: headroomCapped,
+    priorityAtDefault: prio(defaultLimit),
+    priorityAtRecommended: recommendedLimit === null ? null : prio(recommendedLimit),
+    priorityAtMax: prio(MAX_COMPUTE_UNIT_LIMIT),
+    maxLimit: MAX_COMPUTE_UNIT_LIMIT
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3734,6 +3775,7 @@ if (typeof module !== "undefined" && module.exports) {
     durableNoncePlan, NONCE_ACCOUNT_BYTES, MAX_NONCE_TRANSACTIONS,
     token2022MintSpace, T22_MINT_BASE_BYTES, T22_TLV_HEADER_BYTES, T22_MULTISIG_ACCOUNT_BYTES, T22_MINT_EXTENSION_BYTES,
     token2022AccountSpace, T22_ACCOUNT_BASE_BYTES, T22_ACCOUNT_EXTENSION_BYTES,
+    computeBudgetPlan, DEFAULT_CU_PER_INSTRUCTION,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5119,6 +5161,35 @@ if (typeof document !== "undefined") {
       if (res.duplicatesIgnored > 0) note += " The same extension picked twice is counted once: an extension is either present on an account or it is not.";
       if (res.padded) note += " The unpadded total would be exactly 355 bytes, the length of a multisig account, so the length calculation adds 2 bytes.";
       setText("aext-result", "Model output: a Token-2022 token account with " + (res.extensionCount === 0 ? "no extensions" : res.extensionCount + (res.extensionCount === 1 ? " extension" : " extensions")) + " is " + res.sizeBytes.toLocaleString("en-US") + " bytes and must be funded rent-exempt at " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL), Tool 3's figure at that size - locked, not spent, and reclaimed when the account is closed." + note + " Several records follow the mint rather than the account owner: every token account of a transfer-fee mint carries the transfer fee amount record, so creating one costs more than the classic 2,039,280 lamports even when the owner chooses nothing. An educational model of Token-2022 token-account sizing, not a live account reading. Not financial advice.");
+    });
+
+    var cbForm = document.getElementById("cb-calc");
+    if (cbForm) cbForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = computeBudgetPlan(val("cb-ix"), val("cb-used"), val("cb-head"), val("cb-price"));
+      if (res === null) {
+        document.getElementById("cb-rec-out").value = "Invalid";
+        document.getElementById("cb-prio-out").value = "Invalid";
+        setText("cb-result", "Check the inputs: instructions must be a whole number from 1 to 256, the measured compute used a whole number of 1 or more, the headroom a whole percentage from 0 to 900, and the compute-unit price a whole number of micro-lamports from 0 to 1,000,000,000.");
+        return;
+      }
+      var note = "";
+      if (!res.feasible) {
+        document.getElementById("cb-rec-out").value = "Over the maximum";
+        document.getElementById("cb-prio-out").value = "n/a";
+        setText("cb-result", "Model output: the measured usage of " + res.usedCu.toLocaleString("en-US") + " compute units exceeds the runtime maximum of " + res.maxLimit.toLocaleString("en-US") + " per transaction, so no compute-unit limit can carry this work in a single transaction - it must be split across transactions. The default limit for " + res.instructionCount + (res.instructionCount === 1 ? " instruction" : " instructions") + " would be " + res.defaultLimit.toLocaleString("en-US") + ". An educational model of compute budgeting, not a live simulation. Not financial advice.");
+        return;
+      }
+      document.getElementById("cb-rec-out").value = res.recommendedLimit.toLocaleString("en-US");
+      document.getElementById("cb-prio-out").value = res.priorityAtRecommended.toLocaleString("en-US");
+      if (res.fitsDefault) {
+        note = " The measured usage fits inside the default limit of " + res.defaultLimit.toLocaleString("en-US") + ", so the transaction would execute without any compute-budget instruction - but at this compute-unit price the default limit would carry a priority fee of " + res.priorityAtDefault.toLocaleString("en-US") + " lamports if a price were set against it, against " + res.priorityAtRecommended.toLocaleString("en-US") + " at the recommended limit: the fee is charged on the limit requested, not the compute used.";
+      } else {
+        note = " The measured usage exceeds the default limit of " + res.defaultLimit.toLocaleString("en-US") + ", so without a SetComputeUnitLimit instruction this transaction fails with a computational budget exceeded error; the recommended limit is what lets it execute.";
+      }
+      if (res.headroomCapped) note += " The chosen headroom would push the limit past the " + res.maxLimit.toLocaleString("en-US") + " maximum, so the recommendation is capped there and the transaction carries no spare room above its measured usage.";
+      if (res.cuPriceMicro === 0) note += " At a compute-unit price of zero every priority fee here is zero - the price is what turns an oversized limit into a cost.";
+      setText("cb-result", "Model output: for " + res.instructionCount + (res.instructionCount === 1 ? " instruction" : " instructions") + " measuring " + res.usedCu.toLocaleString("en-US") + " compute units used, the default limit is " + res.defaultLimit.toLocaleString("en-US") + "; requesting the measured usage plus " + res.headroomPct + "% headroom gives a recommended limit of " + res.recommendedLimit.toLocaleString("en-US") + " compute units, whose priority fee at " + res.cuPriceMicro.toLocaleString("en-US") + " micro-lamports per unit is " + res.priorityAtRecommended.toLocaleString("en-US") + " lamports (Tool 5's formula at that limit). Requesting the " + res.maxLimit.toLocaleString("en-US") + " maximum instead would cost " + res.priorityAtMax.toLocaleString("en-US") + " lamports at the same price." + note + " An educational model of compute budgeting, not a live simulation. Not financial advice.");
     });
 
     /* catalogue filter */

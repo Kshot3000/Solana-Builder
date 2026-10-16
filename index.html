@@ -2677,6 +2677,41 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>68. Compute budget planner \u2014 the limit a transaction is given, and the one it should ask for</h3>
+      <p>Every transaction runs against a <strong>compute-unit limit</strong>. Never set one and the runtime gives the transaction <strong>200,000 compute units per instruction</strong>, capped at the transaction maximum of <strong>1,400,000</strong> \u2014 so three instructions get 600,000 by default. The limit matters twice. Execution <strong>fails the moment usage passes it</strong>, so a transaction whose real usage \u2014 measured by simulating it \u2014 exceeds the default dies unless it asks for more with a SetComputeUnitLimit instruction. And the prioritization fee (Tool 5) is charged on the <strong>limit requested, not the compute used</strong>, so an oversized limit is paid for in full: at 10,000 micro-lamports per unit, the 1,400,000 maximum costs 14,000 lamports whether the transaction uses it or not. The planner's headline: 3 instructions measuring <strong>412,000</strong> compute units used, given 20% headroom, should request <strong>494,400</strong> \u2014 a priority fee of <strong>4,944 lamports</strong> at that price, against 6,000 charged on the 600,000 default. Too little headroom is the symmetric failure: usage that varies between simulations can pass the measured figure, which is why the recommendation grosses usage up rather than requesting it exactly. And some work fits in no transaction at all: usage above 1,400,000 must be split, and headroom that would push a near-maximum transaction past the cap is capped there and flagged, leaving no spare room. An educational model of compute budgeting, not a live simulation. Not financial advice.</p>
+      <form id="cb-calc">
+        <div class="grid">
+          <div>
+            <label for="cb-ix">Instructions in the transaction</label>
+            <input id="cb-ix" name="cb-ix" inputmode="numeric" value="3">
+          </div>
+          <div>
+            <label for="cb-used">Compute units used (measured by simulation)</label>
+            <input id="cb-used" name="cb-used" inputmode="numeric" value="412000">
+          </div>
+          <div>
+            <label for="cb-head">Headroom above measured usage (%)</label>
+            <input id="cb-head" name="cb-head" inputmode="numeric" value="20">
+          </div>
+          <div>
+            <label for="cb-price">Compute-unit price (micro-lamports per CU)</label>
+            <input id="cb-price" name="cb-price" inputmode="numeric" value="10000">
+          </div>
+          <div>
+            <label for="cb-rec-out">Recommended compute-unit limit (model)</label>
+            <input id="cb-rec-out" name="cb-rec-out" readonly>
+          </div>
+          <div>
+            <label for="cb-prio-out">Priority fee at the recommended limit, lamports (model)</label>
+            <input id="cb-prio-out" name="cb-prio-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the compute budget</button>
+        <p class="result" id="cb-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2819,6 +2854,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=64"></script>
+<script src="app.js?v=65"></script>
 </body>
 </html>
