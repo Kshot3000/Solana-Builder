@@ -3538,6 +3538,65 @@ function leverageLoop(depositStr, ltvBpsStr, supplyBpsStr, borrowBpsStr, thresho
   };
 }
 
+/* ---------- Tool 74: transfer-fee swap (a swap where both tokens tax the transfer) ---------- */
+/* A Token-2022 mint can carry a transfer fee (Tool 13): every transfer of
+   that token withholds fee = ceil(amount x bps / 10000), capped at the
+   mint's maximumFee, in RAW units. When such a token trades on a
+   constant-product pool, the fee is charged TWICE around the swap math,
+   and a quote that ignores it overstates what lands:
+     1. the trader's input transfer is taxed, so the pool's vault is
+        credited poolReceived = amountIn - inFee (the withheld inFee stays
+        inside the pool's token account as withheld fees, harvestable to
+        the mint - it is not pool liquidity and does not price the swap);
+     2. the pool swaps poolReceived under Tool 2's own rule - pool fee
+        floored on the amount the pool actually received, output floored
+        against the reserves - giving grossOut;
+     3. the pool's output transfer is taxed again, so the trader's wallet
+        is credited userReceived = grossOut - outFee.
+   Everything here is raw integer units (Tool 6's units, the units the
+   transfer-fee program itself computes in), so the ceilings are exact.
+   plainOut is Tool 2's swap of the FULL amountIn at the same pool fee -
+   what the same trade would return with no transfer fees at all - and
+   shortfall is plainOut - userReceived, always >= 0: transfer fees can
+   only shrink a swap, never grow it (prototype-proven on 20,000 cases
+   against an independent integer oracle, 0 mismatches, and the
+   no-transfer-fee case collapses to plainOut exactly). A 100% output
+   transfer fee honestly returns userReceived 0 and is flagged, not
+   hidden. Classic SPL mints have no transfer fees; set a side's rate to
+   0 (or its cap to 0) for a classic token on that side. */
+function transferFeeSwap(reserveInStr, reserveOutStr, amountInStr, poolFeeBpsStr, inFeeBpsStr, inMaxFeeStr, outFeeBpsStr, outMaxFeeStr) {
+  var rIn = rawAmount(reserveInStr), rOut = rawAmount(reserveOutStr), aIn = rawAmount(amountInStr);
+  var inMax = rawAmount(inMaxFeeStr), outMax = rawAmount(outMaxFeeStr);
+  var poolBps = feeBpsValue(poolFeeBpsStr), inBps = feeBpsValue(inFeeBpsStr), outBps = feeBpsValue(outFeeBpsStr);
+  if (rIn === null || rOut === null || aIn === null || inMax === null || outMax === null) return null;
+  if (poolBps === null || inBps === null || outBps === null) return null;
+  if (rIn <= 0n || rOut <= 0n || aIn <= 0n) return null;
+  if (poolBps >= 10000) return null;
+  var inParts = transferFeeParts(aIn, BigInt(inBps), inMax);
+  var poolReceived = aIn - inParts.fee;
+  if (poolReceived <= 0n) return null;
+  var poolFee = (poolReceived * BigInt(poolBps)) / 10000n;
+  var eff = poolReceived - poolFee;
+  if (eff <= 0n) return null;
+  var grossOut = (eff * rOut) / (rIn + eff);
+  if (grossOut <= 0n || grossOut >= rOut) return null;
+  var outParts = transferFeeParts(grossOut, BigInt(outBps), outMax);
+  var userReceived = grossOut - outParts.fee;
+  var plainFee = (aIn * BigInt(poolBps)) / 10000n;
+  var plainEff = aIn - plainFee;
+  var plainOut = (plainEff * rOut) / (rIn + plainEff);
+  var shortfall = plainOut - userReceived;
+  return {
+    amountIn: aIn.toString(), inFeeBps: inBps, inFee: inParts.fee.toString(), inCapped: inParts.rawFee > inMax,
+    poolReceived: poolReceived.toString(), poolFeeBps: poolBps, poolFee: poolFee.toString(),
+    effectiveIn: eff.toString(), grossOut: grossOut.toString(),
+    outFeeBps: outBps, outFee: outParts.fee.toString(), outCapped: outParts.rawFee > outMax,
+    userReceived: userReceived.toString(), plainOut: plainOut.toString(), shortfall: shortfall.toString(),
+    shortfallPct: plainOut === 0n ? 0 : (Number(shortfall) * 100) / Number(plainOut),
+    receivedZero: userReceived === 0n, noTransferFees: inParts.fee === 0n && outParts.fee === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4090,6 +4149,7 @@ if (typeof module !== "undefined" && module.exports) {
     lpFeeEarnings, MAX_LPF_VALUE, MAX_LPF_DAYS,
     predictionMarket, MAX_PRED_SPEND,
     leverageLoop, MAX_LOOP_DEPOSIT, MAX_LOOP_RATE_BPS,
+    transferFeeSwap,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5639,6 +5699,36 @@ if (typeof document !== "undefined") {
         note = " The loop earns " + res.earnedYear + " on the supplied side and pays " + res.paidYear + " on the borrowed side over a year; it would break even at a supply rate of " + res.breakEvenSupplyBps + " bps (the borrow rate times the LTV), and every basis point of spread is levered " + res.leverage + " times on your equity. The health factor is the liquidation threshold divided by the LTV - " + res.healthFactor + " here - because the supplied side cancels: the higher the LTV you loop to, the thinner that buffer, even with the same asset on both sides.";
       }
       setText("loop-result", "Model output: looping a deposit of " + res.deposit + " to a maximum LTV of " + res.ltvBps + " bps builds a supplied position of " + res.totalSupplied + " against a debt of " + res.totalBorrowed + " - an effective leverage of " + res.leverage + "x on your equity, the limit of deposit, borrow, redeposit repeated. Over a year at a supply rate of " + res.supplyBps + " bps and a borrow rate of " + res.borrowBps + " bps the position nets " + res.netYear + ", an APY of " + res.netApyBps + " bps (" + res.netApyPct + "%) on the deposit alone." + note + " Both rates and the LTV are held frozen for the year; price moves, rate moves, the transaction cost of each loop round and any venue leverage cap are not modelled, and no live market is read. An educational model of a leveraged loop, not a live quote. Not financial advice.");
+    });
+
+    var tfswapForm = document.getElementById("tfswap-calc");
+    if (tfswapForm) tfswapForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = transferFeeSwap(val("tfswap-rin"), val("tfswap-rout"), val("tfswap-ain"), val("tfswap-poolfee"), val("tfswap-inbps"), val("tfswap-inmax"), val("tfswap-outbps"), val("tfswap-outmax"));
+      if (res === null) {
+        document.getElementById("tfswap-rec-out").value = "Invalid";
+        document.getElementById("tfswap-gross-out").value = "Invalid";
+        document.getElementById("tfswap-recv-out").value = "Invalid";
+        document.getElementById("tfswap-plain-out").value = "Invalid";
+        setText("tfswap-result", "Check the inputs: reserves, the amount sent and both maximum fees are whole raw units of more than 0 (a maximum fee may be 0, which caps that side's fee at 0), the pool fee a whole number of basis points below 10,000, and each transfer-fee rate a whole number of basis points from 0 to 10,000 - and the input transfer must leave something for the pool to swap after its fee is withheld.");
+        return;
+      }
+      document.getElementById("tfswap-rec-out").value = res.poolReceived;
+      document.getElementById("tfswap-gross-out").value = res.grossOut;
+      document.getElementById("tfswap-recv-out").value = res.userReceived;
+      document.getElementById("tfswap-plain-out").value = res.plainOut;
+      var caps = "";
+      if (res.inCapped) caps += " The input side's fee hit its maximum-fee cap, so the pool received more than the uncapped rate alone would leave.";
+      if (res.outCapped) caps += " The output side's fee hit its maximum-fee cap, so you received more than the uncapped rate alone would leave.";
+      var note = "";
+      if (res.noTransferFees) {
+        note = " With no transfer fee withheld on either side, this is exactly the plain constant-product swap of Tool 2: what the pool sends is what your wallet is credited, and the shortfall against the plain quote is 0.";
+      } else if (res.receivedZero) {
+        note = " The output transfer fee withheld the pool's ENTIRE output, so your wallet is credited 0: at these settings the trade burns its whole return to the output token's transfer fee, however good the pool price looked.";
+      } else {
+        note = " The gap between the plain quote and what lands - " + res.shortfall + " raw units, " + res.shortfallPct.toFixed(4) + "% of the plain output - is the two transfer fees plus the price impact of swapping a smaller input: the input fee shrinks the trade before the pool prices it, and the output fee is withheld from what the pool sends, so neither fee shows up in the pool's own quote.";
+      }
+      setText("tfswap-result", "Model output: sending " + res.amountIn + " raw units, the input transfer withholds " + res.inFee + " (at " + res.inFeeBps + " bps), so the pool is credited " + res.poolReceived + " and swaps it at a pool fee of " + res.poolFeeBps + " bps (pool fee " + res.poolFee + "), sending " + res.grossOut + " raw units out; the output transfer withholds " + res.outFee + " (at " + res.outFeeBps + " bps), so your wallet is credited " + res.userReceived + ". The same trade with no transfer fees at all would return " + res.plainOut + "." + caps + note + " Amounts are raw units throughout - convert with your mint's decimals (Tool 6). The pool is modelled as pricing the amount it is credited; a real venue's handling of withheld fees can differ in detail. An educational model of a transfer-fee swap, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

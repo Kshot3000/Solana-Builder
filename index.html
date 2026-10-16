@@ -26,6 +26,64 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>74. Transfer-fee swap model — what a fee-on-transfer token does to a swap, twice</h3>
+      <p>A <strong>Token-2022</strong> mint can carry a <strong>transfer fee</strong> (Tool 13): every transfer withholds <strong>ceil(amount × bps ÷ 10,000)</strong>, capped at the mint’s maximum fee, in <strong>raw units</strong>. When such a token trades on a constant-product pool, that tax lands <strong>twice</strong> around the swap: the pool is credited only what survives the input transfer, it swaps that smaller amount, and the output transfer withholds again before your wallet is credited — so a quote that ignores the fees overstates what lands. At the headline settings — reserves of <strong>1,000,000,000</strong> raw units on each side, sending <strong>10,000,000</strong>, a <strong>25 bps</strong> pool fee, a <strong>100 bps</strong> input transfer fee and a <strong>50 bps</strong> output transfer fee — the input transfer withholds <strong>100,000</strong>, the pool swaps the <strong>9,900,000</strong> it was credited and sends <strong>9,778,683</strong> out, and the output transfer withholds <strong>48,894</strong> more, so your wallet is credited <strong>9,729,789</strong> — a shortfall of <strong>146,693</strong> against the <strong>9,876,482</strong> the same trade would return with no transfer fees at all. A maximum-fee cap can bind on either side and shrink that side’s tax; a 100% output fee honestly credits <strong>0</strong>. All amounts are raw units throughout — convert with your mint’s decimals (Tool 6). The pool is modelled as pricing the amount it is credited; a real venue’s handling of withheld fees can differ in detail. An educational model of a transfer-fee swap, not a live quote. Not financial advice.</p>
+      <form id="tfswap-calc">
+        <div class="grid">
+          <div>
+            <label for="tfswap-rin">Pool reserve of the token you send (raw units)</label>
+            <input id="tfswap-rin" name="tfswap-rin" inputmode="numeric" value="1000000000">
+          </div>
+          <div>
+            <label for="tfswap-rout">Pool reserve of the token you receive (raw units)</label>
+            <input id="tfswap-rout" name="tfswap-rout" inputmode="numeric" value="1000000000">
+          </div>
+          <div>
+            <label for="tfswap-ain">Amount you send (raw units)</label>
+            <input id="tfswap-ain" name="tfswap-ain" inputmode="numeric" value="10000000">
+          </div>
+          <div>
+            <label for="tfswap-poolfee">Pool swap fee (basis points, below 10,000)</label>
+            <input id="tfswap-poolfee" name="tfswap-poolfee" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="tfswap-inbps">Input token transfer fee (basis points, 0–10,000)</label>
+            <input id="tfswap-inbps" name="tfswap-inbps" inputmode="numeric" value="100">
+          </div>
+          <div>
+            <label for="tfswap-inmax">Input token maximum transfer fee (raw units, 0 caps the fee at 0)</label>
+            <input id="tfswap-inmax" name="tfswap-inmax" inputmode="numeric" value="500000">
+          </div>
+          <div>
+            <label for="tfswap-outbps">Output token transfer fee (basis points, 0–10,000)</label>
+            <input id="tfswap-outbps" name="tfswap-outbps" inputmode="numeric" value="50">
+          </div>
+          <div>
+            <label for="tfswap-outmax">Output token maximum transfer fee (raw units, 0 caps the fee at 0)</label>
+            <input id="tfswap-outmax" name="tfswap-outmax" inputmode="numeric" value="500000">
+          </div>
+          <div>
+            <label for="tfswap-rec-out">What the pool is credited after the input fee (model)</label>
+            <input id="tfswap-rec-out" name="tfswap-rec-out" readonly>
+          </div>
+          <div>
+            <label for="tfswap-gross-out">What the pool sends out (model)</label>
+            <input id="tfswap-gross-out" name="tfswap-gross-out" readonly>
+          </div>
+          <div>
+            <label for="tfswap-recv-out">What your wallet is credited after the output fee (model)</label>
+            <input id="tfswap-recv-out" name="tfswap-recv-out" readonly>
+          </div>
+          <div>
+            <label for="tfswap-plain-out">The same trade with no transfer fees at all (model)</label>
+            <input id="tfswap-plain-out" name="tfswap-plain-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the transfer-fee swap model</button>
+        <p id="tfswap-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>73. Leveraged loop calculator — recursive supply and borrow (“multiply”)</h3>
       <p>A <strong>leverage loop</strong> — the mechanic behind “multiply” products on Solana lending markets — deposits an asset, borrows against it at the market’s <strong>maximum LTV</strong>, redeposits what it borrowed, borrows against that, and repeats. Each round borrows the same fraction of the last, so the rounds form a <strong>geometric series</strong> with a closed-form limit: total supplied = deposit ÷ (1 − LTV), total borrowed = supplied − deposit, and effective leverage = supplied ÷ deposit. At the headline LTV of <strong>7,500 bps</strong> (75%), a deposit of <strong>1,000</strong> loops to <strong>4,000 supplied against 3,000 borrowed — 4x leverage</strong> — and the loop multiplies the <strong>spread</strong>, not just the yield: at a <strong>500 bps</strong> supply rate against a <strong>700 bps</strong> borrow rate it earns 200 and pays 210 over a year, a net of <strong>−10</strong>, an APY of <strong>−1%</strong> on the deposit, breaking even only at a supply rate of <strong>525 bps</strong> (the borrow rate times the LTV). The fully looped position’s <strong>health factor is the liquidation threshold divided by the LTV</strong> — <strong>1.066666666</strong> at an 8,000 bps threshold — because the supplied side cancels: loop further and the buffer thins, even with the same asset on both sides. Both rates and the LTV are frozen for the year; price moves, rate moves, per-round transaction costs and venue leverage caps are <strong>not</strong> modelled. An educational model of a leveraged loop, not a live quote. Not financial advice.</p>
       <form id="loop-calc">
@@ -3061,6 +3119,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=70"></script>
+<script src="app.js?v=71"></script>
 </body>
 </html>
