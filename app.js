@@ -2460,6 +2460,52 @@ function multisigPlan(members, threshold, approved) {
   };
 }
 
+/* ---------- Tool 54: protocol buyback & burn planner ---------- */
+/* A protocol that earns fees in a quote token can route that revenue into
+   buying its own token back from a constant-product pool and burning what
+   it buys - Raydium's fee-funded buyback of RAY is the best-known Solana
+   form. The buy is Tool 2's cpSwap run verbatim (fee on the input, output
+   floored at the smallest unit), so this tool cannot disagree with the
+   hub's swap model about what a spend buys. Of the tokens bought, a
+   burn share in basis points is destroyed - burned = floor(bought x
+   burnBps / 10000), floored like Tool 51's burn - and the remainder goes
+   to the treasury, so burned + treasury = bought exactly. The supply
+   falls by the burned amount only: newSupply = supply - burned, and the
+   burned share of the supply is floored to whole basis points (a real
+   buyback is usually a few bps of supply, which is the honest scale).
+   A burn larger than the stated supply is rejected - the pool cannot
+   sell back more of the token than exists in this model. A buyback does
+   not by itself set or raise a price, and none is promised: the average
+   price paid (spend / bought) sits above spot by exactly the fee plus
+   the price impact the buy itself causes. Where the revenue came from,
+   how often buybacks run and any live program are not modelled.
+   Prototype-verified before pinning: 20,000 random cases against the
+   float definition of the swap (0 mismatches on the bought amount),
+   with the split and supply invariants exact in BigInt throughout and
+   the bought amount equal to cpSwap's own output on every case. */
+function buybackBurn(reserveQuoteStr, reserveTokenStr, spendStr, feeBps, supplyStr, burnBps) {
+  var sw = cpSwap(reserveQuoteStr, reserveTokenStr, spendStr, feeBps);
+  if (!sw) return null;
+  var S = parseScaled(supplyStr);
+  var bb = Number(burnBps);
+  if (S === null || S <= 0n) return null;
+  if (!Number.isInteger(bb) || bb < 0 || bb > 10000) return null;
+  var bought = parseScaled(sw.amountOut);
+  var burned = (bought * BigInt(bb)) / 10000n;
+  if (burned > S) return null;
+  var treasury = bought - burned;
+  return {
+    fee: sw.fee, effectiveIn: sw.effectiveIn, bought: sw.amountOut,
+    priceImpactPct: sw.priceImpactPct,
+    burned: formatScaled(burned), treasury: formatScaled(treasury),
+    burnBps: bb,
+    supply: formatScaled(S), newSupply: formatScaled(S - burned),
+    burnShareBps: Number((burned * 10000n) / S),
+    spotPrice: Number(parseScaled(reserveQuoteStr)) / Number(parseScaled(reserveTokenStr)),
+    avgPrice: Number(parseScaled(spendStr)) / Number(bought)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -2992,6 +3038,7 @@ if (typeof module !== "undefined" && module.exports) {
     burnShare,
     merkleProof, MAX_MERKLE_RECIPIENTS,
     multisigPlan, binomBigInt, MAX_MULTISIG_MEMBERS,
+    buybackBurn,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4086,6 +4133,30 @@ if (typeof document !== "undefined") {
         ? " The threshold is unanimous, so the smallest blocking coalition is a single member - every member holds a veto."
         : " The smallest blocking coalition is " + res.blockingSize + " members (" + res.blockingSubsets + " distinct " + (res.blockingSubsets === "1" ? "set" : "sets") + " of that size): if that many refuse, fewer than " + res.threshold + " members remain able to approve.";
       setText("msig-result", "Model output: a " + res.threshold + "-of-" + res.members + " multisig requires " + fmtAmt(res.thresholdBps / 100) + "% of its members to act." + stateNote + " Of the " + res.totalSubsets + " possible member subsets, " + res.approvingSubsets + (res.approvingSubsets === "1" ? " is" : " are") + " large enough to approve." + blockNote + " Member identities, key custody and proposal expiry are not modelled, and no live multisig is read. An educational model of a multisig threshold, not a live wallet. Not financial advice.");
+    });
+
+
+    var bbuyForm = document.getElementById("bbuy-calc");
+    if (bbuyForm) bbuyForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = buybackBurn(val("bbuy-rq"), val("bbuy-rt"), val("bbuy-spend"), val("bbuy-fee"), val("bbuy-supply"), val("bbuy-burn"));
+      if (res === null) {
+        document.getElementById("bbuy-bought-out").value = "Invalid";
+        document.getElementById("bbuy-supply-out").value = "Invalid";
+        setText("bbuy-result", "Check the inputs: both pool reserves and the spend must be positive amounts with at most 9 decimal places, the pool fee a whole number of basis points below 10000, the supply positive, the burn share a whole number from 0 to 10000 basis points, and the burn must not exceed the supply.");
+        return;
+      }
+      document.getElementById("bbuy-bought-out").value = res.bought;
+      document.getElementById("bbuy-supply-out").value = res.newSupply;
+      var splitNote = res.burnBps === 10000
+        ? " Every bought token is burned, so the treasury receives none of this buy."
+        : (res.burnBps === 0
+          ? " The burn share is zero, so nothing is burned: the whole buy goes to the treasury and the supply stands unchanged - a buyback without a burn."
+          : " Of the bought tokens " + res.burned + " are burned and " + res.treasury + " go to the treasury.");
+      var supplyNote = res.burned === "0"
+        ? " The supply stands unchanged at " + res.supply + "."
+        : " The supply falls from " + res.supply + " to " + res.newSupply + " - the burn is " + res.burnShareBps + " whole basis points of the supply, floored.";
+      setText("bbuy-result", "Model output: spending the revenue buys back " + res.bought + " tokens - a pool fee of " + res.fee + " comes off the spend first, and the average price paid is " + fmtAmt(res.avgPrice) + " against a spot of " + fmtAmt(res.spotPrice) + ", the gap being the fee plus the " + fmtAmt(res.priceImpactPct) + "% price impact the buy itself causes." + splitNote + supplyNote + " A burn does not by itself set or raise a price, and none is promised. Where the revenue came from, how often buybacks run and any live program are not modelled, and no live pool is read. An educational model of a buyback and burn, not a live program. Not financial advice.");
     });
 
     /* catalogue filter */

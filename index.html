@@ -2137,6 +2137,49 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>54. Protocol buyback &amp; burn planner — what fee revenue buys back, and what the burn removes</h3>
+      <p>A protocol that earns fees in a quote token can route that revenue into <strong>buying its own token back</strong> from a pool and <strong>burning</strong> what it buys — Raydium's fee-funded buyback is the best-known Solana form. The buy is a plain constant-product swap (Tool 2, run verbatim), so size is the whole story: spending <strong>100,000</strong> of quote into a <strong>1,000,000 / 500,000</strong> pool at a 25 bps fee buys back <strong>45,351.216185496</strong> tokens at an average price of <strong>2.205012531</strong> against a spot of 2 — the buy's own 9.07% price impact plus the fee is the premium over spot, and a bigger buyback pays a worse average price, not a better one. Of the tokens bought, the <strong>burn share</strong> is destroyed and the rest go to the treasury; burning all of them takes a <strong>100,000,000</strong> supply to <strong>99,954,648.783814504</strong> — the burn is 0.0453% of the supply, 4 whole basis points floored, which is the honest scale of a single buyback. A burn does not by itself set or raise a price, and none is promised here. Where the revenue came from, how often buybacks run and any live program are not modelled. An educational model of a buyback and burn, not a live program. Not financial advice.</p>
+      <form id="bbuy-calc">
+        <div class="grid">
+          <div>
+            <label for="bbuy-rq">Pool reserve — quote token (the revenue token)</label>
+            <input id="bbuy-rq" name="bbuy-rq" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="bbuy-rt">Pool reserve — the protocol's token</label>
+            <input id="bbuy-rt" name="bbuy-rt" inputmode="decimal" value="500000">
+          </div>
+          <div>
+            <label for="bbuy-spend">Revenue to spend on the buyback</label>
+            <input id="bbuy-spend" name="bbuy-spend" inputmode="decimal" value="100000">
+          </div>
+          <div>
+            <label for="bbuy-fee">Pool fee (basis points)</label>
+            <input id="bbuy-fee" name="bbuy-fee" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="bbuy-supply">Token supply before the burn</label>
+            <input id="bbuy-supply" name="bbuy-supply" inputmode="decimal" value="100000000">
+          </div>
+          <div>
+            <label for="bbuy-burn">Share of the bought tokens burned (basis points)</label>
+            <input id="bbuy-burn" name="bbuy-burn" inputmode="numeric" value="10000">
+          </div>
+          <div>
+            <label for="bbuy-bought-out">Tokens bought back (model)</label>
+            <input id="bbuy-bought-out" name="bbuy-bought-out" readonly>
+          </div>
+          <div>
+            <label for="bbuy-supply-out">Supply after the burn (model)</label>
+            <input id="bbuy-supply-out" name="bbuy-supply-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the buyback</button>
+        <p class="result" id="bbuy-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2279,6 +2322,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=50"></script>
+<script src="app.js?v=51"></script>
 </body>
 </html>
