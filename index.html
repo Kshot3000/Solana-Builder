@@ -2424,6 +2424,33 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>62. Blockhash expiry checker — how long a signed transaction can still land</h3>
+      <p>Every Solana transaction carries a <strong>recent blockhash</strong>, and the runtime only processes it while that blockhash is recent enough: the maximum processing age is <strong>150 blocks</strong>, which is why the RPC's <code>getLatestBlockhash</code> returns a <strong>last valid block height</strong> — the block height the blockhash came from, plus 150. The count is in <strong>block height, not slots</strong>: a skipped slot produces no block and does not age a blockhash, so wallets track expiry by height even though the epoch schedule (Tool 12) runs on slots. Because the age is 0-indexed, a blockhash can land at <strong>151 distinct block heights</strong> — its own height through its last valid height, inclusive — and one block past that it is expired forever: the transaction must be rebuilt and re-signed on a fresh blockhash. The headline blockhash, from block height <strong>250,000,000</strong>, seen at a current height of <strong>250,000,120</strong>, is 120 blocks old with a last valid height of <strong>250,000,150</strong> — <strong>30 blocks remaining</strong>. A durable-nonce transaction is the exception — its stored nonce value does not age this way — and is not modelled here, and no wall-clock time is quoted: the window is counted in produced blocks, never seconds. An educational model of blockhash expiry, not a live cluster reading. Not financial advice.</p>
+      <form id="bhexp-calc">
+        <div class="grid">
+          <div>
+            <label for="bhexp-fetched">Block height the blockhash came from (the blockHeight beside a fresh blockhash)</label>
+            <input id="bhexp-fetched" name="bhexp-fetched" inputmode="numeric" value="250000000">
+          </div>
+          <div>
+            <label for="bhexp-current">Current block height (the height right now, same cluster)</label>
+            <input id="bhexp-current" name="bhexp-current" inputmode="numeric" value="250000120">
+          </div>
+          <div>
+            <label for="bhexp-last-out">Last valid block height (blockhash height + 150, model)</label>
+            <input id="bhexp-last-out" name="bhexp-last-out" readonly>
+          </div>
+          <div>
+            <label for="bhexp-remain-out">Blocks remaining at the current height (model)</label>
+            <input id="bhexp-remain-out" name="bhexp-remain-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Check the blockhash window</button>
+        <p class="result" id="bhexp-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2566,6 +2593,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=58"></script>
+<script src="app.js?v=59"></script>
 </body>
 </html>

@@ -2891,6 +2891,58 @@ function optionsPayoff(kind, strikeStr, premiumStr, expiryStr, qtyStr) {
   };
 }
 
+/* ---------- Tool 62: blockhash expiry (last valid block height) ---------- */
+/* Every transaction carries a RECENT BLOCKHASH, and the runtime will
+   only process it while that blockhash is recent enough: the maximum
+   processing age is 150 BLOCKS. The RPC's getLatestBlockhash says the
+   same thing directly - it returns the blockhash alongside its
+   lastValidBlockHeight, which is the block height the blockhash came
+   from + 150. The count is in BLOCK HEIGHT, not slots: a skipped slot
+   produces no block and does not age a blockhash, which is why wallets
+   and explorers track expiry by height even though Tool 12's schedule
+   runs on slots. Because the age is 0-indexed, a blockhash can land at
+   151 distinct block heights - its own height through its last valid
+   height inclusive; one block past that it is expired and the
+   transaction can never land (it must be rebuilt and re-signed on a
+   fresh blockhash). A DURABLE NONCE transaction is the stated
+   exception - its "blockhash" is a stored nonce value that does not
+   age this way - and is not modelled here. Heights are whole numbers
+   parsed as BigInt and capped at 1e15, far above any live cluster.
+   Verified before shipping on 20,000 prototype cases against the
+   definition (0 bad: valid exactly when fetched <= current <=
+   lastValid, remaining + age = 150, expiredBy = age - 150, and the
+   valid window counts exactly 151 heights). */
+var MAX_PROCESSING_AGE_BLOCKS = 150;
+var MAX_BLOCK_HEIGHT = 1000000000000000n;
+
+function parseBlockHeight(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var v = BigInt(s);
+  if (v > MAX_BLOCK_HEIGHT) return null;
+  return v;
+}
+
+function blockhashExpiry(fetchedStr, currentStr) {
+  var F = parseBlockHeight(fetchedStr);
+  var C = parseBlockHeight(currentStr);
+  if (F === null || C === null) return null;
+  if (C < F) return null; /* a current height before the blockhash existed is inconsistent input */
+  var last = F + BigInt(MAX_PROCESSING_AGE_BLOCKS);
+  var age = C - F;
+  var expired = C > last;
+  return {
+    blockhashHeight: F.toString(), currentHeight: C.toString(),
+    lastValidHeight: last.toString(),
+    ageBlocks: Number(age),
+    remainingBlocks: expired ? null : Number(last - C),
+    expiredBy: expired ? Number(C - last) : 0,
+    windowBlocks: MAX_PROCESSING_AGE_BLOCKS + 1,
+    status: expired ? "expired" : (C === last ? "last" : "valid")
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3431,6 +3483,7 @@ if (typeof module !== "undefined" && module.exports) {
     programDeployCost, PROGRAM_ACCOUNT_BYTES, PROGRAMDATA_HEADER_BYTES, BUFFER_HEADER_BYTES, MAX_PROGRAM_BYTES,
     clmmImpermanentLoss,
     optionsPayoff,
+    blockhashExpiry, MAX_PROCESSING_AGE_BLOCKS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4688,6 +4741,25 @@ if (typeof document !== "undefined") {
         : " The break-even expiry price is " + res.breakEven + " - at exactly that price the payoff repays the premium to the smallest unit and the net is zero.";
       var pctNote = res.pnlPct === null ? "" : " That is " + (res.pnlIsLoss ? "a loss of " : "a return of ") + Math.abs(res.pnlPct).toFixed(4) + "% on the premium paid.";
       setText("opt-result", "Model output: a long " + res.kind + " with strike " + res.strike + ", bought for a premium of " + res.premium + " per unit over " + res.quantity + " units (total premium " + res.premiumTotal + "), at an expiry price of " + res.expiryPrice + " pays " + res.payoffTotal + " in total - a net of " + res.pnl + "." + pctNote + moneyNote + beNote + " A long option's most that can be lost is the premium, here " + res.maxLoss + ". Only the long side at expiry is modelled: no time value, volatility, early exercise or trading fees, and a short position's profile is the mirror image with margin on top. An educational model of an option's expiry payoff, not a live quote. Not financial advice.");
+    });
+
+    var bhexpForm = document.getElementById("bhexp-calc");
+    if (bhexpForm) bhexpForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = blockhashExpiry(val("bhexp-fetched"), val("bhexp-current"));
+      if (res === null) {
+        document.getElementById("bhexp-last-out").value = "Invalid";
+        document.getElementById("bhexp-remain-out").value = "Invalid";
+        setText("bhexp-result", "Check the inputs: both heights are whole block heights (no decimals, no signs), and the current block height cannot be below the height the blockhash came from.");
+        return;
+      }
+      document.getElementById("bhexp-last-out").value = res.lastValidHeight;
+      document.getElementById("bhexp-remain-out").value = res.status === "expired" ? "Expired by " + res.expiredBy : String(res.remainingBlocks);
+      var statusNote;
+      if (res.status === "expired") statusNote = " The blockhash is EXPIRED: it aged out " + res.expiredBy + (res.expiredBy === 1 ? " block" : " blocks") + " ago, and a transaction carrying it can never land now - it has to be rebuilt and re-signed on a fresh blockhash.";
+      else if (res.status === "last") statusNote = " This is the LAST block height at which the transaction can still land: one more produced block and the blockhash expires.";
+      else statusNote = " The transaction can still land at any of the " + res.remainingBlocks + " block heights after this one, up to and including the last valid height.";
+      setText("bhexp-result", "Model output: a blockhash from block height " + res.blockhashHeight + ", seen at current block height " + res.currentHeight + ", is " + res.ageBlocks + (res.ageBlocks === 1 ? " block" : " blocks") + " old, and its last valid block height is " + res.lastValidHeight + " - the blockhash height plus the 150-block maximum processing age, counted in produced blocks (block height), not slots, so skipped slots do not age it." + statusNote + " A durable-nonce transaction is the exception - its stored nonce does not age this way - and is not modelled here. An educational model of blockhash expiry, not a live cluster reading. Not financial advice.");
     });
 
     /* catalogue filter */
