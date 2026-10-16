@@ -26,6 +26,60 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>75. Stake pool fee model — the three fees an LST charges, each on a different base</h3>
+      <p>Every big Solana <strong>liquid staking token</strong> runs on the <strong>SPL stake pool</strong> program (Tool 15), and the program charges its fees in <strong>pool tokens</strong>, on <strong>three different bases</strong>. Going in, the <strong>SOL deposit fee</strong> is deducted from the tokens your deposit mints. Each epoch, the <strong>epoch fee</strong> takes a share of that epoch’s <strong>rewards only</strong> — paid by minting new pool tokens to the manager, so no balance moves and every holder is diluted instead. Coming out, the <strong>SOL withdrawal fee</strong> is deducted from your tokens before the rest convert back to SOL. At the headline settings — a pool holding <strong>1,000,000</strong> for <strong>800,000</strong> pool tokens (a rate of 1.25), a deposit of <strong>10,000</strong>, a <strong>100 bps</strong> deposit fee, one epoch earning <strong>8,000</strong> of rewards at a <strong>1,000 bps</strong> epoch fee, and a <strong>50 bps</strong> withdrawal fee — the deposit mints <strong>8,000</strong> tokens and the deposit fee deducts <strong>80</strong>, leaving <strong>7,920</strong>; the epoch fee is <strong>800</strong> of value, minted as <strong>640</strong> new tokens; and withdrawing pays <strong>9,920.665809259</strong> — a net of <strong>−79.334190741</strong> — against <strong>10,079.207920792</strong> for the identical round trip with no fees at all, a drag of <strong>158.542111533</strong>. The deposit and withdrawal fees tax the principal, so a one-epoch stay can lose money in a pool that earned rewards. Referral splits, stake (non-SOL) deposits and validator changes are not modelled. An educational model of stake pool fees, not a live quote. Not financial advice.</p>
+      <form id="spool-calc">
+        <div class="grid">
+          <div>
+            <label for="spool-total">Pool total value (SOL held by the pool)</label>
+            <input id="spool-total" name="spool-total" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="spool-supply">Pool token supply (tokens outstanding)</label>
+            <input id="spool-supply" name="spool-supply" inputmode="decimal" value="800000">
+          </div>
+          <div>
+            <label for="spool-deposit">Your deposit (SOL)</label>
+            <input id="spool-deposit" name="spool-deposit" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="spool-depfee">SOL deposit fee (basis points, 0–10,000)</label>
+            <input id="spool-depfee" name="spool-depfee" inputmode="numeric" value="100">
+          </div>
+          <div>
+            <label for="spool-rewards">Rewards the pool earns in one epoch (SOL)</label>
+            <input id="spool-rewards" name="spool-rewards" inputmode="decimal" value="8000">
+          </div>
+          <div>
+            <label for="spool-epochfee">Epoch fee on rewards (basis points, 0–10,000)</label>
+            <input id="spool-epochfee" name="spool-epochfee" inputmode="numeric" value="1000">
+          </div>
+          <div>
+            <label for="spool-wdfee">SOL withdrawal fee (basis points, 0–10,000)</label>
+            <input id="spool-wdfee" name="spool-wdfee" inputmode="numeric" value="50">
+          </div>
+          <div>
+            <label for="spool-user-out">Pool tokens you hold after the deposit fee (model)</label>
+            <input id="spool-user-out" name="spool-user-out" readonly>
+          </div>
+          <div>
+            <label for="spool-epochfee-out">Pool tokens the epoch fee mints to the manager (model)</label>
+            <input id="spool-epochfee-out" name="spool-epochfee-out" readonly>
+          </div>
+          <div>
+            <label for="spool-out-out">SOL you receive withdrawing after the epoch (model)</label>
+            <input id="spool-out-out" name="spool-out-out" readonly>
+          </div>
+          <div>
+            <label for="spool-nofee-out">The same round trip with no fees at all (model)</label>
+            <input id="spool-nofee-out" name="spool-nofee-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the stake pool fee model</button>
+        <p id="spool-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>74. Transfer-fee swap model — what a fee-on-transfer token does to a swap, twice</h3>
       <p>A <strong>Token-2022</strong> mint can carry a <strong>transfer fee</strong> (Tool 13): every transfer withholds <strong>ceil(amount × bps ÷ 10,000)</strong>, capped at the mint’s maximum fee, in <strong>raw units</strong>. When such a token trades on a constant-product pool, that tax lands <strong>twice</strong> around the swap: the pool is credited only what survives the input transfer, it swaps that smaller amount, and the output transfer withholds again before your wallet is credited — so a quote that ignores the fees overstates what lands. At the headline settings — reserves of <strong>1,000,000,000</strong> raw units on each side, sending <strong>10,000,000</strong>, a <strong>25 bps</strong> pool fee, a <strong>100 bps</strong> input transfer fee and a <strong>50 bps</strong> output transfer fee — the input transfer withholds <strong>100,000</strong>, the pool swaps the <strong>9,900,000</strong> it was credited and sends <strong>9,778,683</strong> out, and the output transfer withholds <strong>48,894</strong> more, so your wallet is credited <strong>9,729,789</strong> — a shortfall of <strong>146,693</strong> against the <strong>9,876,482</strong> the same trade would return with no transfer fees at all. A maximum-fee cap can bind on either side and shrink that side’s tax; a 100% output fee honestly credits <strong>0</strong>. All amounts are raw units throughout — convert with your mint’s decimals (Tool 6). The pool is modelled as pricing the amount it is credited; a real venue’s handling of withheld fees can differ in detail. An educational model of a transfer-fee swap, not a live quote. Not financial advice.</p>
       <form id="tfswap-calc">
@@ -3119,6 +3173,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=71"></script>
+<script src="app.js?v=72"></script>
 </body>
 </html>

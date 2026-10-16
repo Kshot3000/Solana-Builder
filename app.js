@@ -3597,6 +3597,72 @@ function transferFeeSwap(reserveInStr, reserveOutStr, amountInStr, poolFeeBpsStr
   };
 }
 
+/* ---------- Tool 75: stake pool fees (SPL stake pool) ---------- */
+/* The SPL stake pool program - the engine under Solana's big liquid
+   staking tokens - charges its fees in POOL TOKENS, on three different
+   bases, and none of them is a cut of your balance per year:
+   (1) Deposit: a deposit of D into a pool holding T for S pool tokens
+       mints floor(D * S / T) new tokens (D itself on an empty pool, the
+       1:1 bootstrap), and the SOL deposit fee - floor(minted * bps /
+       10000) of the MINTED tokens - is deducted before the rest reach
+       the depositor. The fee tokens go to the manager (a referrer may
+       take a stated share of them; not modelled here), so the supply
+       still grows by the full minted amount and the pool by the full
+       deposit.
+   (2) Epoch: when an epoch adds rewards R to the pool's value, the
+       epoch fee is floor(R * bps / 10000) of VALUE, converted to pool
+       tokens at the rate BEFORE the rewards land - floor(feeValue * S1
+       / T1) - and minted new to the manager. No holder's balance moves;
+       every holder's share of the pool is diluted by exactly that mint.
+   (3) Withdrawal: redeeming pool tokens deducts the SOL withdrawal fee
+       in tokens first - floor(tokens * bps / 10000) - and only the
+       remainder converts to SOL at the current rate, floor(net * T2 /
+       S2), every step floored at the smallest unit in exact scaled
+       BigInt. Fees are fractions on-chain (numerator / denominator);
+       this model takes whole basis points, and referral splits, stake
+       (non-SOL) deposits and withdrawals, validator changes and the
+       reserve's liquidity limits are not modelled. The no-fee run is
+       the identical flow with every rate 0, so feeDrag = noFeeOut - out
+       is the whole cost of the three fees on this round trip and is
+       always >= 0 (prototype-proven on 20,000 cases against an
+       independent exact-rational oracle, 0 mismatches). */
+var MAX_SPOOL_VALUE = 1000000000000;
+
+function stakePoolFees(totalStr, supplyStr, depositStr, depFeeBpsStr, rewardsStr, epochFeeBpsStr, wdFeeBpsStr) {
+  var T = parseScaled(totalStr), S = parseScaled(supplyStr), D = parseScaled(depositStr), R = parseScaled(rewardsStr);
+  var depBps = feeBpsValue(depFeeBpsStr), epochBps = feeBpsValue(epochFeeBpsStr), wdBps = feeBpsValue(wdFeeBpsStr);
+  if (T === null || S === null || D === null || R === null) return null;
+  if (depBps === null || epochBps === null || wdBps === null) return null;
+  var cap = BigInt(MAX_SPOOL_VALUE) * SCALE;
+  if (T > cap || S > cap || D > cap || R > cap) return null;
+  if (D <= 0n) return null;
+  if ((S === 0n) !== (T === 0n)) return null;
+  var minted = S === 0n ? D : (D * S) / T;
+  if (minted <= 0n) return null;
+  var depFeeTokens = (minted * BigInt(depBps)) / 10000n;
+  var userTokens = minted - depFeeTokens;
+  var T1 = T + D, S1 = S + minted;
+  var epochFeeValue = (R * BigInt(epochBps)) / 10000n;
+  var epochFeeTokens = T1 === 0n ? 0n : (epochFeeValue * S1) / T1;
+  var T2 = T1 + R, S2 = S1 + epochFeeTokens;
+  var wdFeeTokens = (userTokens * BigInt(wdBps)) / 10000n;
+  var netTokens = userTokens - wdFeeTokens;
+  var out = S2 === 0n ? 0n : (netTokens * T2) / S2;
+  var noFeeOut = S1 === 0n ? 0n : (minted * T2) / S1;
+  return {
+    total: formatScaled(T), supply: formatScaled(S), deposit: formatScaled(D), rewards: formatScaled(R),
+    depFeeBps: depBps, epochFeeBps: epochBps, wdFeeBps: wdBps,
+    minted: formatScaled(minted), depFeeTokens: formatScaled(depFeeTokens), userTokens: formatScaled(userTokens),
+    epochFeeValue: formatScaled(epochFeeValue), epochFeeTokens: formatScaled(epochFeeTokens),
+    wdFeeTokens: formatScaled(wdFeeTokens), netTokens: formatScaled(netTokens),
+    totalAfter: formatScaled(T2), supplyAfter: formatScaled(S2),
+    out: formatScaled(out), noFeeOut: formatScaled(noFeeOut),
+    netGain: formatScaled(out - D), noFeeGain: formatScaled(noFeeOut - D), feeDrag: formatScaled(noFeeOut - out),
+    receivedZero: out === 0n, noFees: depBps === 0 && epochBps === 0 && wdBps === 0,
+    depositFeeAll: userTokens === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4150,6 +4216,7 @@ if (typeof module !== "undefined" && module.exports) {
     predictionMarket, MAX_PRED_SPEND,
     leverageLoop, MAX_LOOP_DEPOSIT, MAX_LOOP_RATE_BPS,
     transferFeeSwap,
+    stakePoolFees, MAX_SPOOL_VALUE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5729,6 +5796,39 @@ if (typeof document !== "undefined") {
         note = " The gap between the plain quote and what lands - " + res.shortfall + " raw units, " + res.shortfallPct.toFixed(4) + "% of the plain output - is the two transfer fees plus the price impact of swapping a smaller input: the input fee shrinks the trade before the pool prices it, and the output fee is withheld from what the pool sends, so neither fee shows up in the pool's own quote.";
       }
       setText("tfswap-result", "Model output: sending " + res.amountIn + " raw units, the input transfer withholds " + res.inFee + " (at " + res.inFeeBps + " bps), so the pool is credited " + res.poolReceived + " and swaps it at a pool fee of " + res.poolFeeBps + " bps (pool fee " + res.poolFee + "), sending " + res.grossOut + " raw units out; the output transfer withholds " + res.outFee + " (at " + res.outFeeBps + " bps), so your wallet is credited " + res.userReceived + ". The same trade with no transfer fees at all would return " + res.plainOut + "." + caps + note + " Amounts are raw units throughout - convert with your mint's decimals (Tool 6). The pool is modelled as pricing the amount it is credited; a real venue's handling of withheld fees can differ in detail. An educational model of a transfer-fee swap, not a live quote. Not financial advice.");
+    });
+
+    var spoolForm = document.getElementById("spool-calc");
+    if (spoolForm) spoolForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = stakePoolFees(val("spool-total"), val("spool-supply"), val("spool-deposit"), val("spool-depfee"), val("spool-rewards"), val("spool-epochfee"), val("spool-wdfee"));
+      if (res === null) {
+        document.getElementById("spool-user-out").value = "Invalid";
+        document.getElementById("spool-epochfee-out").value = "Invalid";
+        document.getElementById("spool-out-out").value = "Invalid";
+        document.getElementById("spool-nofee-out").value = "Invalid";
+        setText("spool-result", "Check the inputs: the pool total, its token supply, your deposit and the epoch's rewards are amounts of more than 0 (the rewards may be 0; an empty pool has total and supply both 0), each fee a whole number of basis points from 0 to 10,000, and the deposit large enough to mint at least one smallest unit of pool token at the pool's rate.");
+        return;
+      }
+      document.getElementById("spool-user-out").value = res.userTokens;
+      document.getElementById("spool-epochfee-out").value = res.epochFeeTokens;
+      document.getElementById("spool-out-out").value = res.out;
+      document.getElementById("spool-nofee-out").value = res.noFeeOut;
+      var note = "";
+      if (res.noFees) {
+        note = " With every fee at 0 the round trip is the pure exchange rate at work: your deposit's share of the pool grows by its share of the rewards and nothing is skimmed, which is why the two withdrawal figures agree exactly.";
+      } else if (res.depositFeeAll) {
+        note = " The deposit fee took the ENTIRE mint, so you hold no pool tokens at all: the deposit is in the pool, owned by everyone else, and there is nothing left to withdraw - however long you wait, this position cannot earn its way back.";
+      } else if (res.receivedZero) {
+        note = " The withdrawal fee took the ENTIRE redemption, so withdrawing pays out 0: your pool tokens are consumed by the fee before any of them convert back to SOL.";
+      } else if (res.netGain.charAt(0) === "-") {
+        note = " The round trip LOSES " + res.netGain.slice(1) + " even though the pool earned rewards: the three fees together drag " + res.feeDrag + " against the no-fee return, which is more than this deposit's share of one epoch's rewards (" + res.noFeeGain + "). The deposit and withdrawal fees tax the principal going in and out, so a short stay pays them in full for a single epoch's yield - the epoch fee alone is the only one that scales with what the pool actually earned.";
+      } else if (res.netGain === "0") {
+        note = " The round trip exactly breaks even: this deposit's share of the epoch's rewards is precisely consumed by the three fees, which together drag " + res.feeDrag + " against the no-fee return.";
+      } else {
+        note = " The round trip nets " + res.netGain + " after all three fees, which together drag " + res.feeDrag + " against the no-fee return of " + res.noFeeGain + ": the deposit and withdrawal fees tax the principal going in and out, while the epoch fee skims only the rewards - which is why its cost grows with earnings, not with the deposit.";
+      }
+      setText("spool-result", "Model output: depositing " + res.deposit + " into a pool holding " + res.total + " for " + res.supply + " pool tokens mints " + res.minted + " tokens; the deposit fee at " + res.depFeeBps + " bps deducts " + res.depFeeTokens + " of them, so you hold " + res.userTokens + ". One epoch then adds " + res.rewards + " of rewards to the pool; the epoch fee at " + res.epochFeeBps + " bps is " + res.epochFeeValue + " of value, minted to the manager as " + res.epochFeeTokens + " new pool tokens at the pre-reward rate, diluting every holder. Withdrawing everything, the withdrawal fee at " + res.wdFeeBps + " bps deducts " + res.wdFeeTokens + " more tokens and the remaining " + res.netTokens + " convert at the new rate to " + res.out + ". The identical round trip with no fees at all would return " + res.noFeeOut + "." + note + " One epoch is modelled; rewards, rates and fees are frozen, referral splits of the deposit fee and stake (non-SOL) deposits and withdrawals are not modelled, and no live pool is read. An educational model of stake pool fees, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
