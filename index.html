@@ -2534,6 +2534,86 @@
         <button type="submit">Plan the nonce accounts</button>
         <p class="result" id="nonce-result" aria-live="polite"></p>
       </form>
+
+      <h3>66. Token-2022 mint extension space planner — what each extension adds to a mint</h3>
+      <p>A <strong>Token-2022</strong> mint keeps the classic <strong>82-byte</strong> mint layout, and every extension a builder enables is appended after it as a <strong>TLV record</strong> — a 2-byte type and a 2-byte length in front of the extension's own fixed-size data — plus a single <strong>account-type byte</strong> ahead of the first record. So a mint carrying a <strong>transfer fee config</strong> (108 bytes of data) and a <strong>metadata pointer</strong> (64 bytes) is 82 + 1 + 112 + 68 = <strong>263 bytes</strong>, funded rent-exempt at <strong>2,721,360 lamports</strong> (Tool 3's figure at that size). With no extensions the account is exactly 82 bytes and carries no marker byte at all. One trap is built into the length calculation: if a combination would total exactly <strong>355 bytes — the length of a multisig account</strong> — 2 bytes are added (a transfer fee config with a token group and a group member lands there and ships at 357), so no extended account can be mistaken for a multisig by length alone. The same extension picked twice counts once. The <strong>variable-length token metadata extension is not modelled</strong> — its size depends on the metadata packed into it — and token-account extensions are a separate list. An educational model of Token-2022 mint sizing, not a live mint reading. Not financial advice.</p>
+      <form id="ext-calc">
+        <div class="grid">
+          <div>
+            <label for="ext-e1">Extension 1</label>
+            <select id="ext-e1" name="ext-e1">
+              <option value="none">None</option>
+              <option value="transferFeeConfig" selected>Transfer fee config — 108 bytes of data</option>
+              <option value="mintCloseAuthority">Mint close authority — 32 bytes of data</option>
+              <option value="confidentialTransferMint">Confidential transfer mint — 65 bytes of data</option>
+              <option value="defaultAccountState">Default account state — 1 byte of data</option>
+              <option value="nonTransferable">Non-transferable — 0 bytes of data</option>
+              <option value="interestBearingConfig">Interest-bearing config — 52 bytes of data</option>
+              <option value="permanentDelegate">Permanent delegate — 32 bytes of data</option>
+              <option value="transferHook">Transfer hook — 64 bytes of data</option>
+              <option value="metadataPointer">Metadata pointer — 64 bytes of data</option>
+              <option value="groupPointer">Group pointer — 64 bytes of data</option>
+              <option value="tokenGroup">Token group — 80 bytes of data</option>
+              <option value="groupMemberPointer">Group member pointer — 64 bytes of data</option>
+              <option value="tokenGroupMember">Token group member — 72 bytes of data</option>
+              <option value="scaledUiAmountConfig">Scaled UI amount config — 56 bytes of data</option>
+              <option value="pausableConfig">Pausable config — 33 bytes of data</option>
+            </select>
+          </div>
+          <div>
+            <label for="ext-e2">Extension 2</label>
+            <select id="ext-e2" name="ext-e2">
+              <option value="none">None</option>
+              <option value="transferFeeConfig">Transfer fee config — 108 bytes of data</option>
+              <option value="mintCloseAuthority">Mint close authority — 32 bytes of data</option>
+              <option value="confidentialTransferMint">Confidential transfer mint — 65 bytes of data</option>
+              <option value="defaultAccountState">Default account state — 1 byte of data</option>
+              <option value="nonTransferable">Non-transferable — 0 bytes of data</option>
+              <option value="interestBearingConfig">Interest-bearing config — 52 bytes of data</option>
+              <option value="permanentDelegate">Permanent delegate — 32 bytes of data</option>
+              <option value="transferHook">Transfer hook — 64 bytes of data</option>
+              <option value="metadataPointer" selected>Metadata pointer — 64 bytes of data</option>
+              <option value="groupPointer">Group pointer — 64 bytes of data</option>
+              <option value="tokenGroup">Token group — 80 bytes of data</option>
+              <option value="groupMemberPointer">Group member pointer — 64 bytes of data</option>
+              <option value="tokenGroupMember">Token group member — 72 bytes of data</option>
+              <option value="scaledUiAmountConfig">Scaled UI amount config — 56 bytes of data</option>
+              <option value="pausableConfig">Pausable config — 33 bytes of data</option>
+            </select>
+          </div>
+          <div>
+            <label for="ext-e3">Extension 3</label>
+            <select id="ext-e3" name="ext-e3">
+              <option value="none" selected>None</option>
+              <option value="transferFeeConfig">Transfer fee config — 108 bytes of data</option>
+              <option value="mintCloseAuthority">Mint close authority — 32 bytes of data</option>
+              <option value="confidentialTransferMint">Confidential transfer mint — 65 bytes of data</option>
+              <option value="defaultAccountState">Default account state — 1 byte of data</option>
+              <option value="nonTransferable">Non-transferable — 0 bytes of data</option>
+              <option value="interestBearingConfig">Interest-bearing config — 52 bytes of data</option>
+              <option value="permanentDelegate">Permanent delegate — 32 bytes of data</option>
+              <option value="transferHook">Transfer hook — 64 bytes of data</option>
+              <option value="metadataPointer">Metadata pointer — 64 bytes of data</option>
+              <option value="groupPointer">Group pointer — 64 bytes of data</option>
+              <option value="tokenGroup">Token group — 80 bytes of data</option>
+              <option value="groupMemberPointer">Group member pointer — 64 bytes of data</option>
+              <option value="tokenGroupMember">Token group member — 72 bytes of data</option>
+              <option value="scaledUiAmountConfig">Scaled UI amount config — 56 bytes of data</option>
+              <option value="pausableConfig">Pausable config — 33 bytes of data</option>
+            </select>
+          </div>
+          <div>
+            <label for="ext-size-out">Mint account size, bytes (model)</label>
+            <input id="ext-size-out" name="ext-size-out" readonly>
+          </div>
+          <div>
+            <label for="ext-rent-out">Rent-exempt minimum, lamports (model)</label>
+            <input id="ext-rent-out" name="ext-rent-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Size the mint account</button>
+        <p class="result" id="ext-result" aria-live="polite"></p>
+      </form>
     </article>
 
   </section>
@@ -2678,6 +2758,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=62"></script>
+<script src="app.js?v=63"></script>
 </body>
 </html>
