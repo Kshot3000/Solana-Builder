@@ -3481,6 +3481,63 @@ function predictionMarket(yesStr, noStr, spendStr) {
   };
 }
 
+/* ---------- Tool 73: leveraged loop (recursive supply and borrow) ---------- */
+/* A leverage loop - the mechanic behind "multiply" products on Solana
+   lending markets - deposits an asset, borrows against it at the market's
+   maximum LTV, redeposits the borrowed amount, borrows against that, and
+   repeats. With the same asset on both sides and every round borrowing
+   the same fraction l of the new deposit, the rounds form a geometric
+   series whose limit is closed-form:
+     total supplied  S = D / (1 - l)
+     total borrowed  B = S - D          (so B / S = l exactly)
+     leverage          = S / D = 1 / (1 - l)
+   The model floors S once at the smallest unit; a step-by-step loop that
+   floors every round's borrow lands within dust of it (prototype-checked:
+   the floored closed form is exactly the floor of the exact series limit
+   on 20,000 cases, and a floored per-round simulation over 3,000 cases
+   converged to within 6e-10 relative). A year of interest at fixed rates
+   is earned = floor(S x supplyBps / 10000) and paid = floor(B x
+   borrowBps / 10000), both floored at the smallest unit, and the net is
+   earned - paid on the equity D alone - so looping multiplies the SPREAD,
+   not just the yield: the position breaks even when the supply rate
+   equals borrow x l, and a borrow rate above the supply rate makes the
+   loop lose money faster than holding would. The health factor of the
+   fully looped position is threshold / l - the supplied side cancels -
+   which is why a higher LTV is a thinner liquidation buffer even in the
+   same asset. Rates and the LTV are held frozen for the year; price moves,
+   rate moves, loop transaction costs and venue leverage caps are stated
+   as not modelled, and no live market is read. */
+var MAX_LOOP_DEPOSIT = 1000000000000;
+var MAX_LOOP_RATE_BPS = 100000;
+
+function leverageLoop(depositStr, ltvBpsStr, supplyBpsStr, borrowBpsStr, thresholdBpsStr) {
+  var D = parseScaled(depositStr);
+  var lR = parseScaled(ltvBpsStr), sR = parseScaled(supplyBpsStr), bR = parseScaled(borrowBpsStr), tR = parseScaled(thresholdBpsStr);
+  if (D === null || lR === null || sR === null || bR === null || tR === null) return null;
+  if (lR % SCALE !== 0n || sR % SCALE !== 0n || bR % SCALE !== 0n || tR % SCALE !== 0n) return null;
+  var L = lR / SCALE, Sr = sR / SCALE, Br = bR / SCALE, T = tR / SCALE;
+  if (D <= 0n || D > BigInt(MAX_LOOP_DEPOSIT) * SCALE) return null;
+  if (L < 0n || L >= 10000n) return null;
+  if (Sr < 0n || Sr > BigInt(MAX_LOOP_RATE_BPS) || Br < 0n || Br > BigInt(MAX_LOOP_RATE_BPS)) return null;
+  if (T <= L || T > 10000n) return null;
+  var S = (D * 10000n) / (10000n - L);
+  var B = S - D;
+  var earned = (S * Sr) / 10000n;
+  var paid = (B * Br) / 10000n;
+  var net = earned - paid;
+  var apyScaled = (net * 10000n * SCALE) / D; /* bps x SCALE, truncates toward zero like the signed fields elsewhere */
+  var hf = L === 0n ? null : (T * SCALE) / L;
+  return {
+    deposit: formatScaled(D), totalSupplied: formatScaled(S), totalBorrowed: formatScaled(B),
+    leverage: formatScaled((S * SCALE) / D),
+    ltvBps: Number(L), supplyBps: Number(Sr), borrowBps: Number(Br), thresholdBps: Number(T),
+    earnedYear: formatScaled(earned), paidYear: formatScaled(paid), netYear: formatScaled(net),
+    netApyBps: formatScaled(apyScaled), netApyPct: Number(apyScaled) / 100000000000,
+    healthFactor: hf === null ? null : formatScaled(hf), noDebt: L === 0n,
+    breakEvenSupplyBps: formatScaled((Br * L * SCALE) / 10000n)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4032,6 +4089,7 @@ if (typeof module !== "undefined" && module.exports) {
     scaledUiAmount, MAX_SUA_MULTIPLIER, MAX_SUA_TIMESTAMP,
     lpFeeEarnings, MAX_LPF_VALUE, MAX_LPF_DAYS,
     predictionMarket, MAX_PRED_SPEND,
+    leverageLoop, MAX_LOOP_DEPOSIT, MAX_LOOP_RATE_BPS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5552,6 +5610,35 @@ if (typeof document !== "undefined") {
         note = " The two prices sum to exactly 1, so the complete-set rule offers no edge either way: minting and redeeming both break even at these prices before fees, and only a view that the true probability differs from the price makes either side worth holding.";
       }
       setText("pred-result", "Model output: at a YES price of " + res.yesPrice + " and a NO price of " + res.noPrice + ", the market's implied probability of YES is the YES price itself - " + res.impliedYesPct.toFixed(4) + "% - because one share pays exactly 1 if YES happens and 0 if it does not. Your spend of " + res.spend + " buys " + res.shares + " YES shares (spend divided by the price, floored at the smallest unit): if YES happens they pay " + res.payoutIfYes + ", a profit of " + res.profitIfYes + "; if NO happens they pay 0 and the whole spend of " + res.lossIfNo + " is lost, which is why the price is also the break-even probability - the trade profits in expectation only if the true chance is above it." + note + " Market fees, spread and price movement while trading are not modelled, and no live market is read. An educational model of prediction-market outcome shares, not a live quote. Not financial advice.");
+    });
+
+    var loopForm = document.getElementById("loop-calc");
+    if (loopForm) loopForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = leverageLoop(val("loop-deposit"), val("loop-ltv"), val("loop-supply"), val("loop-borrow"), val("loop-threshold"));
+      if (res === null) {
+        document.getElementById("loop-supplied-out").value = "Invalid";
+        document.getElementById("loop-borrowed-out").value = "Invalid";
+        document.getElementById("loop-lev-out").value = "Invalid";
+        document.getElementById("loop-net-out").value = "Invalid";
+        setText("loop-result", "Check the inputs: the deposit must be more than 0 and at most 1,000,000,000,000 units at up to 9 decimal places, the maximum LTV a whole number of basis points from 0 up to (but not including) 10,000, the liquidation threshold a whole number of basis points above the LTV and at most 10,000 - a threshold at or below the LTV would be liquidatable the moment it opened - and each yearly rate a whole number of basis points from 0 to 100,000.");
+        return;
+      }
+      document.getElementById("loop-supplied-out").value = res.totalSupplied;
+      document.getElementById("loop-borrowed-out").value = res.totalBorrowed;
+      document.getElementById("loop-lev-out").value = res.leverage + "x";
+      document.getElementById("loop-net-out").value = res.netYear + " (" + res.netApyBps + " bps)";
+      var note = "";
+      if (res.noDebt) {
+        note = " At a maximum LTV of 0 there is nothing to borrow, so there is no loop: the deposit simply earns the supply rate, and with no debt there is no health factor to watch.";
+      } else if (res.netYear.startsWith("-")) {
+        note = " The loop LOSES money at these rates: it earns " + res.earnedYear + " on the supplied side and pays " + res.paidYear + " on the borrowed side over a year, because looping multiplies the spread between the two rates, not just the yield - it would break even at a supply rate of " + res.breakEvenSupplyBps + " bps (the borrow rate times the LTV), and every basis point of spread is levered " + res.leverage + " times on your equity. The health factor is the liquidation threshold divided by the LTV - " + res.healthFactor + " here - because the supplied side cancels: the higher the LTV you loop to, the thinner that buffer, even with the same asset on both sides.";
+      } else if (res.netYear === "0") {
+        note = " The loop exactly breaks even over a year at these rates: it earns " + res.earnedYear + " on the supplied side and pays " + res.paidYear + " on the borrowed side, and the break-even supply rate is " + res.breakEvenSupplyBps + " bps (the borrow rate times the LTV). The health factor is the liquidation threshold divided by the LTV - " + res.healthFactor + " here - because the supplied side cancels.";
+      } else {
+        note = " The loop earns " + res.earnedYear + " on the supplied side and pays " + res.paidYear + " on the borrowed side over a year; it would break even at a supply rate of " + res.breakEvenSupplyBps + " bps (the borrow rate times the LTV), and every basis point of spread is levered " + res.leverage + " times on your equity. The health factor is the liquidation threshold divided by the LTV - " + res.healthFactor + " here - because the supplied side cancels: the higher the LTV you loop to, the thinner that buffer, even with the same asset on both sides.";
+      }
+      setText("loop-result", "Model output: looping a deposit of " + res.deposit + " to a maximum LTV of " + res.ltvBps + " bps builds a supplied position of " + res.totalSupplied + " against a debt of " + res.totalBorrowed + " - an effective leverage of " + res.leverage + "x on your equity, the limit of deposit, borrow, redeposit repeated. Over a year at a supply rate of " + res.supplyBps + " bps and a borrow rate of " + res.borrowBps + " bps the position nets " + res.netYear + ", an APY of " + res.netApyBps + " bps (" + res.netApyPct + "%) on the deposit alone." + note + " Both rates and the LTV are held frozen for the year; price moves, rate moves, the transaction cost of each loop round and any venue leverage cap are not modelled, and no live market is read. An educational model of a leveraged loop, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

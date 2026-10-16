@@ -25,6 +25,53 @@
     <h1>Build, fix and improve across the Solana ecosystem</h1>
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
+    <article class="card">
+      <h3>73. Leveraged loop calculator — recursive supply and borrow (“multiply”)</h3>
+      <p>A <strong>leverage loop</strong> — the mechanic behind “multiply” products on Solana lending markets — deposits an asset, borrows against it at the market’s <strong>maximum LTV</strong>, redeposits what it borrowed, borrows against that, and repeats. Each round borrows the same fraction of the last, so the rounds form a <strong>geometric series</strong> with a closed-form limit: total supplied = deposit ÷ (1 − LTV), total borrowed = supplied − deposit, and effective leverage = supplied ÷ deposit. At the headline LTV of <strong>7,500 bps</strong> (75%), a deposit of <strong>1,000</strong> loops to <strong>4,000 supplied against 3,000 borrowed — 4x leverage</strong> — and the loop multiplies the <strong>spread</strong>, not just the yield: at a <strong>500 bps</strong> supply rate against a <strong>700 bps</strong> borrow rate it earns 200 and pays 210 over a year, a net of <strong>−10</strong>, an APY of <strong>−1%</strong> on the deposit, breaking even only at a supply rate of <strong>525 bps</strong> (the borrow rate times the LTV). The fully looped position’s <strong>health factor is the liquidation threshold divided by the LTV</strong> — <strong>1.066666666</strong> at an 8,000 bps threshold — because the supplied side cancels: loop further and the buffer thins, even with the same asset on both sides. Both rates and the LTV are frozen for the year; price moves, rate moves, per-round transaction costs and venue leverage caps are <strong>not</strong> modelled. An educational model of a leveraged loop, not a live quote. Not financial advice.</p>
+      <form id="loop-calc">
+        <div class="grid">
+          <div>
+            <label for="loop-deposit">Your deposit (units of the asset)</label>
+            <input id="loop-deposit" name="loop-deposit" inputmode="decimal" value="1000">
+          </div>
+          <div>
+            <label for="loop-ltv">Maximum LTV (basis points, below 10,000)</label>
+            <input id="loop-ltv" name="loop-ltv" inputmode="numeric" value="7500">
+          </div>
+          <div>
+            <label for="loop-supply">Supply rate (basis points per year)</label>
+            <input id="loop-supply" name="loop-supply" inputmode="numeric" value="500">
+          </div>
+          <div>
+            <label for="loop-borrow">Borrow rate (basis points per year)</label>
+            <input id="loop-borrow" name="loop-borrow" inputmode="numeric" value="700">
+          </div>
+          <div>
+            <label for="loop-threshold">Liquidation threshold (basis points, above the LTV)</label>
+            <input id="loop-threshold" name="loop-threshold" inputmode="numeric" value="8000">
+          </div>
+          <div>
+            <label for="loop-supplied-out">Total supplied after looping (model)</label>
+            <input id="loop-supplied-out" name="loop-supplied-out" readonly>
+          </div>
+          <div>
+            <label for="loop-borrowed-out">Total borrowed after looping (model)</label>
+            <input id="loop-borrowed-out" name="loop-borrowed-out" readonly>
+          </div>
+          <div>
+            <label for="loop-lev-out">Effective leverage (model)</label>
+            <input id="loop-lev-out" name="loop-lev-out" readonly>
+          </div>
+          <div>
+            <label for="loop-net-out">Net over one year, and its APY in bps (model)</label>
+            <input id="loop-net-out" name="loop-net-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the loop</button>
+        <p class="result" id="loop-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" aria-labelledby="explainer-h">
@@ -3014,6 +3061,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=69"></script>
+<script src="app.js?v=70"></script>
 </body>
 </html>
