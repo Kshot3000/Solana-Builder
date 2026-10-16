@@ -3136,6 +3136,58 @@ function token2022MintSpace(ext1, ext2, ext3) {
   };
 }
 
+/* Tool 67 - Token-2022 token-account extension space planner. The token
+   account side of Tool 66: a Token-2022 token account keeps the classic
+   165-byte token-account layout, and each account extension appends the
+   same kind of TLV record (the shared 4-byte header plus its own data)
+   behind the same single account-type byte. Several records are not the
+   account owner's choice at all - they follow the mint: a transfer-fee
+   mint puts a TransferFeeAmount record (the withheld fees, 8 bytes of
+   data) on every one of its token accounts, and confidential-transfer,
+   non-transferable, transfer-hook and pausable mints do the same with
+   theirs; ImmutableOwner, MemoTransfer and CpiGuard are the owner's own
+   picks. The multisig padding rule is shared with the mint side, but no
+   combination of these 8 extensions can total 355 bytes: without the
+   confidential record (295 bytes of data) the largest total is 205, with
+   it the smallest is 465 (prototype-verified over all 256 subsets and
+   all 729 three-pick combinations against the reference client SDK's
+   getAccountLen and getTypeLen, 0 mismatches). Rent is Tool 3's
+   rentExempt run at the computed size, verbatim. */
+var T22_ACCOUNT_BASE_BYTES = 165;
+var T22_ACCOUNT_EXTENSION_BYTES = {
+  transferFeeAmount: 8, confidentialTransferAccount: 295, immutableOwner: 0,
+  memoTransfer: 1, cpiGuard: 1, nonTransferableAccount: 0,
+  transferHookAccount: 1, pausableAccount: 0
+};
+
+function token2022AccountSpace(ext1, ext2, ext3) {
+  var picks = [ext1, ext2, ext3];
+  var distinct = [];
+  var chosen = 0;
+  for (var i = 0; i < picks.length; i++) {
+    var k = picks[i];
+    if (k === "none") continue;
+    if (typeof k !== "string" || !Object.prototype.hasOwnProperty.call(T22_ACCOUNT_EXTENSION_BYTES, k)) return null;
+    chosen++;
+    if (distinct.indexOf(k) === -1) distinct.push(k);
+  }
+  var tlvBytes = 0;
+  for (var j = 0; j < distinct.length; j++) tlvBytes += T22_TLV_HEADER_BYTES + T22_ACCOUNT_EXTENSION_BYTES[distinct[j]];
+  var accountTypeBytes = distinct.length > 0 ? 1 : 0;
+  var sizeBytes = T22_ACCOUNT_BASE_BYTES + accountTypeBytes + tlvBytes;
+  var padded = false;
+  if (sizeBytes === T22_MULTISIG_ACCOUNT_BYTES) { sizeBytes += 2; padded = true; }
+  var rent = rentExempt(sizeBytes);
+  if (rent === null) return null;
+  return {
+    extensions: distinct, extensionCount: distinct.length,
+    duplicatesIgnored: chosen - distinct.length,
+    baseBytes: T22_ACCOUNT_BASE_BYTES, accountTypeBytes: accountTypeBytes,
+    tlvBytes: tlvBytes, sizeBytes: sizeBytes, padded: padded,
+    rentLamports: rent.rentExemptLamports, rentSol: formatScaled(BigInt(rent.rentExemptLamports))
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3681,6 +3733,7 @@ if (typeof module !== "undefined" && module.exports) {
     reallocPlan, MAX_PERMITTED_DATA_INCREASE, MAX_ACCOUNT_DATA_LEN,
     durableNoncePlan, NONCE_ACCOUNT_BYTES, MAX_NONCE_TRANSACTIONS,
     token2022MintSpace, T22_MINT_BASE_BYTES, T22_TLV_HEADER_BYTES, T22_MULTISIG_ACCOUNT_BYTES, T22_MINT_EXTENSION_BYTES,
+    token2022AccountSpace, T22_ACCOUNT_BASE_BYTES, T22_ACCOUNT_EXTENSION_BYTES,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5043,6 +5096,29 @@ if (typeof document !== "undefined") {
       if (res.duplicatesIgnored > 0) note += " The same extension picked twice is counted once: an extension is either enabled on a mint or it is not.";
       if (res.padded) note += " The unpadded total would be exactly 355 bytes, the length of a multisig account, so the length calculation adds 2 bytes - no extended account may be mistaken for a multisig by its length alone.";
       setText("ext-result", "Model output: a Token-2022 mint with " + (res.extensionCount === 0 ? "no extensions" : res.extensionCount + (res.extensionCount === 1 ? " extension" : " extensions")) + " is " + res.sizeBytes.toLocaleString("en-US") + " bytes and must be funded rent-exempt at " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL), Tool 3's figure at that size - locked, not spent, and reclaimed when the mint is closed." + note + " The variable-length token metadata extension is not modelled - its size depends on the metadata packed into it - and token-account extensions are a separate list. An educational model of Token-2022 mint sizing, not a live mint reading. Not financial advice.");
+    });
+
+    var aextForm = document.getElementById("aext-calc");
+    if (aextForm) aextForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = token2022AccountSpace(val("aext-e1"), val("aext-e2"), val("aext-e3"));
+      if (res === null) {
+        document.getElementById("aext-size-out").value = "Invalid";
+        document.getElementById("aext-rent-out").value = "Invalid";
+        setText("aext-result", "Check the inputs: choose each extension from the list (or None).");
+        return;
+      }
+      document.getElementById("aext-size-out").value = res.sizeBytes.toLocaleString("en-US");
+      document.getElementById("aext-rent-out").value = res.rentLamports.toLocaleString("en-US");
+      var note = "";
+      if (res.extensionCount === 0) {
+        note = " With no extensions the account is the classic 165-byte token account exactly - no account-type byte and no TLV records are added, which is the 2,039,280-lamport figure behind Tools 27 and 58.";
+      } else {
+        note = " The " + res.extensionCount + (res.extensionCount === 1 ? " extension adds " : " distinct extensions add ") + res.tlvBytes.toLocaleString("en-US") + " TLV bytes - a 4-byte type-and-length header in front of each extension's own data - plus the 1-byte account-type marker that precedes the first record.";
+      }
+      if (res.duplicatesIgnored > 0) note += " The same extension picked twice is counted once: an extension is either present on an account or it is not.";
+      if (res.padded) note += " The unpadded total would be exactly 355 bytes, the length of a multisig account, so the length calculation adds 2 bytes.";
+      setText("aext-result", "Model output: a Token-2022 token account with " + (res.extensionCount === 0 ? "no extensions" : res.extensionCount + (res.extensionCount === 1 ? " extension" : " extensions")) + " is " + res.sizeBytes.toLocaleString("en-US") + " bytes and must be funded rent-exempt at " + res.rentLamports.toLocaleString("en-US") + " lamports (" + res.rentSol + " SOL), Tool 3's figure at that size - locked, not spent, and reclaimed when the account is closed." + note + " Several records follow the mint rather than the account owner: every token account of a transfer-fee mint carries the transfer fee amount record, so creating one costs more than the classic 2,039,280 lamports even when the owner chooses nothing. An educational model of Token-2022 token-account sizing, not a live account reading. Not financial advice.");
     });
 
     /* catalogue filter */
