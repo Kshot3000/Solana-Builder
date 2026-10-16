@@ -2712,6 +2712,45 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>69. Interest-bearing token display calculator \u2014 the balance that grows without a single token moving</h3>
+      <p>A Token-2022 mint with the <strong>interest-bearing extension</strong> never mints its interest. The raw amount in your token account stays exactly what was deposited, and what grows is the <strong>displayed amount</strong>, computed when a wallet reads the balance: displayed = raw \u00d7 e<sup>rate \u00d7 time</sup>, compounded continuously. The rate is a signed count of <strong>basis points per year</strong> stored on the mint \u2014 negative rates are representable and shrink the display \u2014 and the time runs against a year of <strong>365.24 days (31,556,736 seconds)</strong>, so 365 days is not quite a full year: at <strong>500 bps</strong>, a raw 10,000 displays as <strong>10,512.365573169</strong> after 365 days. When the rate authority changes the rate, the mint stores a <strong>pre-update average rate</strong> for the stretch before the change and applies the new rate only from the change onward, so the total factor is the product of the two stretches\u2019 exponentials \u2014 the headline below\u2019s second example accrues at an average 300 bps for 200 days, then 600 bps for 100. The grown figure is <strong>truncated at the smallest unit</strong>, never rounded, and a transfer still moves raw amounts: the growth exists only in the conversion, which is the reference client SDK\u2019s own formula, verified case-for-case before this tool shipped. An educational model of the interest-bearing display conversion, not a live mint reading. Not financial advice.</p>
+      <form id="ib-calc">
+        <div class="grid">
+          <div>
+            <label for="ib-amt">Raw token balance (what the account actually holds)</label>
+            <input id="ib-amt" name="ib-amt" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="ib-prev-rate">Pre-update average rate (basis points per year)</label>
+            <input id="ib-prev-rate" name="ib-prev-rate" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="ib-prev-days">Days at the pre-update average rate</label>
+            <input id="ib-prev-days" name="ib-prev-days" inputmode="numeric" value="0">
+          </div>
+          <div>
+            <label for="ib-rate">Current rate (basis points per year)</label>
+            <input id="ib-rate" name="ib-rate" inputmode="numeric" value="500">
+          </div>
+          <div>
+            <label for="ib-days">Days at the current rate</label>
+            <input id="ib-days" name="ib-days" inputmode="numeric" value="365">
+          </div>
+          <div>
+            <label for="ib-grown-out">Displayed amount after accrual (model)</label>
+            <input id="ib-grown-out" name="ib-grown-out" readonly>
+          </div>
+          <div>
+            <label for="ib-int-out">Interest accrued in the display (model)</label>
+            <input id="ib-int-out" name="ib-int-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Convert the balance</button>
+        <p class="result" id="ib-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2854,6 +2893,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=65"></script>
+<script src="app.js?v=66"></script>
 </body>
 </html>

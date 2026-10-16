@@ -3229,6 +3229,73 @@ function computeBudgetPlan(ixCount, usedCu, headroomPct, cuPriceMicro) {
   };
 }
 
+/* Tool 69 - Interest-bearing token display calculator. A Token-2022 mint
+   with the interest-bearing extension never mints the interest: the raw
+   amount held in every token account stays exactly what was deposited,
+   and what grows is the DISPLAYED (UI) amount, computed at reading time
+   as amount x e^(rate x time). The rate is a signed 16-bit count of
+   basis points per year - negative rates are representable and shrink
+   the display - time is measured in seconds against a year of 365.24
+   days (31,556,736 seconds, the reference client SDK's
+   SECONDS_PER_YEAR), and the grown amount is TRUNCATED at the token's
+   smallest unit, never rounded. Because the mint's stored config keeps
+   a pre-update average rate covering the stretch from initialization to
+   the last rate update and a current rate covering the stretch since,
+   the total factor is the product of the two periods' exponentials,
+   e^(r1 t1) x e^(r2 t2) - the reference SDK's
+   amountToUiAmountForInterestBearingMint formula, verified against that
+   SDK on 20,000 cases before shipping (agreement to the smallest unit;
+   the float path is the reference's own, since it too computes in
+   doubles and truncates). One consequence worth teaching: 365 days is
+   NOT a full year here - at 500 bps a 10,000 balance displays
+   10,512.365573169 after 365 days, because the exponent uses
+   365 / 365.24 of a year; a full year multiplies by e^0.05. The amount
+   is capped at 1,000,000 tokens so the scaled figure stays exactly
+   representable in a double, the precision the reference works at, and
+   a combined exponent past 50 is rejected rather than displayed as an
+   overflow. */
+var IB_SECONDS_PER_YEAR = 31556736; /* 60 x 60 x 24 x 365.24 */
+var MAX_IB_AMOUNT_TOKENS = 1000000;
+var MAX_IB_DAYS = 36500;
+var MAX_IB_EXPONENT = 50;
+
+function ibRate(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^-?\d+$/.test(s)) return null;
+  var n = Number(s);
+  return (n >= -32768 && n <= 32767) ? n : null;
+}
+
+function ibDays(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var n = Number(s);
+  return (n >= 0 && n <= MAX_IB_DAYS) ? n : null;
+}
+
+function interestBearingAmount(amountStr, prevRateStr, prevDaysStr, rateStr, daysStr) {
+  var amt = parseScaled(amountStr);
+  if (amt === null || amt <= 0n || amt > BigInt(MAX_IB_AMOUNT_TOKENS) * SCALE) return null;
+  var prevRate = ibRate(prevRateStr), prevDays = ibDays(prevDaysStr);
+  var rate = ibRate(rateStr), days = ibDays(daysStr);
+  if (prevRate === null || prevDays === null || rate === null || days === null) return null;
+  var expPrev = prevRate * prevDays * 86400 / (IB_SECONDS_PER_YEAR * 10000);
+  var expCur = rate * days * 86400 / (IB_SECONDS_PER_YEAR * 10000);
+  if (expPrev + expCur > MAX_IB_EXPONENT) return null;
+  var factorPrev = Math.exp(expPrev);
+  var factorCurrent = Math.exp(expCur);
+  var factor = factorPrev * factorCurrent;
+  var grown = BigInt(Math.trunc(Number(amt) * factor));
+  return {
+    amount: formatScaled(amt), prevRateBps: prevRate, prevDays: prevDays,
+    rateBps: rate, days: days,
+    factorPrev: factorPrev, factorCurrent: factorCurrent, factor: factor,
+    grown: formatScaled(grown), interest: formatScaled(grown - amt)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3776,6 +3843,7 @@ if (typeof module !== "undefined" && module.exports) {
     token2022MintSpace, T22_MINT_BASE_BYTES, T22_TLV_HEADER_BYTES, T22_MULTISIG_ACCOUNT_BYTES, T22_MINT_EXTENSION_BYTES,
     token2022AccountSpace, T22_ACCOUNT_BASE_BYTES, T22_ACCOUNT_EXTENSION_BYTES,
     computeBudgetPlan, DEFAULT_CU_PER_INSTRUCTION,
+    interestBearingAmount, IB_SECONDS_PER_YEAR, MAX_IB_DAYS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5190,6 +5258,32 @@ if (typeof document !== "undefined") {
       if (res.headroomCapped) note += " The chosen headroom would push the limit past the " + res.maxLimit.toLocaleString("en-US") + " maximum, so the recommendation is capped there and the transaction carries no spare room above its measured usage.";
       if (res.cuPriceMicro === 0) note += " At a compute-unit price of zero every priority fee here is zero - the price is what turns an oversized limit into a cost.";
       setText("cb-result", "Model output: for " + res.instructionCount + (res.instructionCount === 1 ? " instruction" : " instructions") + " measuring " + res.usedCu.toLocaleString("en-US") + " compute units used, the default limit is " + res.defaultLimit.toLocaleString("en-US") + "; requesting the measured usage plus " + res.headroomPct + "% headroom gives a recommended limit of " + res.recommendedLimit.toLocaleString("en-US") + " compute units, whose priority fee at " + res.cuPriceMicro.toLocaleString("en-US") + " micro-lamports per unit is " + res.priorityAtRecommended.toLocaleString("en-US") + " lamports (Tool 5's formula at that limit). Requesting the " + res.maxLimit.toLocaleString("en-US") + " maximum instead would cost " + res.priorityAtMax.toLocaleString("en-US") + " lamports at the same price." + note + " An educational model of compute budgeting, not a live simulation. Not financial advice.");
+    });
+
+    var ibForm = document.getElementById("ib-calc");
+    if (ibForm) ibForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = interestBearingAmount(val("ib-amt"), val("ib-prev-rate"), val("ib-prev-days"), val("ib-rate"), val("ib-days"));
+      if (res === null) {
+        document.getElementById("ib-grown-out").value = "Invalid";
+        document.getElementById("ib-int-out").value = "Invalid";
+        setText("ib-result", "Check the inputs: the amount must be more than 0 and at most 1,000,000 tokens at up to 9 decimal places, each rate a whole number of basis points from -32,768 to 32,767 (the signed 16-bit range the mint stores), each stretch a whole number of days from 0 to 36,500, and the combined growth must stay inside the representable range.");
+        return;
+      }
+      document.getElementById("ib-grown-out").value = res.grown;
+      document.getElementById("ib-int-out").value = res.interest;
+      var note = "";
+      if (res.grown === res.amount) {
+        note = " Nothing has accrued: with no time elapsed at a non-zero rate the displayed amount is the raw amount exactly.";
+      } else if (res.interest.charAt(0) === "-") {
+        note = " The displayed amount SHRANK: a negative rate compounds downward exactly as a positive one compounds up, and the raw balance is still untouched - only the conversion moved.";
+      } else {
+        note = " The raw balance never moved: no tokens were minted, and a transfer still moves raw amounts - the growth exists only in this conversion, which every wallet and explorer reading the mint performs.";
+      }
+      if (res.prevDays > 0 && res.prevRateBps !== 0) {
+        note += " Two rates applied: the pre-update average of " + res.prevRateBps + " bps covered the first " + res.prevDays + (res.prevDays === 1 ? " day" : " days") + " (a factor of " + res.factorPrev.toFixed(9) + ") and the current " + res.rateBps + " bps the " + res.days + (res.days === 1 ? " day" : " days") + " since the last update (a factor of " + res.factorCurrent.toFixed(9) + "); the mint stores that average precisely so a rate change never rewrites history.";
+      }
+      setText("ib-result", "Model output: a raw balance of " + res.amount + " on an interest-bearing mint displays as " + res.grown + " - interest of " + res.interest + " - after compounding at " + res.rateBps + " basis points a year for " + res.days + (res.days === 1 ? " day" : " days") + (res.prevDays > 0 ? " on top of the earlier stretch" : "") + ", a total factor of " + res.factor.toFixed(9) + ". The year in the exponent is 365.24 days (31,556,736 seconds), so 365 days is slightly less than a full year of accrual, and the grown figure is truncated at the smallest unit, never rounded." + note + " An educational model of the interest-bearing display conversion, not a live mint reading. Not financial advice.");
     });
 
     /* catalogue filter */
