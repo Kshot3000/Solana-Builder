@@ -3435,6 +3435,52 @@ function lpFeeEarnings(volumeStr, feeBps, tvlStr, depositStr, daysStr) {
   };
 }
 
+/* ---------- Tool 72: prediction-market outcome shares ---------- */
+/* A binary prediction market trades two outcome shares, YES and NO, and
+   the pair is anchored to the collateral by a complete-set rule: paying
+   exactly 1 unit of collateral mints one YES plus one NO, and one YES
+   plus one NO redeems for exactly 1 unit, whichever side wins. A share
+   price IS an implied probability - a YES at 0.62 prices a 62% chance -
+   and the two prices of a consistent market sum to exactly 1. When they
+   do not, the complete-set rule itself is the arbitrage: a sum above 1
+   lets a trader mint sets for 1 and sell both sides for the sum, and a
+   sum below 1 lets a trader buy both sides for the sum and redeem for 1.
+   Buying YES with a spend returns spend / yesPrice shares, floored at
+   the smallest unit like an on-chain division; each share pays exactly
+   1 if YES happens and 0 if it does not, so the price is also the
+   break-even probability of the trade. Prices must sit strictly inside
+   (0, 1) - a price of 0 or 1 is a settled market, not a tradeable one.
+   Values are generic collateral units, capped at 1e12 so the scaled
+   figures stay exact; market fees and spread are stated as not
+   modelled, and no live market is read. */
+var MAX_PRED_SPEND = 1000000000000;
+
+function predictionMarket(yesStr, noStr, spendStr) {
+  var Y = parseScaled(yesStr), N = parseScaled(noStr), S = parseScaled(spendStr);
+  if (Y === null || N === null || S === null) return null;
+  if (Y <= 0n || Y >= SCALE || N <= 0n || N >= SCALE || S <= 0n) return null;
+  if (S > BigInt(MAX_PRED_SPEND) * SCALE) return null;
+  var sum = Y + N;
+  var dev = sum - SCALE;
+  var devBps = Number((dev * 10000n) / SCALE);
+  var shares = (S * SCALE) / Y;
+  if (shares <= 0n) return null;
+  var mode = dev > 0n ? "mint" : dev < 0n ? "buy" : "fair";
+  var arbSets, arbValue;
+  if (dev > 0n) { arbSets = S; arbValue = (S * sum) / SCALE; }
+  else if (dev < 0n) { arbSets = (S * SCALE) / sum; arbValue = arbSets; }
+  else { arbSets = S; arbValue = S; }
+  return {
+    yesPrice: formatScaled(Y), noPrice: formatScaled(N), spend: formatScaled(S),
+    sumPrice: formatScaled(sum), deviation: formatScaled(dev), devBps: devBps,
+    mode: mode, impliedYesPct: Number(Y) / 10000000,
+    shares: formatScaled(shares), payoutIfYes: formatScaled(shares),
+    profitIfYes: formatScaled(shares - S), lossIfNo: formatScaled(S),
+    arbSets: formatScaled(arbSets), arbValue: formatScaled(arbValue),
+    arbProfit: formatScaled(arbValue - S), arbZero: arbValue - S === 0n && dev !== 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3985,6 +4031,7 @@ if (typeof module !== "undefined" && module.exports) {
     interestBearingAmount, IB_SECONDS_PER_YEAR, MAX_IB_DAYS,
     scaledUiAmount, MAX_SUA_MULTIPLIER, MAX_SUA_TIMESTAMP,
     lpFeeEarnings, MAX_LPF_VALUE, MAX_LPF_DAYS,
+    predictionMarket, MAX_PRED_SPEND,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5480,6 +5527,31 @@ if (typeof document !== "undefined") {
         note = " The simple APR annualises one day without compounding; the compounded APY assumes every day's earnings are added to the position and themselves earn from the next day, which is why it sits above the APR whenever earnings are positive - and why a quoted APY is never comparable with a quoted APR without asking which one it is.";
       }
       setText("lpf-result", "Model output: on daily volume of " + res.volume + " at a " + res.feeBps + "-basis-point fee tier the pool collects " + res.poolFeesDay + " a day in fees. Your deposit of " + res.deposit + " is " + (res.shareBps / 100) + "% of the pool's " + res.tvl + " (share floored to whole basis points: " + res.shareBps + "), so it earns " + res.dailyEarnings + " a day and " + res.periodEarnings + " over " + res.days + (res.days === 1 ? " day" : " days") + " at that pace." + note + " The volume, the fee tier and the pool's size are held frozen for the whole period, impermanent loss is not deducted, and in a concentrated pool fees are earned only while the price is inside your range - none of that is modelled. An educational model of LP fee earnings, not a live pool quote. Not financial advice.");
+    });
+
+    var predForm = document.getElementById("pred-calc");
+    if (predForm) predForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = predictionMarket(val("pred-yes"), val("pred-no"), val("pred-spend"));
+      if (res === null) {
+        document.getElementById("pred-sum-out").value = "Invalid";
+        document.getElementById("pred-shares-out").value = "Invalid";
+        document.getElementById("pred-arb-out").value = "Invalid";
+        setText("pred-result", "Check the inputs: each price must be more than 0 and less than 1 at up to 9 decimal places - a price of 0 or 1 is a settled market, not a tradeable one - and the spend more than 0 and at most 1,000,000,000,000 collateral units.");
+        return;
+      }
+      document.getElementById("pred-sum-out").value = res.sumPrice + " (" + (res.devBps > 0 ? "+" : "") + res.devBps + " bps vs 1)";
+      document.getElementById("pred-shares-out").value = res.shares;
+      document.getElementById("pred-arb-out").value = res.arbProfit;
+      var note = "";
+      if (res.mode === "mint") {
+        note = " The two prices sum to MORE than 1, so the complete-set rule itself is out of line: minting complete sets with the whole spend locks " + res.spend + " of collateral, and selling both sides of the resulting amount of sets (" + res.arbSets + ") returns " + res.arbValue + " at these prices - a gross edge of " + res.arbProfit + " before any market fee or spread." + (res.arbZero ? " At this spend that edge floors to zero at the smallest unit: the deviation is real but smaller than one payable unit on an amount this small." : "");
+      } else if (res.mode === "buy") {
+        note = " The two prices sum to LESS than 1, so the complete-set rule itself is out of line: the whole spend buys a complete-set amount of " + res.arbSets + " (both sides, in proportion), and redeeming that amount pays exactly " + res.arbValue + " of collateral whichever side wins - a gross edge of " + res.arbProfit + " before any market fee or spread." + (res.arbZero ? " At this spend that edge floors to zero at the smallest unit: the deviation is real but smaller than one payable unit on an amount this small." : "");
+      } else {
+        note = " The two prices sum to exactly 1, so the complete-set rule offers no edge either way: minting and redeeming both break even at these prices before fees, and only a view that the true probability differs from the price makes either side worth holding.";
+      }
+      setText("pred-result", "Model output: at a YES price of " + res.yesPrice + " and a NO price of " + res.noPrice + ", the market's implied probability of YES is the YES price itself - " + res.impliedYesPct.toFixed(4) + "% - because one share pays exactly 1 if YES happens and 0 if it does not. Your spend of " + res.spend + " buys " + res.shares + " YES shares (spend divided by the price, floored at the smallest unit): if YES happens they pay " + res.payoutIfYes + ", a profit of " + res.profitIfYes + "; if NO happens they pay 0 and the whole spend of " + res.lossIfNo + " is lost, which is why the price is also the break-even probability - the trade profits in expectation only if the true chance is above it." + note + " Market fees, spread and price movement while trading are not modelled, and no live market is read. An educational model of prediction-market outcome shares, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

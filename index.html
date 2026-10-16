@@ -2678,8 +2678,8 @@
     </article>
 
     <article class="tool">
-      <h3>68. Compute budget planner \u2014 the limit a transaction is given, and the one it should ask for</h3>
-      <p>Every transaction runs against a <strong>compute-unit limit</strong>. Never set one and the runtime gives the transaction <strong>200,000 compute units per instruction</strong>, capped at the transaction maximum of <strong>1,400,000</strong> \u2014 so three instructions get 600,000 by default. The limit matters twice. Execution <strong>fails the moment usage passes it</strong>, so a transaction whose real usage \u2014 measured by simulating it \u2014 exceeds the default dies unless it asks for more with a SetComputeUnitLimit instruction. And the prioritization fee (Tool 5) is charged on the <strong>limit requested, not the compute used</strong>, so an oversized limit is paid for in full: at 10,000 micro-lamports per unit, the 1,400,000 maximum costs 14,000 lamports whether the transaction uses it or not. The planner's headline: 3 instructions measuring <strong>412,000</strong> compute units used, given 20% headroom, should request <strong>494,400</strong> \u2014 a priority fee of <strong>4,944 lamports</strong> at that price, against 6,000 charged on the 600,000 default. Too little headroom is the symmetric failure: usage that varies between simulations can pass the measured figure, which is why the recommendation grosses usage up rather than requesting it exactly. And some work fits in no transaction at all: usage above 1,400,000 must be split, and headroom that would push a near-maximum transaction past the cap is capped there and flagged, leaving no spare room. An educational model of compute budgeting, not a live simulation. Not financial advice.</p>
+      <h3>68. Compute budget planner — the limit a transaction is given, and the one it should ask for</h3>
+      <p>Every transaction runs against a <strong>compute-unit limit</strong>. Never set one and the runtime gives the transaction <strong>200,000 compute units per instruction</strong>, capped at the transaction maximum of <strong>1,400,000</strong> — so three instructions get 600,000 by default. The limit matters twice. Execution <strong>fails the moment usage passes it</strong>, so a transaction whose real usage — measured by simulating it — exceeds the default dies unless it asks for more with a SetComputeUnitLimit instruction. And the prioritization fee (Tool 5) is charged on the <strong>limit requested, not the compute used</strong>, so an oversized limit is paid for in full: at 10,000 micro-lamports per unit, the 1,400,000 maximum costs 14,000 lamports whether the transaction uses it or not. The planner's headline: 3 instructions measuring <strong>412,000</strong> compute units used, given 20% headroom, should request <strong>494,400</strong> — a priority fee of <strong>4,944 lamports</strong> at that price, against 6,000 charged on the 600,000 default. Too little headroom is the symmetric failure: usage that varies between simulations can pass the measured figure, which is why the recommendation grosses usage up rather than requesting it exactly. And some work fits in no transaction at all: usage above 1,400,000 must be split, and headroom that would push a near-maximum transaction past the cap is capped there and flagged, leaving no spare room. An educational model of compute budgeting, not a live simulation. Not financial advice.</p>
       <form id="cb-calc">
         <div class="grid">
           <div>
@@ -2713,8 +2713,8 @@
     </article>
 
     <article class="tool">
-      <h3>69. Interest-bearing token display calculator \u2014 the balance that grows without a single token moving</h3>
-      <p>A Token-2022 mint with the <strong>interest-bearing extension</strong> never mints its interest. The raw amount in your token account stays exactly what was deposited, and what grows is the <strong>displayed amount</strong>, computed when a wallet reads the balance: displayed = raw \u00d7 e<sup>rate \u00d7 time</sup>, compounded continuously. The rate is a signed count of <strong>basis points per year</strong> stored on the mint \u2014 negative rates are representable and shrink the display \u2014 and the time runs against a year of <strong>365.24 days (31,556,736 seconds)</strong>, so 365 days is not quite a full year: at <strong>500 bps</strong>, a raw 10,000 displays as <strong>10,512.365573169</strong> after 365 days. When the rate authority changes the rate, the mint stores a <strong>pre-update average rate</strong> for the stretch before the change and applies the new rate only from the change onward, so the total factor is the product of the two stretches\u2019 exponentials \u2014 the headline below\u2019s second example accrues at an average 300 bps for 200 days, then 600 bps for 100. The grown figure is <strong>truncated at the smallest unit</strong>, never rounded, and a transfer still moves raw amounts: the growth exists only in the conversion, which is the reference client SDK\u2019s own formula, verified case-for-case before this tool shipped. An educational model of the interest-bearing display conversion, not a live mint reading. Not financial advice.</p>
+      <h3>69. Interest-bearing token display calculator — the balance that grows without a single token moving</h3>
+      <p>A Token-2022 mint with the <strong>interest-bearing extension</strong> never mints its interest. The raw amount in your token account stays exactly what was deposited, and what grows is the <strong>displayed amount</strong>, computed when a wallet reads the balance: displayed = raw × e<sup>rate × time</sup>, compounded continuously. The rate is a signed count of <strong>basis points per year</strong> stored on the mint — negative rates are representable and shrink the display — and the time runs against a year of <strong>365.24 days (31,556,736 seconds)</strong>, so 365 days is not quite a full year: at <strong>500 bps</strong>, a raw 10,000 displays as <strong>10,512.365573169</strong> after 365 days. When the rate authority changes the rate, the mint stores a <strong>pre-update average rate</strong> for the stretch before the change and applies the new rate only from the change onward, so the total factor is the product of the two stretches' exponentials — the headline below's second example accrues at an average 300 bps for 200 days, then 600 bps for 100. The grown figure is <strong>truncated at the smallest unit</strong>, never rounded, and a transfer still moves raw amounts: the growth exists only in the conversion, which is the reference client SDK's own formula, verified case-for-case before this tool shipped. An educational model of the interest-bearing display conversion, not a live mint reading. Not financial advice.</p>
       <form id="ib-calc">
         <div class="grid">
           <div>
@@ -2834,6 +2834,41 @@
         </div>
         <button type="submit">Estimate the earnings</button>
         <p class="result" id="lpf-result" aria-live="polite"></p>
+      </form>
+    </article>
+
+    <article class="card">
+      <h3>72. Prediction-market outcome shares — a price that is a probability</h3>
+      <p>A binary prediction market trades two outcome shares, <strong>YES</strong> and <strong>NO</strong>, anchored to the collateral by a <strong>complete-set</strong> rule: paying exactly <strong>1</strong> unit of collateral mints one YES plus one NO, and one of each redeems for exactly 1, whichever side wins. That anchor makes a share price <strong>an implied probability</strong> — a YES at <strong>0.62</strong> prices a 62% chance, because the share pays exactly 1 if YES happens and 0 if it does not — and it makes the two prices of a consistent market sum to <strong>exactly 1</strong>. Below, YES at 0.62 and NO at <strong>0.41</strong> sum to <strong>1.03</strong>, 300 bps rich: minting complete sets for 1 and selling both sides returns 1.03 a set, so a spend of <strong>620</strong> locked as collateral comes back as <strong>638.6</strong>, a gross edge of <strong>18.6</strong> before fees. Prices summing under 1 run the same rule backwards — buy both sides for the sum, redeem for 1. The same spend pointed at YES alone buys <strong>1,000 shares</strong> (620 / 0.62): they pay 1,000 if YES happens, a profit of <strong>380</strong>, and exactly 0 if it does not, which is why the price is also the trade's <strong>break-even probability</strong>. A price of 0 or 1 is a settled market, not a tradeable one, and is rejected here. Market fees, spread and price movement while trading are <strong>not</strong> modelled. An educational model of prediction-market outcome shares, not a live market quote. Not financial advice.</p>
+      <form id="pred-calc">
+        <div class="grid">
+          <div>
+            <label for="pred-yes">YES share price (collateral units, between 0 and 1)</label>
+            <input id="pred-yes" name="pred-yes" inputmode="decimal" value="0.62">
+          </div>
+          <div>
+            <label for="pred-no">NO share price (collateral units, between 0 and 1)</label>
+            <input id="pred-no" name="pred-no" inputmode="decimal" value="0.41">
+          </div>
+          <div>
+            <label for="pred-spend">Your spend (collateral units)</label>
+            <input id="pred-spend" name="pred-spend" inputmode="decimal" value="620">
+          </div>
+          <div>
+            <label for="pred-sum-out">Sum of the two prices vs the complete-set anchor of 1 (model)</label>
+            <input id="pred-sum-out" name="pred-sum-out" readonly>
+          </div>
+          <div>
+            <label for="pred-shares-out">YES shares the spend buys (model)</label>
+            <input id="pred-shares-out" name="pred-shares-out" readonly>
+          </div>
+          <div>
+            <label for="pred-arb-out">Complete-set edge on the whole spend (model)</label>
+            <input id="pred-arb-out" name="pred-arb-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the outcome shares</button>
+        <p class="result" id="pred-result" aria-live="polite"></p>
       </form>
     </article>
 
@@ -2979,6 +3014,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=68"></script>
+<script src="app.js?v=69"></script>
 </body>
 </html>
