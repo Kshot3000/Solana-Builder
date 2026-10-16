@@ -3381,6 +3381,60 @@ function scaledUiAmount(rawStr, multStr, newMultStr, effTsStr, readTsStr, sendSt
   };
 }
 
+/* Tool 71 - LP fee earnings estimator. A constant-product pool charges
+   its fee tier, in basis points of every trade, and that fee stays in
+   the pool for its liquidity providers pro-rata: the pool collects
+   floor(volume x feeBps / 10000) per day, and a position whose deposit
+   is deposit / tvl of the pool earns floor(poolFees x deposit / tvl)
+   of it per day, both floors at the smallest unit in exact scaled
+   BigInt - the same two-floor shape a real distribution's accounting
+   shows, and the reason a dust share can floor a whole day's earnings
+   to zero while the pool still collects. The period figure is the
+   daily figure times the days, with volume, tier and pool size held
+   frozen: an annualisation of one observed day, never a forecast.
+   The simple APR is daily / deposit x 365 (as a percentage); the
+   compounded APY is (1 + daily / deposit)^365 - 1, which assumes each
+   day's earnings join the position and themselves earn - the two
+   numbers answer different questions, and the model returns both so
+   the distinction is the lesson. Gross of impermanent loss (Tools 4
+   and 60), gross of price movement, and for a full-range position
+   that is always active: a concentrated position earns only while
+   the price is inside its range, and its already-accrued fees are
+   Tool 25's fee-growth accounting, not this estimate. Values are
+   generic value units (the same unit for volume, tvl and deposit),
+   capped at 1e12 so the scaled figures stay exact. */
+var MAX_LPF_VALUE = 1000000000000;
+var MAX_LPF_DAYS = 36500;
+
+function lpFeeEarnings(volumeStr, feeBps, tvlStr, depositStr, daysStr) {
+  var V = parseScaled(volumeStr), T = parseScaled(tvlStr), D = parseScaled(depositStr);
+  var bps = Number(feeBps), days = Number(daysStr);
+  if (V === null || T === null || D === null) return null;
+  if (V <= 0n || T <= 0n || D <= 0n) return null;
+  var cap = BigInt(MAX_LPF_VALUE) * SCALE;
+  if (V > cap || T > cap || D > cap) return null;
+  if (D > T) return null;
+  if (!Number.isInteger(bps) || bps < 0 || bps > 10000) return null;
+  if (!Number.isInteger(days) || days < 1 || days > MAX_LPF_DAYS) return null;
+  var poolFeesDay = (V * BigInt(bps)) / 10000n;
+  var daily = (poolFeesDay * D) / T;
+  var period = daily * BigInt(days);
+  var shareBps = Number((D * 10000n) / T);
+  var r = Number(daily) / Number(D);
+  var aprPct = r * 36500;
+  var apyPct = (Math.pow(1 + r, 365) - 1) * 100;
+  return {
+    volume: formatScaled(V), feeBps: bps, tvl: formatScaled(T),
+    deposit: formatScaled(D), days: days,
+    poolFeesDay: formatScaled(poolFeesDay),
+    shareBps: shareBps,
+    dailyEarnings: formatScaled(daily),
+    periodEarnings: formatScaled(period),
+    aprPct: aprPct, apyPct: apyPct, apyFinite: Number.isFinite(apyPct),
+    feesZero: poolFeesDay === 0n, earningsZero: daily === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3930,6 +3984,7 @@ if (typeof module !== "undefined" && module.exports) {
     computeBudgetPlan, DEFAULT_CU_PER_INSTRUCTION,
     interestBearingAmount, IB_SECONDS_PER_YEAR, MAX_IB_DAYS,
     scaledUiAmount, MAX_SUA_MULTIPLIER, MAX_SUA_TIMESTAMP,
+    lpFeeEarnings, MAX_LPF_VALUE, MAX_LPF_DAYS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5400,6 +5455,31 @@ if (typeof document !== "undefined") {
         note += " The amount to send converts back to " + res.sendRaw + " raw units: entered display amounts are divided by the multiplier and truncated at the smallest unit, never rounded up, so a transfer never moves more raw than the display promises.";
       }
       setText("sua-result", "Model output: a raw balance of " + res.raw + " on a scaled-UI-amount mint displays as " + res.displayed + " when read at timestamp " + res.readTimestamp + ", because the multiplier in force there is " + res.effectiveMultiplier + " (current " + res.multiplier + ", scheduled " + res.newMultiplier + " from timestamp " + res.effectiveTimestamp + "): the displayed amount is the raw amount x the multiplier in force, truncated at the smallest unit. The raw balance never moved and a transfer still moves raw amounts - the multiplier exists only in this conversion, which every wallet and explorer reading the mint performs." + note + " An educational model of the scaled-UI display conversion, not a live mint reading. Not financial advice.");
+    });
+
+    var lpfForm = document.getElementById("lpf-calc");
+    if (lpfForm) lpfForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = lpFeeEarnings(val("lpf-volume"), val("lpf-fee"), val("lpf-tvl"), val("lpf-deposit"), val("lpf-days"));
+      if (res === null) {
+        document.getElementById("lpf-poolfees-out").value = "Invalid";
+        document.getElementById("lpf-earn-out").value = "Invalid";
+        document.getElementById("lpf-apr-out").value = "Invalid";
+        setText("lpf-result", "Check the inputs: the daily volume, the pool's total liquidity value and your deposit must each be more than 0 and at most 1,000,000,000,000 value units at up to 9 decimal places, your deposit no larger than the pool's total, the fee a whole number of basis points from 0 to 10,000, and the period a whole number of days from 1 to 36,500.");
+        return;
+      }
+      document.getElementById("lpf-poolfees-out").value = res.poolFeesDay;
+      document.getElementById("lpf-earn-out").value = res.periodEarnings;
+      document.getElementById("lpf-apr-out").value = res.apyFinite ? res.aprPct.toFixed(4) + "% simple / " + res.apyPct.toFixed(4) + "% compounded" : res.aprPct.toFixed(4) + "% simple / compounding beyond finite display";
+      var note = "";
+      if (res.feesZero) {
+        note = " At this fee tier on this volume the pool collects nothing at all in a day, so there is nothing to share - a zero tier earns zero however large the position.";
+      } else if (res.earningsZero) {
+        note = " The pool collects " + res.poolFeesDay + " a day, but your share of one day floors below one smallest unit, so the model credits nothing: a position this small a share of the pool needs more volume, a higher tier or a larger deposit before a single day's fees amount to one payable unit.";
+      } else {
+        note = " The simple APR annualises one day without compounding; the compounded APY assumes every day's earnings are added to the position and themselves earn from the next day, which is why it sits above the APR whenever earnings are positive - and why a quoted APY is never comparable with a quoted APR without asking which one it is.";
+      }
+      setText("lpf-result", "Model output: on daily volume of " + res.volume + " at a " + res.feeBps + "-basis-point fee tier the pool collects " + res.poolFeesDay + " a day in fees. Your deposit of " + res.deposit + " is " + (res.shareBps / 100) + "% of the pool's " + res.tvl + " (share floored to whole basis points: " + res.shareBps + "), so it earns " + res.dailyEarnings + " a day and " + res.periodEarnings + " over " + res.days + (res.days === 1 ? " day" : " days") + " at that pace." + note + " The volume, the fee tier and the pool's size are held frozen for the whole period, impermanent loss is not deducted, and in a concentrated pool fees are earned only while the price is inside your range - none of that is modelled. An educational model of LP fee earnings, not a live pool quote. Not financial advice.");
     });
 
     /* catalogue filter */
