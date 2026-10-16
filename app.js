@@ -2737,6 +2737,54 @@ function nftMintCost(count, editions) {
   };
 }
 
+/* ---------- Tool 59: program deploy cost (upgradeable loader) ---------- */
+/* Deploying through the upgradeable BPF loader creates two permanent
+   accounts, each funded rent-exempt: the program account (36 bytes - a
+   4-byte state tag plus the 32-byte programdata address) and the
+   programdata account (a 45-byte header - tag, deployment slot and the
+   upgrade-authority option plus key - followed by space for the program's
+   ELF bytes, allocated at the deploy's maximum data length, which may
+   exceed today's ELF to leave room for upgrades). The upload first stages
+   the ELF in a buffer account (a 37-byte header - the same layout minus
+   the slot field - plus the same maximum length); the buffer is transient
+   and its deposit is reclaimed when the deploy completes, so it counts
+   toward the PEAK funding the deployer must hold, not the amount left
+   locked. Every figure is Tool 3's rentExempt run verbatim on those
+   sizes, so the tools cannot disagree; the 8-byte header gap makes the
+   buffer's deposit exactly 55,680 lamports smaller than the programdata
+   account's. Headroom is priced at exactly 6,960 lamports per byte -
+   the same per-byte figure an ExtendProgram top-up would charge later,
+   so reserving space now and extending later cost the same rent; only
+   the timing differs. Transaction fees for the chunked upload writes
+   are separate and not modelled. */
+var PROGRAM_ACCOUNT_BYTES = 36;
+var PROGRAMDATA_HEADER_BYTES = 45;
+var BUFFER_HEADER_BYTES = 37;
+var MAX_PROGRAM_BYTES = 10485760;
+
+function programDeployCost(elfBytes, maxBytes) {
+  var elf = Number(elfBytes);
+  var mx = Number(maxBytes);
+  if (!Number.isInteger(elf) || elf < 1 || elf > MAX_PROGRAM_BYTES) return null;
+  if (!Number.isInteger(mx) || mx < elf || mx > MAX_PROGRAM_BYTES) return null;
+  var programRent = rentExempt(PROGRAM_ACCOUNT_BYTES).rentExemptLamports;
+  var programDataRent = rentExempt(PROGRAMDATA_HEADER_BYTES + mx).rentExemptLamports;
+  var bufferRent = rentExempt(BUFFER_HEADER_BYTES + mx).rentExemptLamports;
+  var locked = BigInt(programRent) + BigInt(programDataRent);
+  var peak = locked + BigInt(bufferRent);
+  var headroom = mx - elf;
+  return {
+    elfBytes: elf, maxBytes: mx,
+    programBytes: PROGRAM_ACCOUNT_BYTES, programRentLamports: programRent,
+    programDataBytes: PROGRAMDATA_HEADER_BYTES + mx, programDataRentLamports: programDataRent,
+    bufferBytes: BUFFER_HEADER_BYTES + mx, bufferRentLamports: bufferRent,
+    lockedLamports: locked.toString(), lockedSol: formatScaled(locked),
+    peakLamports: peak.toString(), peakSol: formatScaled(peak),
+    headroomBytes: headroom,
+    headroomRentLamports: headroom * RENT_LAMPORTS_PER_BYTE_YEAR * RENT_EXEMPTION_YEARS
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3274,6 +3322,7 @@ if (typeof module !== "undefined" && module.exports) {
     dcaPlan, MAX_DCA_ORDERS, MAX_DCA_TX_FEE_LAMPORTS,
     dlmmBins, MAX_DLMM_BIN_ID, MAX_DLMM_WIDTH,
     nftMintCost, NFT_MINT_BYTES, NFT_TOKEN_ACCOUNT_BYTES, NFT_METADATA_BYTES, NFT_EDITION_BYTES, MAX_NFT_COUNT,
+    programDeployCost, PROGRAM_ACCOUNT_BYTES, PROGRAMDATA_HEADER_BYTES, BUFFER_HEADER_BYTES, MAX_PROGRAM_BYTES,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4468,6 +4517,24 @@ if (typeof document !== "undefined") {
         ? " No master editions are created, so each NFT is three accounts and " + res.perNftLamports + " lamports."
         : " The " + res.editions + (res.editions === 1 ? " master edition adds" : " master editions add") + " a 282-byte account at " + res.editionRentLamports + " lamports each" + (res.editions === res.count ? ", so every NFT carries the full four-account recipe at " + res.perNftWithEditionLamports + " lamports (" + res.perNftSol + " SOL) each." : ".");
       setText("nft-result", "Model output: minting " + res.count + (res.count === 1 ? " NFT" : " NFTs") + " creates " + res.totalBytes + " bytes of accounts - per NFT a mint at " + res.mintRentLamports + " lamports, a token account at " + res.tokenRentLamports + " and metadata at " + res.metadataRentLamports + " - and locks " + res.totalLamports + " lamports (" + res.totalSol + " SOL) of rent-exempt deposits in total." + edNote + " The deposits are locked, not spent: closing an account reclaims its deposit. Transaction fees, any marketplace or mint-program fee, candy-machine or guard costs and compressed NFTs (Tool 28, a different structure) are not modelled, and no live mint is read. An educational model of a classic NFT mint's rent, not a live quote. Not financial advice.");
+    });
+
+    var deployForm = document.getElementById("deploy-calc");
+    if (deployForm) deployForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = programDeployCost(val("deploy-elf"), val("deploy-max"));
+      if (res === null) {
+        document.getElementById("deploy-locked-out").value = "Invalid";
+        document.getElementById("deploy-peak-out").value = "Invalid";
+        setText("deploy-result", "Check the inputs: the program size and the maximum data length must be whole numbers of bytes from 1 to 10485760, and the maximum must be at least the program size.");
+        return;
+      }
+      document.getElementById("deploy-locked-out").value = res.lockedLamports;
+      document.getElementById("deploy-peak-out").value = res.peakLamports;
+      var headNote = res.headroomBytes === 0
+        ? " The maximum is the program size exactly, so an upgrade that grows the program must first extend the account - at the same 6,960 lamports per added byte."
+        : " The maximum leaves " + res.headroomBytes + " bytes of headroom over today's program, and that reserved space is " + res.headroomRentLamports + " lamports of the locked total - exactly what extending by those bytes later would cost, paid now instead.";
+      setText("deploy-result", "Model output: deploying a " + res.elfBytes + "-byte program at a " + res.maxBytes + "-byte maximum locks " + res.lockedLamports + " lamports (" + res.lockedSol + " SOL) permanently - a 36-byte program account at " + res.programRentLamports + " lamports and a " + res.programDataBytes + "-byte programdata account at " + res.programDataRentLamports + " - and the deployer must hold " + res.peakLamports + " lamports (" + res.peakSol + " SOL) at the peak, because the upload buffer (a " + res.bufferBytes + "-byte account at " + res.bufferRentLamports + " lamports) is funded too and reclaimed when the deploy completes." + headNote + " The deposits are locked, not spent: closing a program reclaims them. The transaction fees for the chunked upload writes, any IDL account and program testing are not modelled, and no live program is read. An educational model of a program deploy's rent, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

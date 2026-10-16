@@ -2312,6 +2312,33 @@
       </form>
     </article>
 
+    <article class="card">
+      <h3>59. Program deploy cost planner — what a .so file locks up</h3>
+      <p>Deploying a program through the upgradeable loader is not one account either: it creates a <strong>program account</strong> (36 bytes, <strong>1,141,440 lamports</strong>) and a <strong>programdata account</strong> — a 45-byte header plus the space allocated for the program's bytes at the deploy's maximum data length — each funded rent-exempt. Before either exists, the upload stages the bytes in a <strong>buffer account</strong> (a 37-byte header — the same layout minus the slot field — plus the same maximum length) whose deposit is reclaimed when the deploy completes: it counts toward the peak the deployer must hold, not the amount left locked, and the 8-byte header gap makes it exactly 55,680 lamports smaller than the programdata deposit. A <strong>200,000-byte</strong> program deployed at exactly its own size locks <strong>1,394,345,520 lamports (1.39434552 SOL)</strong> — programdata 200,045 bytes at 1,393,204,080 — and peaks at <strong>2,787,493,920 lamports (2.78749392 SOL)</strong> while the buffer is funded. Every figure is Tool 3's rent run verbatim on those sizes. Allocating a larger maximum leaves headroom for upgrades at exactly 6,960 lamports per reserved byte — the same per-byte figure an extension would charge later, so reserving now and extending later cost the same rent; only the timing differs. The deposits are locked, not spent: closing a program reclaims them. An educational model of a program deploy's rent, not a live quote. Not financial advice.</p>
+      <form id="deploy-calc">
+        <div class="grid">
+          <div>
+            <label for="deploy-elf">Program (.so) size in bytes</label>
+            <input id="deploy-elf" name="deploy-elf" inputmode="numeric" value="200000">
+          </div>
+          <div>
+            <label for="deploy-max">Maximum data length to allocate (bytes)</label>
+            <input id="deploy-max" name="deploy-max" inputmode="numeric" value="200000">
+          </div>
+          <div>
+            <label for="deploy-locked-out">Lamports locked after deploy (model)</label>
+            <input id="deploy-locked-out" name="deploy-locked-out" readonly>
+          </div>
+          <div>
+            <label for="deploy-peak-out">Peak lamports held during deploy (model)</label>
+            <input id="deploy-peak-out" name="deploy-peak-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the deploy cost</button>
+        <p class="result" id="deploy-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2454,6 +2481,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=55"></script>
+<script src="app.js?v=56"></script>
 </body>
 </html>
