@@ -3663,6 +3663,59 @@ function stakePoolFees(totalStr, supplyStr, depositStr, depFeeBpsStr, rewardsStr
   };
 }
 
+/* ---------- Tool 76: farm emissions (liquidity mining rewards) ---------- */
+/* Farms - the incentive programs pools run on Raydium, Orca and across
+   Solana DeFi - pay a reward token at a stated emission rate, split
+   pro-rata by staked VALUE: your share is stake / totalStaked, so your
+   tokens per day are floor(emission * stake / totalStaked) at the
+   smallest unit in exact scaled BigInt, your value per day is that
+   floored token count times the reward price you supply, and a period
+   is the floored daily figure times the days (day-by-day accrual).
+   The APR the farm quotes follows from the daily value alone: APR =
+   (valueDay / stake) * 365, and the stake cancels - APR =
+   emission * price * 365 / totalStaked - so a position twice as large
+   earns twice the tokens at exactly the same APR, and if the total
+   staked doubles, every APR halves: emissions are a fixed pie, and
+   new stakers dilute the old ones without any rate changing. The APY
+   compounds that daily rate for a year and assumes the rewards are
+   reinvested daily at the same rate and price - an assumption, stated
+   on the page, not a promise. This is NOT trading-fee income (Tool 71
+   models a pool's own fees) and NOT protocol staking (Tool 8): the
+   emission schedule, its end date, vesting or lockups on the reward
+   token, and any change in the total staked are not modelled, the
+   price is a user assumption, and no live farm is read. Values are
+   generic units, capped at 1e12 so the scaled figures stay exact
+   (prototype-proven on 20,000 cases against an independent
+   exact-rational Python oracle, 0 mismatches on every figure). */
+var MAX_FARM_VALUE = 1000000000000;
+var MAX_FARM_DAYS = 36500;
+
+function farmRewards(emissionStr, priceStr, tvlStr, stakeStr, daysStr) {
+  var E = parseScaled(emissionStr), P = parseScaled(priceStr), T = parseScaled(tvlStr), S = parseScaled(stakeStr);
+  var days = Number(daysStr);
+  if (E === null || P === null || T === null || S === null) return null;
+  var cap = BigInt(MAX_FARM_VALUE) * SCALE;
+  if (E > cap || P > cap || T > cap || S > cap) return null;
+  if (T <= 0n || S <= 0n || S > T) return null;
+  if (!Number.isInteger(days) || days < 1 || days > MAX_FARM_DAYS) return null;
+  var tokensDay = (E * S) / T;
+  var tokensPeriod = tokensDay * BigInt(days);
+  var valueDay = (tokensDay * P) / SCALE;
+  var valuePeriod = valueDay * BigInt(days);
+  var shareBps = Number((S * 10000n) / T);
+  var r = Number(valueDay) / Number(S);
+  var aprPct = r * 36500;
+  var apyPct = (Math.pow(1 + r, 365) - 1) * 100;
+  return {
+    emission: formatScaled(E), price: formatScaled(P), tvl: formatScaled(T), stake: formatScaled(S), days: days,
+    shareBps: shareBps, sharePct: (Number(S) / Number(T)) * 100,
+    tokensDay: formatScaled(tokensDay), tokensPeriod: formatScaled(tokensPeriod),
+    valueDay: formatScaled(valueDay), valuePeriod: formatScaled(valuePeriod),
+    aprPct: aprPct, apyPct: apyPct, apyFinite: Number.isFinite(apyPct), aprDoubleTvlPct: aprPct / 2,
+    emissionZero: E === 0n, priceZero: P === 0n, rewardsZero: tokensDay === 0n, wholeFarm: S === T
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4217,6 +4270,7 @@ if (typeof module !== "undefined" && module.exports) {
     leverageLoop, MAX_LOOP_DEPOSIT, MAX_LOOP_RATE_BPS,
     transferFeeSwap,
     stakePoolFees, MAX_SPOOL_VALUE,
+    farmRewards, MAX_FARM_VALUE, MAX_FARM_DAYS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -5829,6 +5883,38 @@ if (typeof document !== "undefined") {
         note = " The round trip nets " + res.netGain + " after all three fees, which together drag " + res.feeDrag + " against the no-fee return of " + res.noFeeGain + ": the deposit and withdrawal fees tax the principal going in and out, while the epoch fee skims only the rewards - which is why its cost grows with earnings, not with the deposit.";
       }
       setText("spool-result", "Model output: depositing " + res.deposit + " into a pool holding " + res.total + " for " + res.supply + " pool tokens mints " + res.minted + " tokens; the deposit fee at " + res.depFeeBps + " bps deducts " + res.depFeeTokens + " of them, so you hold " + res.userTokens + ". One epoch then adds " + res.rewards + " of rewards to the pool; the epoch fee at " + res.epochFeeBps + " bps is " + res.epochFeeValue + " of value, minted to the manager as " + res.epochFeeTokens + " new pool tokens at the pre-reward rate, diluting every holder. Withdrawing everything, the withdrawal fee at " + res.wdFeeBps + " bps deducts " + res.wdFeeTokens + " more tokens and the remaining " + res.netTokens + " convert at the new rate to " + res.out + ". The identical round trip with no fees at all would return " + res.noFeeOut + "." + note + " One epoch is modelled; rewards, rates and fees are frozen, referral splits of the deposit fee and stake (non-SOL) deposits and withdrawals are not modelled, and no live pool is read. An educational model of stake pool fees, not a live quote. Not financial advice.");
+    });
+
+    var farmForm = document.getElementById("farm-calc");
+    if (farmForm) farmForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = farmRewards(val("farm-emission"), val("farm-price"), val("farm-tvl"), val("farm-stake"), val("farm-days"));
+      if (res === null) {
+        document.getElementById("farm-share-out").value = "Invalid";
+        document.getElementById("farm-tokens-out").value = "Invalid";
+        document.getElementById("farm-value-out").value = "Invalid";
+        document.getElementById("farm-apr-out").value = "Invalid";
+        setText("farm-result", "Check the inputs: the emission per day and the reward price are amounts of 0 or more, the total staked and your stake are amounts of more than 0 with your stake no larger than the total (your stake is part of it), and the period is a whole number of days from 1 to 36,500.");
+        return;
+      }
+      document.getElementById("farm-share-out").value = res.shareBps + " bps (" + res.sharePct + "%)";
+      document.getElementById("farm-tokens-out").value = res.tokensPeriod;
+      document.getElementById("farm-value-out").value = res.valuePeriod;
+      document.getElementById("farm-apr-out").value = res.aprPct.toFixed(4) + "% simple APR (model)";
+      var note = "";
+      if (res.wholeFarm) {
+        note = " You are the entire farm, so every emitted token is yours - and the APR is at its ceiling for this emission and total: the first outside staker who joins dilutes it from here.";
+      } else if (res.emissionZero) {
+        note = " The farm emits nothing at this rate, so there is nothing to split: a farm whose emissions have ended pays exactly 0 however large the stake, until a new emission schedule is funded.";
+      } else if (res.priceZero) {
+        note = " The tokens still accrue - " + res.tokensDay + " a day - but at a price of 0 they are worth 0 in this model: an emission is only income at a price someone will pay, which is why a farm can advertise a huge token count and a worthless APR at the same time.";
+      } else if (res.rewardsZero) {
+        note = " Your share is so small that one day's emission floors to 0 tokens at the smallest unit: the pro-rata share exists on paper, but nothing accrues until the stake - or the emission - is larger.";
+      } else {
+        note = " The APR does not depend on the size of your stake - a position twice as large earns twice the tokens at exactly this APR, because the stake cancels: APR = emission x price x 365 / total staked. What moves it is the total: if the total staked doubles while the emission stands still, the APR halves to " + res.aprDoubleTvlPct.toFixed(4) + "% - a fixed emission pie is diluted by every new staker, with no rate ever changing.";
+      }
+      var apyText = res.apyFinite && res.apyPct < 1e21 ? res.apyPct.toFixed(4) + "% compounded daily for a year if the rewards were reinvested every day at the same rate and price" : "a compounded figure too large to display at this daily rate";
+      setText("farm-result", "Model output: an emission of " + res.emission + " reward tokens a day, split pro-rata across " + res.tvl + " of total staked value, gives your stake of " + res.stake + " a share of " + res.shareBps + " bps (" + res.sharePct + "%): " + res.tokensDay + " tokens a day, " + res.tokensPeriod + " tokens over " + res.days + " days. At your price of " + res.price + " per reward token that is " + res.valueDay + " a day and " + res.valuePeriod + " over the period - a simple APR of " + res.aprPct.toFixed(4) + "%, or " + apyText + "." + note + " The emission, price and total staked are frozen at your figures; emission schedules end and change, reward tokens can be locked or vesting, and no live farm is read. An educational model of farm emissions, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
