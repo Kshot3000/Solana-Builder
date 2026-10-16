@@ -2412,6 +2412,54 @@ function merkleProof(recipients) {
   };
 }
 
+/* ---------- Tool 53: multisig approval planner ---------- */
+/* A multisig wallet (Squads and similar on Solana) holds funds under
+   N members and acts only when M of them approve - an M-of-N threshold,
+   every member's vote equal. Three exact counts decide how safe and how
+   live that setup is. Approvals still needed is max(0, M - A) for A
+   approvals already collected. The number of member subsets that CAN
+   approve is sum_{k=M}^{N} C(N,k) out of 2^N subsets in total - for a
+   3-of-5 that is 10 + 5 + 1 = 16 of 32, exactly half. And the smallest
+   BLOCKING coalition is N - M + 1 members: that many refusers leave
+   fewer than M members able to approve, while one fewer refuser never
+   blocks, so a unanimous N-of-N hands every single member a veto
+   (blocking size 1) and a 1-of-N can only be blocked by all N refusing.
+   Binomials are exact BigInt (multiplicative form, each step dividing
+   exactly). Member identities, key custody and any live multisig are
+   not modelled. Prototype-verified before pinning: brute-force subset
+   enumeration for every N up to 12 and every threshold, plus a Pascal
+   triangle cross-check of every binomial - 0 mismatches. */
+var MAX_MULTISIG_MEMBERS = 100;
+
+function binomBigInt(n, k) {
+  if (k < 0 || k > n) return 0n;
+  var kk = Math.min(k, n - k);
+  var r = 1n;
+  for (var i = 0; i < kk; i++) r = (r * BigInt(n - i)) / BigInt(i + 1);
+  return r;
+}
+
+function multisigPlan(members, threshold, approved) {
+  var N = Number(members);
+  var M = Number(threshold);
+  var A = Number(approved);
+  if (!Number.isInteger(N) || !Number.isInteger(M) || !Number.isInteger(A)) return null;
+  if (N < 1 || N > MAX_MULTISIG_MEMBERS || M < 1 || M > N || A < 0 || A > N) return null;
+  var approving = 0n;
+  for (var k = M; k <= N; k++) approving += binomBigInt(N, k);
+  var blockingSize = N - M + 1;
+  return {
+    members: N, threshold: M, approved: A,
+    stillNeeded: Math.max(0, M - A), ready: A >= M,
+    thresholdBps: Number((BigInt(M) * 10000n) / BigInt(N)),
+    approvingSubsets: approving.toString(),
+    totalSubsets: (2n ** BigInt(N)).toString(),
+    blockingSize: blockingSize,
+    blockingSubsets: binomBigInt(N, blockingSize).toString(),
+    singleCanBlock: M === N
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -2943,6 +2991,7 @@ if (typeof module !== "undefined" && module.exports) {
     quadraticVote, MAX_QV_BUDGET, MAX_QV_VOTES,
     burnShare,
     merkleProof, MAX_MERKLE_RECIPIENTS,
+    multisigPlan, binomBigInt, MAX_MULTISIG_MEMBERS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4016,6 +4065,27 @@ if (typeof document !== "undefined") {
           ? " The recipient count is an exact power of two, so no leaf slots are left empty."
           : " The tree is padded to " + res.paddedLeaves + " leaves, so " + res.emptyLeaves + " leaf slots stand empty - padding changes no proof, it only completes the tree.");
       setText("merk-result", "Model output: " + (res.recipients === 1 ? "1 recipient commits" : res.recipients + " recipients commit") + " to a Merkle tree of depth " + res.depth + " with " + res.totalNodes + (res.totalNodes === "1" ? " node" : " nodes") + " in total. Only the 32-byte root goes on-chain; each claim supplies a proof of " + res.proofHashes + " sibling hashes (" + res.proofBytes + " bytes) and the program hashes the claim up those levels to check it against the root." + stepNote + " One recipient past a power of two pushes every proof up a level, so proof size moves in steps, not smoothly. Leaf contents, the hash function and any claim program are not modelled, and no live tree or airdrop is read. An educational model of a Merkle proof, not a live airdrop. Not financial advice.");
+    });
+
+    var msigForm = document.getElementById("msig-calc");
+    if (msigForm) msigForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = multisigPlan(val("msig-members"), val("msig-threshold"), val("msig-approved"));
+      if (res === null) {
+        document.getElementById("msig-needed-out").value = "Invalid";
+        document.getElementById("msig-subsets-out").value = "Invalid";
+        setText("msig-result", "Check the inputs: members must be a whole number from 1 to 100, the threshold a whole number from 1 up to the member count, and approvals collected a whole number from 0 up to the member count.");
+        return;
+      }
+      document.getElementById("msig-needed-out").value = res.ready ? "0 - ready to execute" : String(res.stillNeeded);
+      document.getElementById("msig-subsets-out").value = res.approvingSubsets + " of " + res.totalSubsets;
+      var stateNote = res.ready
+        ? " The threshold is met: " + res.approved + " approvals collected against " + res.threshold + " required, so the transaction can execute."
+        : " The proposal is still pending: " + res.approved + " of the " + res.threshold + " required approvals collected, " + res.stillNeeded + " still needed.";
+      var blockNote = res.singleCanBlock
+        ? " The threshold is unanimous, so the smallest blocking coalition is a single member - every member holds a veto."
+        : " The smallest blocking coalition is " + res.blockingSize + " members (" + res.blockingSubsets + " distinct " + (res.blockingSubsets === "1" ? "set" : "sets") + " of that size): if that many refuse, fewer than " + res.threshold + " members remain able to approve.";
+      setText("msig-result", "Model output: a " + res.threshold + "-of-" + res.members + " multisig requires " + fmtAmt(res.thresholdBps / 100) + "% of its members to act." + stateNote + " Of the " + res.totalSubsets + " possible member subsets, " + res.approvingSubsets + (res.approvingSubsets === "1" ? " is" : " are") + " large enough to approve." + blockNote + " Member identities, key custody and proposal expiry are not modelled, and no live multisig is read. An educational model of a multisig threshold, not a live wallet. Not financial advice.");
     });
 
     /* catalogue filter */

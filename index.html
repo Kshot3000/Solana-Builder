@@ -2105,6 +2105,38 @@
       </form>
     </article>
 
+
+    <article class="tool">
+      <h3>53. Multisig approval planner — how many keys must agree, and how few can block</h3>
+      <p>A multisig wallet (Squads is the common Solana form) holds funds under <strong>N members</strong> and acts only when <strong>M of them approve</strong> — every member's vote equal, unlike a token-weighted DAO vote (Tool 48). Three counts describe the setup. A <strong>3-of-5</strong> threshold is <strong>60%</strong> of the members, and <strong>16 of the 32</strong> possible member subsets are large enough to approve (10 sets of three, 5 of four, 1 of five). The mirror count is the <strong>smallest blocking coalition</strong>: N − M + 1 members refusing makes approval unreachable, so a 3-of-5 is blocked by any <strong>3 refusers</strong>, a unanimous 5-of-5 hands every single member a veto, and a 1-of-3 can only be blocked if all 3 refuse. Raising M buys safety against stolen keys and sells liveness — more approvals to collect before anything can move. This model counts subsets and coalitions in exact integer math; member identities, key custody, proposal expiry and any live multisig are not modelled. An educational model of a multisig threshold, not a live wallet. Not financial advice.</p>
+      <form id="msig-calc">
+        <div class="grid">
+          <div>
+            <label for="msig-members">Members (N)</label>
+            <input id="msig-members" name="msig-members" inputmode="numeric" value="5">
+          </div>
+          <div>
+            <label for="msig-threshold">Approvals required (M)</label>
+            <input id="msig-threshold" name="msig-threshold" inputmode="numeric" value="3">
+          </div>
+          <div>
+            <label for="msig-approved">Approvals already collected</label>
+            <input id="msig-approved" name="msig-approved" inputmode="numeric" value="2">
+          </div>
+          <div>
+            <label for="msig-needed-out">Approvals still needed (model)</label>
+            <input id="msig-needed-out" name="msig-needed-out" readonly>
+          </div>
+          <div>
+            <label for="msig-subsets-out">Subsets that can approve (model)</label>
+            <input id="msig-subsets-out" name="msig-subsets-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the multisig</button>
+        <p class="result" id="msig-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2247,6 +2279,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=49"></script>
+<script src="app.js?v=50"></script>
 </body>
 </html>
