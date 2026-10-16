@@ -2211,6 +2211,49 @@
       </form>
     </article>
 
+    <article class="tool">
+      <h3>56. DCA execution planner — what splitting one buy into many orders does, and does not, do</h3>
+      <p>A dollar-cost-averaging program (Jupiter's DCA is the common Solana form) splits one intended buy into <strong>N equal orders</strong> executed over time. This model freezes the pool — no price movement between orders, no replenishment — and runs the orders back to back, each against the reserves the previous order left, to compare the split honestly with one lump buy of the same total. The finding: splitting <strong>10 orders of 10,000</strong> from a total of <strong>100,000</strong> into a <strong>1,000,000 / 1,000,000</strong> pool at a 25 bps fee receives <strong>90,702.432370988</strong> — the lump buy receives 90,702.432370993, a difference of <strong>5 smallest units</strong>, flooring dust from each order's output and fee rounding in opposite directions. Walking the same curve in steps lands where one walk lands: splitting buys nothing on execution against an unmoving pool. What it buys in reality is exposure to <em>different prices at different times</em>, which this model does not simulate and cannot promise — and its certain cost is one transaction fee per order: 10 orders at 5,000 lamports each is <strong>50,000 lamports (0.00005 SOL)</strong> on top of the pool fees. The orders sum to the total exactly: each is floor(total ÷ N), and the first total-mod-N orders carry one extra smallest unit. An educational model of a DCA split, not a live program. Not financial advice.</p>
+      <form id="dca-calc">
+        <div class="grid">
+          <div>
+            <label for="dca-rin">Pool reserve — token you pay</label>
+            <input id="dca-rin" name="dca-rin" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="dca-rout">Pool reserve — token you buy</label>
+            <input id="dca-rout" name="dca-rout" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="dca-total">Total to spend across all orders</label>
+            <input id="dca-total" name="dca-total" inputmode="decimal" value="100000">
+          </div>
+          <div>
+            <label for="dca-fee">Pool fee (basis points)</label>
+            <input id="dca-fee" name="dca-fee" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="dca-orders">Number of orders</label>
+            <input id="dca-orders" name="dca-orders" inputmode="numeric" value="10">
+          </div>
+          <div>
+            <label for="dca-txfee">Transaction fee per order (lamports)</label>
+            <input id="dca-txfee" name="dca-txfee" inputmode="numeric" value="5000">
+          </div>
+          <div>
+            <label for="dca-tranche-out">Amount per order (model)</label>
+            <input id="dca-tranche-out" name="dca-tranche-out" readonly>
+          </div>
+          <div>
+            <label for="dca-total-out">Total received, split (model)</label>
+            <input id="dca-total-out" name="dca-total-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Plan the DCA</button>
+        <p class="result" id="dca-result" aria-live="polite"></p>
+      </form>
+    </article>
+
   </section>
 
   <section class="wrap" id="catalogue" aria-labelledby="catalogue-h">
@@ -2353,6 +2396,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=52"></script>
+<script src="app.js?v=53"></script>
 </body>
 </html>

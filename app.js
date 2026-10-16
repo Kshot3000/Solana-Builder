@@ -2549,6 +2549,80 @@ function escrowRelease(amountStr, feeBps, escrowBytes) {
   };
 }
 
+/* ---------- Tool 56: DCA execution planner ---------- */
+/* A dollar-cost-averaging program (Jupiter's DCA is the common Solana
+   form) splits one intended buy into N equal orders executed over time.
+   This model freezes the pool - no price movement between orders, no
+   replenishment - and runs the orders back to back, each one Tool 2's
+   swap math against the reserves the previous order left, so the split
+   can be compared honestly with one lump buy of the same total. The
+   total is split exactly in scaled BigInt: every order is
+   floor(total / N) and the first (total mod N) orders carry one extra
+   smallest unit, so the orders sum to the total exactly. The finding
+   the model exists to show: against a frozen pool the split receives
+   the lump amount to within flooring dust (the headline differs by 5
+   smallest units in 90,702) - walking the same curve in steps lands
+   where one walk lands, because each order's output flooring and each
+   order's fee flooring pull a few smallest units in opposite
+   directions. Splitting therefore buys nothing on execution against an
+   unmoving pool; what it buys in reality is exposure to DIFFERENT
+   prices over time, which no model can promise, and its certain cost
+   is one transaction fee per order (a per-order lamport input here,
+   charged on top of the pool fee). A tranche that floors to a zero
+   output, or a total too small to give every order a whole smallest
+   unit, rejects the plan. Between-order price movement, aggregator or
+   program fees beyond the per-order transaction fee, and any live DCA
+   program are not modelled.
+   Prototype-verified before pinning: 20,000 random cases - the orders
+   sum to the total exactly on every case, a single order equals
+   cpSwap's own output and fee exactly, and the split's total pool fee
+   never exceeds the lump fee and trails it by fewer than N smallest
+   units (each order's fee floors separately). */
+var MAX_DCA_ORDERS = 1000;
+var MAX_DCA_TX_FEE_LAMPORTS = 1000000;
+
+function dcaPlan(reserveInStr, reserveOutStr, totalInStr, feeBps, orders, txFeeLamports) {
+  var rIn = parseScaled(reserveInStr);
+  var rOut = parseScaled(reserveOutStr);
+  var T = parseScaled(totalInStr);
+  var bps = Number(feeBps);
+  var n = Number(orders);
+  var txFee = Number(txFeeLamports);
+  if (rIn === null || rOut === null || T === null) return null;
+  if (rIn <= 0n || rOut <= 0n || T <= 0n) return null;
+  if (!Number.isInteger(bps) || bps < 0 || bps >= 10000) return null;
+  if (!Number.isInteger(n) || n < 1 || n > MAX_DCA_ORDERS) return null;
+  if (!Number.isInteger(txFee) || txFee < 0 || txFee > MAX_DCA_TX_FEE_LAMPORTS) return null;
+  var lump = cpSwap(reserveInStr, reserveOutStr, totalInStr, feeBps);
+  if (!lump) return null;
+  var base = T / BigInt(n);
+  var rem = T - base * BigInt(n);
+  if (base <= 0n) return null;
+  var curIn = rIn, curOut = rOut, totOut = 0n, totFee = 0n;
+  for (var i = 0; i < n; i++) {
+    var a = base + (BigInt(i) < rem ? 1n : 0n);
+    var fee = (a * BigInt(bps)) / 10000n;
+    var eff = a - fee;
+    if (eff <= 0n) return null;
+    var out = (eff * curOut) / (curIn + eff);
+    if (out <= 0n || out >= curOut) return null;
+    totOut += out; totFee += fee; curIn += eff; curOut -= out;
+  }
+  var txTotal = BigInt(n) * BigInt(txFee);
+  var diff = totOut - parseScaled(lump.amountOut);
+  return {
+    orders: n, tranche: formatScaled(base), remainderUnits: rem.toString(),
+    totalIn: formatScaled(T),
+    dcaOut: formatScaled(totOut), dcaFees: formatScaled(totFee),
+    lumpOut: lump.amountOut, lumpFee: lump.fee,
+    diff: formatScaled(diff), diffUnits: diff.toString(),
+    txFeePerOrder: txFee, txFeesLamports: txTotal.toString(),
+    txFeesSol: formatScaled(txTotal),
+    avgPriceDca: Number(T) / Number(totOut),
+    avgPriceLump: Number(T) / Number(parseScaled(lump.amountOut))
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -3083,6 +3157,7 @@ if (typeof module !== "undefined" && module.exports) {
     multisigPlan, binomBigInt, MAX_MULTISIG_MEMBERS,
     buybackBurn,
     escrowRelease,
+    dcaPlan, MAX_DCA_ORDERS, MAX_DCA_TX_FEE_LAMPORTS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -4219,6 +4294,27 @@ if (typeof document !== "undefined") {
         ? " The fee floors to zero at this size, so on release the seller receives the whole " + res.amount + " - a percentage fee takes nothing from a dust payment."
         : " On release the platform fee is " + res.fee + " (an effective " + res.effectiveBps + " whole basis points, floored, never above the stated " + res.feeBps + ") and the seller receives " + res.seller + ".";
       setText("escr-result", "Model output: " + res.amount + " sits locked in the escrow account, and the escrow account's own rent-exempt deposit is " + res.rentLamports + " lamports (" + res.rentSol + " SOL) for its " + res.escrowBytes + " bytes - locked by whoever funds the account and reclaimed when it closes, not a cost of the trade." + feeNote + " On refund the buyer receives the whole " + res.refund + " back and no fee is charged: the fee exists only on the release path. Delivery, disputes, arbiter decisions and timeouts are not modelled, and no live escrow is read. An educational model of an escrow release, not a live escrow. Not financial advice.");
+    });
+
+    var dcaForm = document.getElementById("dca-calc");
+    if (dcaForm) dcaForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = dcaPlan(val("dca-rin"), val("dca-rout"), val("dca-total"), val("dca-fee"), val("dca-orders"), val("dca-txfee"));
+      if (res === null) {
+        document.getElementById("dca-tranche-out").value = "Invalid";
+        document.getElementById("dca-total-out").value = "Invalid";
+        setText("dca-result", "Check the inputs: both pool reserves and the total to spend must be positive amounts with at most 9 decimal places, the pool fee a whole number of basis points below 10000, the order count a whole number from 1 to 1000, the per-order transaction fee a whole number of lamports from 0 to 1000000, and the total must give every order at least one smallest unit and a non-zero output.");
+        return;
+      }
+      document.getElementById("dca-tranche-out").value = res.tranche;
+      document.getElementById("dca-total-out").value = res.dcaOut;
+      var dustNote = res.diffUnits === "0"
+        ? " The split receives exactly the lump amount."
+        : " The split receives " + res.dcaOut + " against the lump buy's " + res.lumpOut + " - a difference of " + res.diffUnits + " smallest units, flooring dust from each order's output and fee rounding in opposite directions, not an execution gain or loss worth the name.";
+      var splitNote = res.orders === 1
+        ? " A single order is the lump buy itself, run once."
+        : " The " + res.orders + " orders of " + res.tranche + " each" + (res.remainderUnits === "0" ? "" : " (the first " + res.remainderUnits + (res.remainderUnits === "1" ? " order carries" : " orders carry") + " one extra smallest unit, so the orders sum to the total exactly)") + " run back to back against the reserves each previous order leaves.";
+      setText("dca-result", "Model output:" + splitNote + dustNote + " Pool fees total " + res.dcaFees + " across the split against " + res.lumpFee + " on the lump buy, and the transaction fees are the certain extra cost: " + res.orders + (res.orders === 1 ? " order" : " orders") + " at " + res.txFeePerOrder + " lamports each is " + res.txFeesLamports + " lamports (" + res.txFeesSol + " SOL). Against this frozen pool the average price is " + fmtAmt(res.avgPriceDca) + " split against " + fmtAmt(res.avgPriceLump) + " lump. What splitting buys in reality - exposure to different prices at different times - is not modelled and cannot be promised; between-order price movement, program fees beyond the per-order transaction fee and any live DCA program are not modelled, and no live pool is read. An educational model of a DCA split, not a live program. Not financial advice.");
     });
 
     /* catalogue filter */
