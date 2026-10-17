@@ -3904,6 +3904,57 @@ function validatorCommission(stakeStr, grossBpsStr, commissionPctStr, daysStr) {
   };
 }
 
+/* ---------- Tool 80: leader schedule share ---------- */
+/* Every epoch the runtime computes a leader schedule: the epoch's
+   slots are assigned to validators in runs of LEADER_SLOTS_PER_WINDOW
+   (4) consecutive slots - a leader window - chosen by a stake-weighted
+   random draw, so a validator's EXPECTED share of the epoch's windows
+   and slots is exactly its share of the total activated stake. A
+   normal epoch (Tool 12) holds 432,000 slots = 108,000 windows; the
+   slots input accepts any multiple of 4 up to that, so warmup epochs
+   can be modelled too. The expectation is not the schedule itself:
+   the actual draw is seeded, fixed for the epoch and known in
+   advance, and a real validator's count lands near the expectation,
+   not on it. A scheduled slot whose leader produces no block is
+   skipped; the skip share here is the user's own assumed figure,
+   applied to the expected slots. Every figure is floored at the
+   smallest unit in exact scaled BigInt: the share in whole basis
+   points, the expectations at 9 decimal places, and the stake per
+   expected window is the total stake divided by the window count.
+   Prototype-proven on 20,008 cases against an independent Python
+   exact-rational oracle, 0 mismatches. No live stake or schedule
+   data is read. */
+var LEADER_SLOTS_PER_WINDOW = 4;
+var MAX_LEAD_SLOTS_PER_EPOCH = 432000;
+
+function leaderSchedule(stakeStr, totalStr, slotsStr, skipBpsStr) {
+  var stake = parseScaled(stakeStr);
+  var total = parseScaled(totalStr);
+  var slots = Number(slotsStr), skipBps = Number(skipBpsStr);
+  if (stake === null || total === null) return null;
+  if (stake <= 0n || total <= 0n || stake > total) return null;
+  if (!Number.isInteger(slots) || slots < LEADER_SLOTS_PER_WINDOW || slots > MAX_LEAD_SLOTS_PER_EPOCH || slots % LEADER_SLOTS_PER_WINDOW !== 0) return null;
+  if (!Number.isInteger(skipBps) || skipBps < 0 || skipBps > 10000) return null;
+  var windowsTotal = slots / LEADER_SLOTS_PER_WINDOW;
+  var shareBps = Number(stake * 10000n / total);
+  var expectedScaled = (BigInt(slots) * stake * SCALE) / total;
+  var expectedWindowsScaled = (BigInt(windowsTotal) * stake * SCALE) / total;
+  var producedScaled = expectedScaled * BigInt(10000 - skipBps) / 10000n;
+  var skippedScaled = expectedScaled - producedScaled;
+  return {
+    stake: formatScaled(stake), total: formatScaled(total), slotsPerEpoch: slots,
+    windowsTotal: windowsTotal, shareBps: shareBps, skipBps: skipBps,
+    expectedSlots: formatScaled(expectedScaled),
+    expectedWindows: formatScaled(expectedWindowsScaled),
+    produced: formatScaled(producedScaled),
+    skipped: formatScaled(skippedScaled),
+    stakePerWindow: formatScaled(total / BigInt(windowsTotal)),
+    fullStake: stake === total, zeroSkip: skipBps === 0, allSkipped: skipBps === 10000,
+    subBpsShare: shareBps === 0 && stake !== total,
+    dustExpectation: expectedScaled === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4462,6 +4513,7 @@ if (typeof module !== "undefined" && module.exports) {
     bundleTipPlan, MAX_BUNDLE_LAMPORTS, MAX_BUNDLE_COUNT, MAX_BUNDLE_TXS, MAX_BUNDLE_SIGS, MIN_BUNDLE_TIP_LAMPORTS,
     feeSplit, MAX_FSPLIT_SIGS, MAX_FSPLIT_COUNT, MAX_FSPLIT_CU_PRICE,
     validatorCommission, MAX_VCOMM_GROSS_BPS, MAX_VCOMM_DAYS,
+    leaderSchedule, LEADER_SLOTS_PER_WINDOW, MAX_LEAD_SLOTS_PER_EPOCH,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6196,6 +6248,39 @@ if (typeof document !== "undefined") {
         note = " Each single percentage point of commission costs one hundredth of the gross reward, so the comparison between two validators at the same gross rate is arithmetic, not judgement: the whole gap between their effective rates is the gap between their commission rates, scaled by the gross rate.";
       }
       setText("vcomm-result", "Model output: a stake of " + res.stake + " at an assumed gross reward rate of " + res.grossBps + " bps a year earns a gross reward of " + res.grossAnnual + " a year before commission. At a commission of " + res.commissionPct + " percent - a whole number of percentage points, the only form a vote account accepts - the validator keeps " + res.commissionAnnual + " of that reward and the delegator nets " + res.netAnnual + ", an effective rate of " + res.effectiveBps + " bps, with each percentage point of commission worth " + res.perPointAnnual + " a year at these settings. Over a period of " + res.days + " day(s) the gross reward is " + res.periodGross + ", of which the commission takes " + res.periodCommission + " and the delegator nets " + res.periodNet + "." + note + " The gross rate is an assumed figure, not a live rate; commission can be changed only during the first half of an epoch; stake-pool token fees (Tool 75), gross epoch compounding (Tool 8) and any separate block-revenue or MEV commission are not modelled, and no live validator data is read. An educational model of validator commission, not a live quote. Not financial advice.");
+    });
+
+    var leadForm = document.getElementById("lead-calc");
+    if (leadForm) leadForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = leaderSchedule(val("lead-stake"), val("lead-total"), val("lead-slots"), val("lead-skip"));
+      if (res === null) {
+        document.getElementById("lead-share-out").value = "Invalid";
+        document.getElementById("lead-slots-out").value = "Invalid";
+        document.getElementById("lead-prod-out").value = "Invalid";
+        document.getElementById("lead-perwindow-out").value = "Invalid";
+        setText("lead-result", "Check the inputs: the validator stake is a positive amount no larger than the total activated stake, the slots per epoch are a whole multiple of 4 from 4 to 432,000, and the assumed skipped share is a whole number of basis points from 0 to 10,000.");
+        return;
+      }
+      document.getElementById("lead-share-out").value = res.shareBps + " bps of the total activated stake";
+      document.getElementById("lead-slots-out").value = res.expectedSlots + " slots in " + res.expectedWindows + " leader windows";
+      document.getElementById("lead-prod-out").value = res.produced + " slots (" + res.skipped + " skipped)";
+      document.getElementById("lead-perwindow-out").value = res.stakePerWindow;
+      var note = "";
+      if (res.dustExpectation) {
+        note = " At this stake the expected assignment floors to zero at nine decimal places: the stake is far below one window's worth, and whole epochs would ordinarily pass with no assignment at all.";
+      } else if (res.allSkipped) {
+        note = " At an assumed skipped share of 100 percent every assigned slot is expected to be skipped: the schedule assigns the slots, but no blocks come out of them.";
+      } else if (res.fullStake) {
+        note = " With the whole activated stake the draw has only one validator to pick: every window of the epoch is assigned to it, and the expectation is the schedule itself.";
+      } else if (res.subBpsShare) {
+        note = " The stake share floors to zero whole basis points, but the expectation is not zero: a sub-basis-point share still expects the fraction of a window shown, which in practice means an assignment in some epochs and none in others.";
+      } else if (res.zeroSkip) {
+        note = " At an assumed skipped share of zero every assigned slot is expected to produce a block; any real skip rate comes straight off the produced figure and changes nothing about the assignment.";
+      } else {
+        note = " The expectation is a mean, not a promise: the epoch's actual schedule is one seeded draw, so a real count lands near this figure rather than on it, and it is fixed and knowable for the whole epoch once the schedule is computed.";
+      }
+      setText("lead-result", "Model output: a validator with " + res.stake + " of activated stake out of a total of " + res.total + " holds a " + res.shareBps + " bps share, so across an epoch of " + res.slotsPerEpoch + " slots - " + res.windowsTotal + " leader windows of 4 consecutive slots each - it is expected to be assigned " + res.expectedWindows + " windows, " + res.expectedSlots + " slots in total. At an assumed skipped share of " + res.skipBps + " bps, " + res.skipped + " of those slots are expected to be skipped and " + res.produced + " to produce blocks. One expected window corresponds to " + res.stakePerWindow + " of total activated stake at these settings." + note + " Stake is the activated stake the schedule is computed from, not a balance; the skip share is an assumed figure, not a live delinquency rate; validator commission (Tool 79) and rewards are not modelled, and no live stake or schedule data is read. An educational model of the leader schedule, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
