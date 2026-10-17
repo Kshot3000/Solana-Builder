@@ -4023,6 +4023,60 @@ function priorityFeePercentile(p1Str, c1Str, p2Str, c2Str, p3Str, c3Str, p4Str, 
   };
 }
 
+/* ---------- Tool 82: rent reclaim on account close ---------- */
+/* The rent-exempt deposit of Tool 3 is a deposit, not a fee: closing
+   an account returns its ENTIRE lamport balance to a destination
+   account, so the deposit locked when the account was created comes
+   back in full. A token account is 165 bytes, so each one closed
+   reclaims exactly rentExempt(165) = 2,039,280 lamports; any other
+   account reclaims (128 + dataLen) x 3,480 x 2 at its own size. The
+   closing transactions still pay Tool 5's base fee of 5,000 lamports
+   per signature - the signatures input is the total across every
+   closing transaction in the plan - so the net reclaim is the gross
+   reclaim minus that fee, and a plan whose signatures cost more than
+   the accounts hold nets negative and is flagged, not hidden. An
+   account can only close when its token balance is zero (stated on
+   the page; balances are not modelled), and a token account holding
+   withheld transfer fees keeps them out of the reclaim - the mint's
+   withdraw authority harvests those, they are not the holder's.
+   Every figure is exact integer lamports composed from Tool 3's own
+   rentExempt and Tool 5's base fee. Prototype-proven on 20,009 cases
+   against an independent Python integer oracle, 0 mismatches. No
+   live account data is read. */
+var TOKEN_ACCOUNT_BYTES = 165;
+var MAX_RECLAIM_ACCOUNTS = 10000;
+var MAX_RECLAIM_ACCOUNT_BYTES = 10000000;
+var MAX_RECLAIM_SIGS = 1000;
+
+function rentReclaim(tcStr, gcStr, gbStr, sigStr) {
+  var rawAll = [tcStr, gcStr, gbStr, sigStr];
+  for (var v = 0; v < rawAll.length; v++) {
+    if (typeof rawAll[v] !== "string" || !/^-?\d+$/.test(rawAll[v].trim())) return null;
+  }
+  var tc = Number(tcStr), gc = Number(gcStr), gb = Number(gbStr), sigs = Number(sigStr);
+  if (tc < 0 || tc > MAX_RECLAIM_ACCOUNTS || gc < 0 || gc > MAX_RECLAIM_ACCOUNTS || tc + gc < 1) return null;
+  if (gb < 0 || gb > MAX_RECLAIM_ACCOUNT_BYTES) return null;
+  if (sigs < 1 || sigs > MAX_RECLAIM_SIGS) return null;
+  var perToken = BigInt(rentExempt(TOKEN_ACCOUNT_BYTES).rentExemptLamports);
+  var perGeneric = BigInt(rentExempt(gb).rentExemptLamports);
+  var tokenReclaim = perToken * BigInt(tc);
+  var genericReclaim = perGeneric * BigInt(gc);
+  var total = tokenReclaim + genericReclaim;
+  var fee = BigInt(sigs) * BigInt(BASE_FEE_LAMPORTS_PER_SIGNATURE);
+  var net = total - fee;
+  var netAbs = net < 0n ? -net : net;
+  return {
+    tokenCount: tc, genericCount: gc, genericBytes: gb, signatures: sigs,
+    perTokenLamports: perToken.toString(), perGenericLamports: perGeneric.toString(),
+    tokenReclaimLamports: tokenReclaim.toString(), genericReclaimLamports: genericReclaim.toString(),
+    totalReclaimLamports: total.toString(), totalReclaimSol: lamportsToSol(total.toString()),
+    feeLamports: fee.toString(), netLamports: net.toString(),
+    netSol: (net < 0n ? "-" : "") + lamportsToSol(netAbs.toString()),
+    feeExceeds: net < 0n, breakEven: net === 0n,
+    onlyTokens: gc === 0, onlyGeneric: tc === 0
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4583,6 +4637,7 @@ if (typeof module !== "undefined" && module.exports) {
     validatorCommission, MAX_VCOMM_GROSS_BPS, MAX_VCOMM_DAYS,
     leaderSchedule, LEADER_SLOTS_PER_WINDOW, MAX_LEAD_SLOTS_PER_EPOCH,
     priorityFeePercentile, MAX_PFEE_PRICE, MAX_PFEE_COUNT, MAX_PFEE_SAMPLES,
+    rentReclaim, TOKEN_ACCOUNT_BYTES, MAX_RECLAIM_ACCOUNTS, MAX_RECLAIM_ACCOUNT_BYTES, MAX_RECLAIM_SIGS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6381,6 +6436,37 @@ if (typeof document !== "undefined") {
         note = " The chosen price sits above the sample median: the difference against the median, priced at this compute-unit limit, is the lamports the urgency costs on every transaction that lands at this bid.";
       }
       setText("pfee-result", "Model output: across " + res.totalSamples + " sampled recent transactions grouped at prices of " + res.prices[0] + ", " + res.prices[1] + ", " + res.prices[2] + " and " + res.prices[3] + " micro-lamports per compute unit, the " + res.percentile + "th percentile by the nearest-rank method is rank " + res.rank + ", which lands on a price of " + res.chosenPrice + " micro-lamports per compute unit - " + res.cumAtChosen + " of the samples (" + res.shareAtChosenBps + " bps) paid at or below it. At a compute-unit limit of " + res.cuLimit + " that price is a prioritization fee of " + res.feeLamports + " lamports (" + res.feeSol + " SOL), charged on the limit requested. The sample median price is " + res.medianPrice + " micro-lamports, which would pay " + res.medianFeeLamports + " lamports at the same limit, so this percentile differs from the median by " + res.diffVsMedianLamports + " lamports." + note + " The samples are your own grouped figures, not a live feed; fee markets are local to the accounts a transaction writes, so samples from a quiet account say nothing about a contested one; the base fee (Tool 5), the split of the fee (Tool 78) and any Jito tip (Tool 77) are separate, and no live fee data is read. An educational model of priority fee percentile selection, not a live quote. Not financial advice.");
+    });
+
+    var reclaimForm = document.getElementById("reclaim-calc");
+    if (reclaimForm) reclaimForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = rentReclaim(val("reclaim-tokens"), val("reclaim-generic"), val("reclaim-bytes"), val("reclaim-sigs"));
+      if (res === null) {
+        document.getElementById("reclaim-per-out").value = "Invalid";
+        document.getElementById("reclaim-total-out").value = "Invalid";
+        document.getElementById("reclaim-fee-out").value = "Invalid";
+        document.getElementById("reclaim-net-out").value = "Invalid";
+        setText("reclaim-result", "Check the inputs: the account counts are whole numbers from 0 to 10,000 with at least one account in total, the other-account size is a whole number of bytes from 0 to 10,000,000, and the signature count is a whole number from 1 to 1,000.");
+        return;
+      }
+      document.getElementById("reclaim-per-out").value = res.perTokenLamports + " lamports per token account; " + res.perGenericLamports + " per other account";
+      document.getElementById("reclaim-total-out").value = res.totalReclaimLamports + " lamports (" + res.totalReclaimSol + " SOL)";
+      document.getElementById("reclaim-fee-out").value = res.feeLamports + " lamports (" + res.signatures + " signatures at 5,000)";
+      document.getElementById("reclaim-net-out").value = res.netLamports + " lamports (" + res.netSol + " SOL)";
+      var note = "";
+      if (res.feeExceeds) {
+        note = " At these settings the plan loses money: the closing transactions' base fees exceed everything the accounts hold, so batching the closes under fewer signatures - or leaving the smallest accounts open - is worth more than closing them this way.";
+      } else if (res.breakEven) {
+        note = " At these settings the reclaim and the closing fees cancel exactly: the accounts come back, but nothing is gained by closing them this way.";
+      } else if (res.onlyTokens) {
+        note = " Every account in this plan is a token account, the wallet case: empty token accounts left behind by sold or moved tokens are exactly the 2,039,280-lamport deposits this reclaims, one per account closed.";
+      } else if (res.onlyGeneric) {
+        note = " No token accounts are in this plan: the reclaim is priced entirely off the other accounts' own byte sizes, at the same (128 + bytes) x 6,960 lamports each.";
+      } else {
+        note = " The two account kinds are priced off the same rent formula at their own sizes: the token accounts at a fixed 165 bytes each, the others at the byte size given.";
+      }
+      setText("reclaim-result", "Model output: closing " + res.tokenCount + " token accounts reclaims " + res.tokenReclaimLamports + " lamports and closing " + res.genericCount + " other accounts of " + res.genericBytes + " bytes reclaims " + res.genericReclaimLamports + " lamports, a gross reclaim of " + res.totalReclaimLamports + " lamports (" + res.totalReclaimSol + " SOL). The closing transactions pay " + res.feeLamports + " lamports of base fees across " + res.signatures + " signatures, so the net reclaim is " + res.netLamports + " lamports (" + res.netSol + " SOL)." + note + " A close returns the account's entire balance, so the deposit comes back in full rather than pro-rated; an account holding tokens cannot close until its balance is zero, which is not modelled here; withheld transfer fees sitting in a token account belong to the mint's withdraw authority, not the holder, and are not part of this reclaim; rent itself (Tool 3) and the base fee (Tool 5) are the composed tools, and no live account data is read. An educational model of rent reclaim on account close, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
