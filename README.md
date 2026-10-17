@@ -91,6 +91,8 @@ I build, fix and improve across Solana: Raydium, Jupiter, Orca, Anchor, Solana P
 
 76. **Farm emissions calculator** - a farm pays a reward token at a stated emission per day, split pro-rata by staked value (your share is your stake / the total staked): at 10,000 tokens a day across 2,000,000 staked, a 10,000 stake earns 50 tokens a day, 1,500 over 30 days, worth 750 at a price of 0.5 - a simple APR of 91.25%. The APR is emission x price x 365 / total staked, so your stake cancels out of it (a bigger position earns more tokens at the same APR) and a doubling of the total staked halves it to 45.625% with no rate changing; compounding daily quotes 148.7707% only under the stated reinvestment assumption. A dust share floors a day's rewards to 0 and a price of 0 makes the accrual worthless; emission schedules, lockups and live farms are not modelled.
 
+77. **Bundle tip planner** - a Jito bundle is at most 5 transactions landing sequentially and atomically in one slot, and inclusion is an auction bid with a tip (a SOL transfer to one of the 8 Jito tip accounts, minimum 1,000 lamports) on top of every transaction's base fees: at a tip of 1,000,000 lamports over 3 single-signature transactions against an expected gross profit of 2,500,000 lamports, one landed bundle costs 1,015,000 lamports and keeps 1,485,000 - a cost share of 4,060 bps - the break-even tip is 2,485,000, and 100 landed bundles cost 101,500,000 lamports (0.1015 SOL) all-in. A bundle that does not land pays nothing; the live tip floor, priority fees, landing probability and retries are not modelled.
+
 Every tool is labelled on the page for what it is: an educational model, not live quotes, not live data, not financial advice. No wallet connects and nothing executes on-chain.
 
 ## Tests
