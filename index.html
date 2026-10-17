@@ -26,6 +26,48 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>99. Vault share planner - donations, rounding and the first-depositor trap</h3>
+      <p>Every share vault on Solana - the lending and yield vaults in the ERC-4626 pattern - prices its shares off two totals: the <strong>assets</strong> it holds and the <strong>shares</strong> outstanding. A deposit mints <strong>deposit &#215; shares &#247; assets</strong>, floored at the smallest unit, and redeeming returns the same proportion floored again, so the rounding dust always stays with the existing holders. A plain transfer into the vault - a <strong>donation</strong> - raises the assets <strong>without minting a single share</strong>, lifting the price of every existing share. That is the whole first-depositor trap: hold the vault's only share, donate a fortune, and the next depositor's mint can floor to <strong>zero shares</strong> - their deposit stays in the vault, owned by the sole holder. The amounts here are <strong>raw smallest units</strong>, the integers a program actually divides, because the trap lives at that granularity. At the headline settings - a vault holding <strong>1,000 assets against 1,000 shares</strong>, a <strong>donation of 9,000</strong> and your <strong>deposit of 5,005</strong> - the donation lifts the price per share from 1 to <strong>10</strong>, your deposit mints <strong>500 shares</strong>, and redeeming them at once returns <strong>5,001</strong>: a loss of <strong>4 raw units</strong> (7 bps) that the flooring, not the donation, took - a deposit of exactly 5,000 would have lost nothing. Set the vault to 1 asset and 1 share with a 999,999 donation and a 500,000 deposit mints zero shares and loses everything. Real vaults defend themselves with locked seed deposits, virtual share offsets and deposit caps; those defences are not modelled - this tool prices the undefended rule so the trap is visible. An educational model of vault share pricing, not a live quote. Not financial advice.</p>
+      <form id="vault-calc">
+        <div class="grid">
+          <div>
+            <label for="vault-assets">Assets the vault holds now (raw smallest units)</label>
+            <input id="vault-assets" name="vault-assets" inputmode="numeric" value="1000">
+          </div>
+          <div>
+            <label for="vault-shares">Shares outstanding now (raw smallest units)</label>
+            <input id="vault-shares" name="vault-shares" inputmode="numeric" value="1000">
+          </div>
+          <div>
+            <label for="vault-donation">Donation transferred in first - assets in, no shares minted (raw units)</label>
+            <input id="vault-donation" name="vault-donation" inputmode="numeric" value="9000">
+          </div>
+          <div>
+            <label for="vault-deposit">Your deposit after the donation (raw smallest units)</label>
+            <input id="vault-deposit" name="vault-deposit" inputmode="numeric" value="5005">
+          </div>
+          <div>
+            <label for="vault-price-out">Price per share - before and after the donation (model)</label>
+            <input id="vault-price-out" name="vault-price-out" readonly>
+          </div>
+          <div>
+            <label for="vault-minted-out">Shares your deposit mints (model)</label>
+            <input id="vault-minted-out" name="vault-minted-out" readonly>
+          </div>
+          <div>
+            <label for="vault-redeem-out">What redeeming those shares at once returns (model)</label>
+            <input id="vault-redeem-out" name="vault-redeem-out" readonly>
+          </div>
+          <div>
+            <label for="vault-loss-out">Your rounding loss to the existing holders (model)</label>
+            <input id="vault-loss-out" name="vault-loss-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the vault share model</button>
+        <p id="vault-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>98. Order-book tick &amp; lot planner - the grid every resting order must fit</h3>
       <p>Tool 43 walks a central limit order book; this tool prices the <strong>grid</strong> the book is built on. Markets on OpenBook v2, Phoenix and Manifest quote prices in <strong>ticks</strong> and sizes in <strong>lots</strong>: an order can only rest at a whole number of ticks and a whole number of lots, so a named price or quantity that falls between grid points is <strong>rounded to the grid</strong> before it can trade. The rounding is conservative by side - a <strong>buy</strong> rounds its price <strong>down</strong> to the tick below (never pay more than you named), a <strong>sell</strong> rounds <strong>up</strong> (never accept less) - while the quantity rounds <strong>down to the nearest lot on both sides</strong>, and the sub-lot remainder is dust that cannot trade at all. At the headline settings - a <strong>buy at 150.37</strong> on a <strong>0.10 tick</strong>, for <strong>10.37</strong> on a <strong>0.25 lot</strong> - the order rests at <strong>150.30</strong> (tick 1,503, a 4 bps concession), trades <strong>10.25</strong> in 41 whole lots with <strong>0.12 of dust</strong>, and carries a notional of <strong>1,540.575</strong> against the <strong>1,559.3369</strong> intended - a grid cost of 18.7619 that is precision lost, not a fee charged. A quantity below one whole lot cannot be placed at all, and a buy priced below one tick has no valid price above zero. Tick and lot sizes differ per market; venue fees are not modelled. An educational model of an order-book grid, not a live quote. Not financial advice.</p>
       <form id="ticklot-calc">
@@ -4174,6 +4216,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=95"></script>
+<script src="app.js?v=96"></script>
 </body>
 </html>

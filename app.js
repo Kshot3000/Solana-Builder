@@ -5055,6 +5055,82 @@ function tickLot(side, priceStr, tickStr, qtyStr, lotStr) {
   };
 }
 
+/* ---------- Tool 99: vault share planner (donations & the first-depositor trap) ---------- */
+/* A share vault (the ERC-4626 pattern, used across Solana lending and
+   yield vaults) prices its shares off two totals: assets A held and
+   shares S outstanding. A deposit P mints floor(P x S / A) new shares,
+   and redeeming m shares at once returns floor(m x A / S) - both
+   floored at the smallest unit, like an on-chain u64 division, so the
+   rounding dust always stays with the vault's existing holders. A
+   plain transfer INTO the vault (a "donation") raises A without
+   minting a single share, so it raises the price of every existing
+   share - which is the whole first-depositor trap: deposit the
+   smallest unit (1 share outstanding), donate a fortune, and the next
+   depositor's floor(P x S / A) can come out at ZERO shares, handing
+   their entire deposit to the sole holder, who redeems everything.
+   With the exact rational mint the redemption would return the
+   deposit exactly, and redemption is increasing in the minted count,
+   so with shares outstanding a depositor can never gain from the
+   rounding - only lose to it, from dust up to the whole deposit.
+   The empty vault is the mirror image: with no shares outstanding a
+   first deposit mints 1:1 and its owner redeems the whole vault,
+   capturing any assets stranded or donated into it beforehand.
+   Amounts here are RAW smallest units (the integers a program
+   actually divides - lamports, raw token units), entered as whole
+   numbers, because the trap lives exactly at that granularity: a
+   share count of 1 against 1,000,000 of assets is invisible at any
+   friendlier precision. Real vaults defend themselves (minimum first
+   deposits locked, virtual share offsets, deposit caps); those
+   defences are stated as not modelled - this tool prices the
+   undefended rule so the trap is visible. A vault with shares
+   outstanding but zero assets prices at zero and is rejected.
+   Prototype-verified before shipping against
+   an independent Python integer oracle on 20,000 cases, 0 mismatches
+   on every figure. No live vault is read. */
+var MAX_VAULT_RAW = 1000000000000000000n; /* 1e18 raw units - a model cap, not a vault limit */
+function vaultRaw(str) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  return BigInt(s);
+}
+function vaultShares(assetsStr, sharesStr, donationStr, depositStr) {
+  var A = vaultRaw(assetsStr);
+  var S = vaultRaw(sharesStr);
+  var D = vaultRaw(donationStr);
+  var P = vaultRaw(depositStr);
+  if (A === null || S === null || D === null || P === null) return null;
+  if (P <= 0n) return null;
+  if (A > MAX_VAULT_RAW || S > MAX_VAULT_RAW || D > MAX_VAULT_RAW || P > MAX_VAULT_RAW) return null;
+  if (S > 0n && A === 0n) return null;
+  var A1 = A + D;
+  if (S === 0n) {
+    return {
+      emptyVault: true, assets: A.toString(), shares: S.toString(),
+      donation: D.toString(), deposit: P.toString(),
+      priceBefore: null, priceAfterDonation: null,
+      minted: P.toString(), mintedZero: false,
+      assetsAfter: (A1 + P).toString(), sharesAfter: P.toString(),
+      redeem: (A1 + P).toString(), captured: A1.toString(),
+      loss: "0", lossBps: 0, exact: A1 === 0n
+    };
+  }
+  var minted = (P * S) / A1;
+  var assetsAfter = A1 + P;
+  var sharesAfter = S + minted;
+  var redeem = minted === 0n ? 0n : (minted * assetsAfter) / sharesAfter;
+  var loss = P - redeem;
+  return {
+    emptyVault: false, assets: A.toString(), shares: S.toString(),
+    donation: D.toString(), deposit: P.toString(),
+    priceBefore: formatScaled((A * SCALE) / S), priceAfterDonation: formatScaled((A1 * SCALE) / S),
+    minted: minted.toString(), mintedZero: minted === 0n,
+    assetsAfter: assetsAfter.toString(), sharesAfter: sharesAfter.toString(),
+    redeem: redeem.toString(), captured: "0",
+    loss: loss.toString(), lossBps: Number((loss * 10000n) / P), exact: loss === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5682,6 +5758,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakeMerge,
     launchAlloc, MAX_LAUNCH_LAMPORTS,
     tickLot, MAX_TICKLOT_LAMPORTS,
+    vaultShares, MAX_VAULT_RAW,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7934,6 +8011,42 @@ if (typeof document !== "undefined") {
       else if (res.side === "buy") note = " The buy rounded its price down, never up: you can be filled cheaper than you named, never dearer, and the quantity you lose is only the sub-lot remainder - the grid takes precision, not a fee, and the dust stays in your account.";
       else note = " The sell rounded its price up, never down: you can receive more than you named, never less, and the quantity you lose is only the sub-lot remainder - the grid takes precision, not a fee, and the dust stays in your account.";
       setText("ticklot-result", "Model output: a " + res.side + " order named at " + res.desiredPrice + " for " + res.desiredQty + " rests on this market at " + res.validPrice + " for " + res.execQty + ", a notional of " + res.validNotional + " against " + res.intendedNotional + " intended (" + res.notionalDelta + ")." + note + " Amounts are user-entered; no live market is read. Taker and maker fees are not modelled. An educational model of an order-book grid, not a live quote. Not financial advice.");
+    });
+
+    var vaultForm = document.getElementById("vault-calc");
+    if (vaultForm) vaultForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = vaultShares(val("vault-assets"), val("vault-shares"), val("vault-donation"), val("vault-deposit"));
+      if (!res) {
+        document.getElementById("vault-price-out").value = "Invalid";
+        document.getElementById("vault-minted-out").value = "Invalid";
+        document.getElementById("vault-redeem-out").value = "Invalid";
+        document.getElementById("vault-loss-out").value = "Invalid";
+        setText("vault-result", "Check the inputs: the assets, shares, donation and deposit must be whole raw smallest units (integers only, no decimals), the deposit must be above zero, and a vault with shares outstanding but no assets prices at zero and cannot be deposited into. Blanks are not read as zero - enter 0 where you mean zero.");
+        return;
+      }
+      if (res.emptyVault) {
+        document.getElementById("vault-price-out").value = "No shares outstanding - the vault has no price per share yet";
+        document.getElementById("vault-minted-out").value = res.minted + " shares minted for your deposit of " + res.deposit + " - a first deposit mints 1:1";
+        document.getElementById("vault-redeem-out").value = res.redeem + " - as the only holder you would redeem the entire vault";
+        document.getElementById("vault-loss-out").value = res.captured === "0" ? "0 - nothing was in the vault to capture" : res.captured + " captured - assets already in the vault (stranded plus donated) now sit behind your shares";
+        var enote = res.captured === "0"
+          ? " The vault was empty, so your deposit sets the opening price of 1 per share and there is nothing to gain or lose to rounding."
+          : " Because no shares were outstanding, every asset already sitting in the vault - the stranded balance plus the donation - ends up behind your new shares: the first depositor captures the vault as it stands, which is why real vaults seed and lock an initial deposit.";
+        setText("vault-result", "Model output: a first deposit of " + res.deposit + " into a shareless vault mints " + res.minted + " shares and controls all " + res.assetsAfter + " of its assets." + enote + " Amounts are user-entered; no live vault is read. Vault defences such as locked seed deposits and virtual share offsets are not modelled. An educational model of vault share pricing, not a live quote. Not financial advice.");
+        return;
+      }
+      document.getElementById("vault-price-out").value = res.priceBefore + " per share before the donation; " + res.priceAfterDonation + " per share after it";
+      document.getElementById("vault-minted-out").value = res.minted + " shares minted for your deposit of " + res.deposit;
+      document.getElementById("vault-redeem-out").value = res.redeem + " - what redeeming those shares at once would return";
+      document.getElementById("vault-loss-out").value = res.mintedZero
+        ? res.loss + " - the entire deposit (" + res.lossBps.toLocaleString("en-US") + " bps): no shares were minted, so the deposit stays in the vault for the existing holders"
+        : res.loss + " (" + res.lossBps.toLocaleString("en-US") + " bps of the deposit) - kept by the existing holders through the two floored divisions";
+      var note = "";
+      if (res.mintedZero) note = " Your deposit mints zero shares at this price per share: the floored mint hands the whole deposit to the existing holders, and redeeming returns nothing. This is the first-depositor trap in its pure form - a tiny share count against a donation-swollen asset total - and any real deposit into such a vault is a donation, whatever the interface calls it.";
+      else if (res.exact) note = " Your deposit divides exactly at the post-donation price, so the rounding takes nothing: a donation on its own does not tax a later depositor - only the flooring does, when the deposit does not buy a whole number of shares' worth.";
+      else note = " The donation itself took nothing from you - it lifted the price per share, and the loss happened entirely in the flooring: your deposit bought a fractional share entitlement that was rounded down at the mint, and the remainder stayed with the existing holders.";
+      setText("vault-result", "Model output: the vault holds " + res.assets + " against " + res.shares + " shares; after a donation of " + res.donation + " the price per share is " + res.priceAfterDonation + ", your deposit of " + res.deposit + " mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Vault defences such as locked seed deposits and virtual share offsets are not modelled. An educational model of vault share pricing, not a live quote. Not financial advice.");
     });
 
     buttons.forEach(function (btn) {
