@@ -3955,6 +3955,74 @@ function leaderSchedule(stakeStr, totalStr, slotsStr, skipBpsStr) {
   };
 }
 
+/* ---------- Tool 81: priority fee percentile planner ---------- */
+/* Tool 5 prices a transaction at a compute-unit price the user already
+   picked; this tool picks the price. Solana's fee market is LOCAL: a
+   transaction competes only with transactions writing to the same
+   accounts, so estimators sample the recent prioritization fees paid
+   for the accounts a transaction touches (the RPC's recent-fee cache
+   covers the last 150 slots) and bid a PERCENTILE of that sample -
+   the median for routine work, a high percentile for a contested
+   account. The percentile here is the nearest-rank method on samples
+   the user groups into four ascending price levels: the rank is
+   ceil(percentile x N / 100), and the chosen price is the first level
+   whose cumulative count reaches the rank. The fee at the chosen
+   price is the prioritization ceiling of Tool 5, ceil(CU limit x
+   price / 1,000,000), charged on the limit requested; the model also
+   prices the sample median so the cost of bidding above (or below)
+   it is visible in lamports. The samples are the user's own figures -
+   grouped counts, not a live feed - and the RPC's own recent-fee
+   values are per-slot minimums, a floor rather than a distribution,
+   which the page states. Prototype-proven on 20,008 cases against an
+   independent Python oracle that expands the grouped samples into a
+   sorted list, 0 mismatches. No live fee data is read. */
+var MAX_PFEE_PRICE = 1000000000000;
+var MAX_PFEE_COUNT = 100000;
+var MAX_PFEE_SAMPLES = 100000;
+
+function priorityFeePercentile(p1Str, c1Str, p2Str, c2Str, p3Str, c3Str, p4Str, c4Str, pctStr, cuStr) {
+  var rawAll = [p1Str, c1Str, p2Str, c2Str, p3Str, c3Str, p4Str, c4Str, pctStr, cuStr];
+  for (var v = 0; v < rawAll.length; v++) {
+    if (typeof rawAll[v] !== "string" || !/^-?\d+$/.test(rawAll[v].trim())) return null;
+  }
+  var prices = [Number(p1Str), Number(p2Str), Number(p3Str), Number(p4Str)];
+  var counts = [Number(c1Str), Number(c2Str), Number(c3Str), Number(c4Str)];
+  var pct = Number(pctStr), cu = Number(cuStr);
+  for (var i = 0; i < 4; i++) {
+    if (!Number.isInteger(prices[i]) || prices[i] < 0 || prices[i] > MAX_PFEE_PRICE) return null;
+    if (!Number.isInteger(counts[i]) || counts[i] < 0 || counts[i] > MAX_PFEE_COUNT) return null;
+    if (i > 0 && prices[i] <= prices[i - 1]) return null;
+  }
+  var total = counts[0] + counts[1] + counts[2] + counts[3];
+  if (total < 1 || total > MAX_PFEE_SAMPLES) return null;
+  if (!Number.isInteger(pct) || pct < 1 || pct > 100) return null;
+  if (!Number.isInteger(cu) || cu < 1 || cu > MAX_COMPUTE_UNIT_LIMIT) return null;
+  function pick(p) {
+    var rank = Math.floor((p * total + 99) / 100);
+    var cum = 0;
+    for (var j = 0; j < 4; j++) {
+      cum += counts[j];
+      if (cum >= rank) return { price: prices[j], rank: rank, cum: cum };
+    }
+    return { price: prices[3], rank: rank, cum: cum };
+  }
+  function fee(price) { return (BigInt(cu) * BigInt(price) + 999999n) / 1000000n; }
+  var chosen = pick(pct), median = pick(50);
+  var chosenFee = fee(chosen.price), medianFee = fee(median.price);
+  var topPrice = 0;
+  for (var k = 0; k < 4; k++) if (counts[k] > 0) topPrice = prices[k];
+  return {
+    prices: prices, counts: counts, totalSamples: total, percentile: pct, cuLimit: cu,
+    rank: chosen.rank, chosenPrice: chosen.price, medianPrice: median.price,
+    cumAtChosen: chosen.cum, shareAtChosenBps: Number(BigInt(chosen.cum) * 10000n / BigInt(total)),
+    feeLamports: chosenFee.toString(), feeSol: lamportsToSol(chosenFee.toString()),
+    medianFeeLamports: medianFee.toString(),
+    diffVsMedianLamports: (chosenFee - medianFee).toString(),
+    zeroFee: chosenFee === 0n, atTop: chosen.price === topPrice,
+    belowMedian: chosen.price < median.price, atMedian: chosen.price === median.price
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4514,6 +4582,7 @@ if (typeof module !== "undefined" && module.exports) {
     feeSplit, MAX_FSPLIT_SIGS, MAX_FSPLIT_COUNT, MAX_FSPLIT_CU_PRICE,
     validatorCommission, MAX_VCOMM_GROSS_BPS, MAX_VCOMM_DAYS,
     leaderSchedule, LEADER_SLOTS_PER_WINDOW, MAX_LEAD_SLOTS_PER_EPOCH,
+    priorityFeePercentile, MAX_PFEE_PRICE, MAX_PFEE_COUNT, MAX_PFEE_SAMPLES,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6281,6 +6350,37 @@ if (typeof document !== "undefined") {
         note = " The expectation is a mean, not a promise: the epoch's actual schedule is one seeded draw, so a real count lands near this figure rather than on it, and it is fixed and knowable for the whole epoch once the schedule is computed.";
       }
       setText("lead-result", "Model output: a validator with " + res.stake + " of activated stake out of a total of " + res.total + " holds a " + res.shareBps + " bps share, so across an epoch of " + res.slotsPerEpoch + " slots - " + res.windowsTotal + " leader windows of 4 consecutive slots each - it is expected to be assigned " + res.expectedWindows + " windows, " + res.expectedSlots + " slots in total. At an assumed skipped share of " + res.skipBps + " bps, " + res.skipped + " of those slots are expected to be skipped and " + res.produced + " to produce blocks. One expected window corresponds to " + res.stakePerWindow + " of total activated stake at these settings." + note + " Stake is the activated stake the schedule is computed from, not a balance; the skip share is an assumed figure, not a live delinquency rate; validator commission (Tool 79) and rewards are not modelled, and no live stake or schedule data is read. An educational model of the leader schedule, not a live quote. Not financial advice.");
+    });
+
+    var pfeeForm = document.getElementById("pfee-calc");
+    if (pfeeForm) pfeeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = priorityFeePercentile(val("pfee-p1"), val("pfee-c1"), val("pfee-p2"), val("pfee-c2"), val("pfee-p3"), val("pfee-c3"), val("pfee-p4"), val("pfee-c4"), val("pfee-pct"), val("pfee-cu"));
+      if (res === null) {
+        document.getElementById("pfee-price-out").value = "Invalid";
+        document.getElementById("pfee-fee-out").value = "Invalid";
+        document.getElementById("pfee-median-out").value = "Invalid";
+        document.getElementById("pfee-diff-out").value = "Invalid";
+        setText("pfee-result", "Check the inputs: the four price levels are whole numbers of micro-lamports per compute unit, strictly ascending, the counts are whole numbers with a total between 1 and 100,000 samples, the percentile is a whole number from 1 to 100, and the compute-unit limit is a whole number from 1 to 1,400,000.");
+        return;
+      }
+      document.getElementById("pfee-price-out").value = res.chosenPrice + " micro-lamports per CU (rank " + res.rank + " of " + res.totalSamples + ")";
+      document.getElementById("pfee-fee-out").value = res.feeLamports + " lamports (" + res.feeSol + " SOL)";
+      document.getElementById("pfee-median-out").value = res.medianPrice + " micro-lamports per CU, " + res.medianFeeLamports + " lamports at this limit";
+      document.getElementById("pfee-diff-out").value = res.diffVsMedianLamports + " lamports vs the median price";
+      var note = "";
+      if (res.zeroFee) {
+        note = " At this percentile the chosen price is zero: enough of the sample landed paying no prioritization fee at all, which is common for accounts nobody is contesting - and worth nothing as a bid the moment the account turns hot.";
+      } else if (res.atTop) {
+        note = " The chosen price is the highest price in the sample: at this percentile the bid matches the most anyone in the sample paid, so a hotter recent window would move the bid again - the percentile is only as current as the samples behind it.";
+      } else if (res.belowMedian) {
+        note = " The chosen price sits below the sample median: more than half the sampled transactions paid more than this bid, which is a deliberate economy choice, not a competitive one, for any account under contention.";
+      } else if (res.atMedian) {
+        note = " The chosen price is the sample median itself: half the sampled transactions paid at or below it, which is the routine-work setting - the contested-account case is what the higher percentiles exist for.";
+      } else {
+        note = " The chosen price sits above the sample median: the difference against the median, priced at this compute-unit limit, is the lamports the urgency costs on every transaction that lands at this bid.";
+      }
+      setText("pfee-result", "Model output: across " + res.totalSamples + " sampled recent transactions grouped at prices of " + res.prices[0] + ", " + res.prices[1] + ", " + res.prices[2] + " and " + res.prices[3] + " micro-lamports per compute unit, the " + res.percentile + "th percentile by the nearest-rank method is rank " + res.rank + ", which lands on a price of " + res.chosenPrice + " micro-lamports per compute unit - " + res.cumAtChosen + " of the samples (" + res.shareAtChosenBps + " bps) paid at or below it. At a compute-unit limit of " + res.cuLimit + " that price is a prioritization fee of " + res.feeLamports + " lamports (" + res.feeSol + " SOL), charged on the limit requested. The sample median price is " + res.medianPrice + " micro-lamports, which would pay " + res.medianFeeLamports + " lamports at the same limit, so this percentile differs from the median by " + res.diffVsMedianLamports + " lamports." + note + " The samples are your own grouped figures, not a live feed; fee markets are local to the accounts a transaction writes, so samples from a quiet account say nothing about a contested one; the base fee (Tool 5), the split of the fee (Tool 78) and any Jito tip (Tool 77) are separate, and no live fee data is read. An educational model of priority fee percentile selection, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */

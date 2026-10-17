@@ -99,6 +99,8 @@ I build, fix and improve across Solana: Raydium, Jupiter, Orca, Anchor, Solana P
 
 80. **Leader schedule share calculator** - how much of an epoch's block production a stake expects: the leader schedule assigns an epoch's slots to validators in windows of 4 consecutive slots by a stake-weighted draw, so the expected assignment is the stake share of the epoch - 1,000,000 against a total of 500,000,000 is 20 bps, expecting 216 of the 108,000 windows in a 432,000-slot epoch (864 slots), of which 842.4 produce blocks at an assumed skipped share of 250 bps (21.6 skipped), and one expected window corresponds to 4,629.629629629 of total stake. The expectation is a mean around a seeded, fixed draw, not the schedule itself; the skip share is user-assumed and no live stake or schedule data is read.
 
+81. **Priority fee percentile planner** - which price of a recent sample a bid actually beats: the fee market is local to the accounts a transaction writes, so estimators sample recent prioritization fees for those accounts and bid a nearest-rank percentile of the sample; with 40 samples at 0, 30 at 1,000, 20 at 10,000 and 10 at 100,000 micro-lamports per compute unit, the 75th percentile is rank 75 of 100 and lands on 10,000 micro-lamports (90 samples, 9,000 bps, at or below it), paying 2,000 lamports at a 200,000 compute-unit limit against the sample median's 200 - a difference of 1,800 lamports. The RPC's own recent-fee values are per-slot minimums, a floor rather than a distribution; samples are user-supplied and no live fee data is read.
+
 Every tool is labelled on the page for what it is: an educational model, not live quotes, not live data, not financial advice. No wallet connects and nothing executes on-chain.
 
 ## Tests
