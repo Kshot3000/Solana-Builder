@@ -26,6 +26,48 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>100. Single-sided (zap) deposit planner - why the right swap is not half</h3>
+      <p>Holding only one side of a pair, a <strong>zap-in</strong> deposit first swaps part of it for the other token, then deposits the two in the pool's ratio (Tool 18 prices the two-sided deposit itself). The tempting split - swap exactly half - is wrong: <strong>the swap moves the pool's price</strong>, so the half you keep is measured against the <strong>post-swap</strong> reserves, not the ones you started from. Swap too little and token B limits the deposit, stranding A; swap too much and A limits it, stranding B; the optimum is the root of a quadratic in the swap size, solved here in exact scaled BigInt and floored by an exact sign test. At the headline settings - a pool of <strong>1,000,000 A / 4,000,000 B</strong>, your <strong>10,000 A</strong>, a <strong>25 bps</strong> fee - the optimum swaps <strong>4,993.804386958</strong>, receives <strong>19,826.517279367 B</strong>, and deposits <strong>5,006.19561304 A</strong> with <em>all</em> of that B, stranding just <strong>0.000000002 A</strong> and holding <strong>49 bps</strong> of the pool. Swapping half instead deposits 5,000 A + 19,801.73635238 B and strands <strong>49.256819176 B</strong> outside the position. Even at a zero fee the optimum is 4,987.562112089, not 5,000 - price impact alone moves it. Slippage protection and any interface zap fee are not modelled. An educational model of a single-sided deposit, not a live quote. Not financial advice.</p>
+      <form id="zap-calc">
+        <div class="grid">
+          <div>
+            <label for="zap-ra">Pool reserve of token A (the token you hold)</label>
+            <input id="zap-ra" name="zap-ra" inputmode="decimal" value="1000000">
+          </div>
+          <div>
+            <label for="zap-rb">Pool reserve of token B</label>
+            <input id="zap-rb" name="zap-rb" inputmode="decimal" value="4000000">
+          </div>
+          <div>
+            <label for="zap-dep">Your deposit - token A only</label>
+            <input id="zap-dep" name="zap-dep" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="zap-fee">Pool swap fee (basis points)</label>
+            <input id="zap-fee" name="zap-fee" inputmode="numeric" value="25">
+          </div>
+          <div>
+            <label for="zap-swap-out">Optimal swap - A in, B received (model)</label>
+            <input id="zap-swap-out" name="zap-swap-out" readonly>
+          </div>
+          <div>
+            <label for="zap-share-out">Deposit placed and pool share (model)</label>
+            <input id="zap-share-out" name="zap-share-out" readonly>
+          </div>
+          <div>
+            <label for="zap-left-out">Left over at the optimum (model)</label>
+            <input id="zap-left-out" name="zap-left-out" readonly>
+          </div>
+          <div>
+            <label for="zap-naive-out">The naive half-swap, for comparison (model)</label>
+            <input id="zap-naive-out" name="zap-naive-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the zap deposit model</button>
+        <p id="zap-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>99. Vault share planner - donations, rounding and the first-depositor trap</h3>
       <p>Every share vault on Solana - the lending and yield vaults in the ERC-4626 pattern - prices its shares off two totals: the <strong>assets</strong> it holds and the <strong>shares</strong> outstanding. A deposit mints <strong>deposit &#215; shares &#247; assets</strong>, floored at the smallest unit, and redeeming returns the same proportion floored again, so the rounding dust always stays with the existing holders. A plain transfer into the vault - a <strong>donation</strong> - raises the assets <strong>without minting a single share</strong>, lifting the price of every existing share. That is the whole first-depositor trap: hold the vault's only share, donate a fortune, and the next depositor's mint can floor to <strong>zero shares</strong> - their deposit stays in the vault, owned by the sole holder. The amounts here are <strong>raw smallest units</strong>, the integers a program actually divides, because the trap lives at that granularity. At the headline settings - a vault holding <strong>1,000 assets against 1,000 shares</strong>, a <strong>donation of 9,000</strong> and your <strong>deposit of 5,005</strong> - the donation lifts the price per share from 1 to <strong>10</strong>, your deposit mints <strong>500 shares</strong>, and redeeming them at once returns <strong>5,001</strong>: a loss of <strong>4 raw units</strong> (7 bps) that the flooring, not the donation, took - a deposit of exactly 5,000 would have lost nothing. Set the vault to 1 asset and 1 share with a 999,999 donation and a 500,000 deposit mints zero shares and loses everything. Real vaults defend themselves with locked seed deposits, virtual share offsets and deposit caps; those defences are not modelled - this tool prices the undefended rule so the trap is visible. An educational model of vault share pricing, not a live quote. Not financial advice.</p>
       <form id="vault-calc">
@@ -4216,6 +4258,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=96"></script>
+<script src="app.js?v=97"></script>
 </body>
 </html>

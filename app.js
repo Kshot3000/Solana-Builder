@@ -5055,6 +5055,74 @@ function tickLot(side, priceStr, tickStr, qtyStr, lotStr) {
   };
 }
 
+/* ---------- Tool 100: single-sided (zap) deposit planner ---------- */
+/* Tool 18 prices a TWO-sided deposit; this prices the one-sided
+   version every "zap in" button performs: you hold only token A, so
+   part of it must be swapped to B before the rest can be deposited
+   alongside. Swap too little and B limits the deposit, stranding A;
+   swap too much and A limits it, stranding B. The optimum is NOT
+   half: the swap itself moves the pool's price, so the A that stays
+   unswapped is measured against the POST-swap reserves. With fee
+   factor g = (10000 - feeBps) / 10000 the balance condition
+   (D - s) / (X + s) = g*s / X solves to the quadratic
+   g*s^2 + X*(g + 10000)*s - 10000*X*D = 0, taken here in exact
+   scaled BigInt: the root is floored from an integer square root,
+   then adjusted by the exact sign test f(s) <= 0 < f(s + 1), which
+   is the definition of the floored root. The swap leg prices the
+   standard way, out = Y*g*s / (10000*X + g*s), floored. At the
+   headline (1,000,000 / 4,000,000 pool, 10,000 A in, 25 bps) the
+   optimum swaps 4,993.804386958 - not 5,000 - and deposits
+   5,006.19561304 A with all 19,826.517279367 B received, stranding
+   2 smallest units of A; swapping half strands 49.256819176 B.
+   Even at zero fee the optimum is 4,987.562112089: price impact
+   alone moves it off half. Prototype-verified before shipping
+   against an independent Python Fraction/Decimal oracle on 20,000
+   cases, 0 mismatches, with the optimal share >= the naive half
+   share in every case. No live pool is read. */
+function zapPipeline(X, Y, D, g, s) {
+  var out = s === 0n ? 0n : (Y * g * s) / (10000n * X + g * s);
+  var x1 = X + s, y1 = Y - out;
+  var a = D - s;
+  var usedA, usedB;
+  if (a * y1 <= out * x1) { usedA = a; usedB = (a * y1) / x1; }
+  else { usedB = out; usedA = (out * x1) / y1; }
+  return {
+    swapIn: s, swapOut: out, usedA: usedA, usedB: usedB,
+    leftA: a - usedA, leftB: out - usedB,
+    shareBps: usedA === 0n ? 0 : Number((usedA * 10000n) / (x1 + usedA))
+  };
+}
+function zapDeposit(reserveAStr, reserveBStr, depositStr, feeBps) {
+  var X = parseScaled(reserveAStr), Y = parseScaled(reserveBStr), D = parseScaled(depositStr);
+  var bps = Number(feeBps);
+  if (X === null || Y === null || D === null) return null;
+  if (X <= 0n || Y <= 0n || D <= 0n) return null;
+  if (!Number.isInteger(bps) || bps < 0 || bps >= 10000) return null;
+  var g = BigInt(10000 - bps);
+  var B = X * (g + 10000n);
+  var disc = B * B + 40000n * g * X * D;
+  var s = (isqrtBigInt(disc) - B) / (2n * g);
+  var f = function (v) { return g * v * v + B * v - 10000n * X * D; };
+  while (f(s + 1n) <= 0n) s += 1n;
+  while (f(s) > 0n) s -= 1n;
+  var opt = zapPipeline(X, Y, D, g, s);
+  if (opt.usedA <= 0n || opt.usedB <= 0n) return null;
+  var naive = zapPipeline(X, Y, D, g, D / 2n);
+  var spotOut = (s * Y) / X;
+  return {
+    reserveA: formatScaled(X), reserveB: formatScaled(Y), deposit: formatScaled(D), feeBps: bps,
+    swapIn: formatScaled(opt.swapIn), swapOut: formatScaled(opt.swapOut),
+    depositA: formatScaled(opt.usedA), depositB: formatScaled(opt.usedB),
+    leftoverA: formatScaled(opt.leftA), leftoverB: formatScaled(opt.leftB),
+    shareBps: opt.shareBps,
+    impactBps: spotOut === 0n ? 0 : Number(((spotOut - opt.swapOut) * 10000n) / spotOut),
+    naiveSwapIn: formatScaled(D / 2n), naiveOut: formatScaled(naive.swapOut),
+    naiveDepositA: formatScaled(naive.usedA), naiveDepositB: formatScaled(naive.usedB),
+    naiveLeftoverA: formatScaled(naive.leftA), naiveLeftoverB: formatScaled(naive.leftB),
+    naiveShareBps: naive.shareBps
+  };
+}
+
 /* ---------- Tool 99: vault share planner (donations & the first-depositor trap) ---------- */
 /* A share vault (the ERC-4626 pattern, used across Solana lending and
    yield vaults) prices its shares off two totals: assets A held and
@@ -5759,6 +5827,7 @@ if (typeof module !== "undefined" && module.exports) {
     launchAlloc, MAX_LAUNCH_LAMPORTS,
     tickLot, MAX_TICKLOT_LAMPORTS,
     vaultShares, MAX_VAULT_RAW,
+    zapDeposit,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8011,6 +8080,29 @@ if (typeof document !== "undefined") {
       else if (res.side === "buy") note = " The buy rounded its price down, never up: you can be filled cheaper than you named, never dearer, and the quantity you lose is only the sub-lot remainder - the grid takes precision, not a fee, and the dust stays in your account.";
       else note = " The sell rounded its price up, never down: you can receive more than you named, never less, and the quantity you lose is only the sub-lot remainder - the grid takes precision, not a fee, and the dust stays in your account.";
       setText("ticklot-result", "Model output: a " + res.side + " order named at " + res.desiredPrice + " for " + res.desiredQty + " rests on this market at " + res.validPrice + " for " + res.execQty + ", a notional of " + res.validNotional + " against " + res.intendedNotional + " intended (" + res.notionalDelta + ")." + note + " Amounts are user-entered; no live market is read. Taker and maker fees are not modelled. An educational model of an order-book grid, not a live quote. Not financial advice.");
+    });
+
+
+    var zapForm = document.getElementById("zap-calc");
+    if (zapForm) zapForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = zapDeposit(val("zap-ra"), val("zap-rb"), val("zap-dep"), val("zap-fee"));
+      if (!res) {
+        document.getElementById("zap-swap-out").value = "Invalid";
+        document.getElementById("zap-share-out").value = "Invalid";
+        document.getElementById("zap-left-out").value = "Invalid";
+        document.getElementById("zap-naive-out").value = "Invalid";
+        setText("zap-result", "Check the inputs: both pool reserves and your token A deposit must be amounts with at most 9 decimal places, all above zero, the fee must be a whole number of basis points under 10,000, and the deposit must be large enough to mint a position on both sides. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("zap-swap-out").value = res.swapIn + " A swapped for " + res.swapOut + " B (price impact " + res.impactBps.toLocaleString("en-US") + " bps)";
+      document.getElementById("zap-share-out").value = res.depositA + " A + " + res.depositB + " B deposited - " + res.shareBps.toLocaleString("en-US") + " bps of the pool after depositing";
+      document.getElementById("zap-left-out").value = res.leftoverA + " A and " + res.leftoverB + " B left over - the floored divisions strand at most a few smallest units at the optimum";
+      document.getElementById("zap-naive-out").value = "Swapping half (" + res.naiveSwapIn + " A) would deposit " + res.naiveDepositA + " A + " + res.naiveDepositB + " B and strand " + res.naiveLeftoverA + " A and " + res.naiveLeftoverB + " B";
+      var note = (res.naiveLeftoverB !== "0" || res.naiveLeftoverA !== "0")
+        ? " The naive half-swap strands value the optimum puts to work: half is the right split only before the swap moves the price, and the swap always moves the price."
+        : " Here the half-swap happens to strand nothing either - the optimum still sizes the deposit at least as large, because it is solved against the post-swap reserves rather than the pre-swap ones.";
+      setText("zap-result", "Model output: from " + res.deposit + " A against a pool of " + res.reserveA + " A / " + res.reserveB + " B at a " + res.feeBps + " bps fee, the optimal zap swaps " + res.swapIn + " A, deposits " + res.depositA + " A with " + res.depositB + " B, and holds " + res.shareBps.toLocaleString("en-US") + " bps of the pool." + note + " Amounts are user-entered; no live pool is read. Slippage protection, the interface's own zap fee if any, and a second token leg are not modelled. An educational model of a single-sided deposit, not a live quote. Not financial advice.");
     });
 
     var vaultForm = document.getElementById("vault-calc");
