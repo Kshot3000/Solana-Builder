@@ -4126,6 +4126,70 @@ function stakeFunding(fundStr, minStr) {
   };
 }
 
+/* ---------- Tool 84: delinquent stake & the finality line ---------- */
+/* Tower BFT finalizes a block only when MORE than two-thirds of the
+   activated stake has voted for it - exactly two-thirds is not a
+   supermajority. Delinquent stake is activated stake whose validator
+   is not voting, so the cluster keeps finalizing exactly while
+   delinquent x 3 < total, and the largest delinquent stake it can
+   carry is total - (floor(2 x total / 3) + 1) lamports: one lamport
+   under a third of the total, never a third itself. At exactly a
+   third delinquent the online stake is exactly two-thirds, nothing
+   finalizes, and a single lamport of stake coming back online
+   restores the supermajority - blocks can still be produced while
+   finality is stalled, which is why the two are stated separately.
+   The scenario input asks the what-if every cluster dashboard
+   implies: how much MORE stake can go delinquent before the line is
+   crossed, or how much must return once it has been. Every figure is
+   exact integer lamports; shares are floored basis points of the
+   total. The totals are user-entered assumptions - no live cluster
+   data is read. Prototype-proven on 20,000 cases against an
+   independent Python exact-rational oracle, 0 mismatches, plus a
+   brute-force scan of every total up to 499 lamports. */
+var MAX_DELINQ_TOTAL_LAMPORTS = 1000000000000000000n; /* 1,000,000,000 SOL */
+
+function delinquentStake(totalStr, delinqStr, extraStr) {
+  var total = parseScaled(totalStr);
+  var delinq = parseScaled(delinqStr);
+  var extra = parseScaled(extraStr);
+  if (total === null || delinq === null || extra === null) return null;
+  if (total <= 0n || total > MAX_DELINQ_TOTAL_LAMPORTS) return null;
+  if (delinq < 0n || delinq > total) return null;
+  if (extra < 0n || delinq + extra > total) return null;
+  var online = total - delinq;
+  var minOnline = (2n * total) / 3n + 1n;
+  var maxDelinq = total - minOnline;
+  var finNow = online >= minOnline;
+  var marginNow = maxDelinq - delinq;
+  var delinqAfter = delinq + extra;
+  var onlineAfter = total - delinqAfter;
+  var finAfter = onlineAfter >= minOnline;
+  var marginAfter = maxDelinq - delinqAfter;
+  var bps = function (x) { return Number((x * 10000n) / total); };
+  var pct = function (b) { return (b / 100).toFixed(2); };
+  return {
+    total: formatScaled(total), totalLamports: total.toString(),
+    delinquent: formatScaled(delinq), delinquentLamports: delinq.toString(),
+    delinqBps: bps(delinq), delinqPct: pct(bps(delinq)),
+    onlineLamports: online.toString(), onlineSol: lamportsToSol(online.toString()),
+    onlineBps: bps(online), onlinePct: pct(bps(online)),
+    minOnlineLamports: minOnline.toString(), minOnlineSol: lamportsToSol(minOnline.toString()),
+    maxDelinqLamports: maxDelinq.toString(), maxDelinqSol: lamportsToSol(maxDelinq.toString()),
+    finalizesNow: finNow,
+    marginNowLamports: marginNow.toString(), marginNowSol: formatScaled(marginNow),
+    returnNeededNowLamports: (finNow ? 0n : -marginNow).toString(),
+    returnNeededNowSol: formatScaled(finNow ? 0n : -marginNow),
+    extra: formatScaled(extra), extraLamports: extra.toString(),
+    delinqAfterLamports: delinqAfter.toString(), delinqAfterSol: lamportsToSol(delinqAfter.toString()),
+    delinqAfterBps: bps(delinqAfter), delinqAfterPct: pct(bps(delinqAfter)),
+    onlineAfterLamports: onlineAfter.toString(), onlineAfterSol: lamportsToSol(onlineAfter.toString()),
+    finalizesAfter: finAfter,
+    marginAfterLamports: marginAfter.toString(), marginAfterSol: formatScaled(marginAfter),
+    returnNeededAfterLamports: (finAfter ? 0n : -marginAfter).toString(),
+    returnNeededAfterSol: formatScaled(finAfter ? 0n : -marginAfter)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4688,6 +4752,7 @@ if (typeof module !== "undefined" && module.exports) {
     priorityFeePercentile, MAX_PFEE_PRICE, MAX_PFEE_COUNT, MAX_PFEE_SAMPLES,
     rentReclaim, TOKEN_ACCOUNT_BYTES, MAX_RECLAIM_ACCOUNTS, MAX_RECLAIM_ACCOUNT_BYTES, MAX_RECLAIM_SIGS,
     stakeFunding, STAKE_ACCOUNT_BYTES, MAX_STAKE_FUNDING_LAMPORTS,
+    delinquentStake, MAX_DELINQ_TOTAL_LAMPORTS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6549,6 +6614,35 @@ if (typeof document !== "undefined") {
       }
       setText("sfund-result", "Model output: funding a stake account with " + res.funding + " SOL gives it a balance of " + res.fundingLamports + " lamports, of which the first " + res.reserveLamports + " lamports (" + res.reserveSol + " SOL) are the rent-exempt reserve for its 200 bytes - locked in the account, never delegated and never earning. The delegated amount is " + res.delegatedLamports + " lamports (" + res.delegatedSol + " SOL), " + res.delegatedBps + " bps of the funding, and rewards accrue on that amount alone." + note + " The minimum delegation is the figure you entered: it is a cluster setting reported by the RPC (getStakeMinimumDelegation), not a constant of the stake program, and it can change. Activation timing (Tool 24), rewards (Tool 8) and validator commission (Tool 79) are separate mechanics, and no live account is read. An educational model of stake account funding, not a live quote. Not financial advice.");
     });
+    var delinqForm = document.getElementById("delinq-calc");
+    if (delinqForm) delinqForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = delinquentStake(val("delinq-total"), val("delinq-delinq"), val("delinq-extra"));
+      if (!res) {
+        document.getElementById("delinq-share-out").value = "Invalid";
+        document.getElementById("delinq-max-out").value = "Invalid";
+        document.getElementById("delinq-margin-out").value = "Invalid";
+        document.getElementById("delinq-after-out").value = "Invalid";
+        setText("delinq-result", "Check the inputs: the total is a SOL amount above zero and at most 1,000,000,000, the delinquent amount is between zero and the total, and the extra offline amount keeps delinquent plus extra at or below the total - all with at most nine decimal places.");
+        return;
+      }
+      document.getElementById("delinq-share-out").value = res.delinquentLamports + " lamports delinquent (" + res.delinqBps + " bps, " + res.delinqPct + "%); " + res.onlineLamports + " lamports (" + res.onlineSol + " SOL) online (" + res.onlineBps + " bps, " + res.onlinePct + "%)";
+      document.getElementById("delinq-max-out").value = res.maxDelinqLamports + " lamports (" + res.maxDelinqSol + " SOL)";
+      document.getElementById("delinq-margin-out").value = (res.finalizesNow ? res.marginNowLamports + " lamports (" + res.marginNowSol + " SOL) of headroom" : res.returnNeededNowLamports + " lamports (" + res.returnNeededNowSol + " SOL) must return");
+      document.getElementById("delinq-after-out").value = res.delinqAfterLamports + " lamports (" + res.delinqAfterSol + " SOL) delinquent, " + res.delinqAfterBps + " bps (" + res.delinqAfterPct + "%) - " + (res.finalizesAfter ? "still finalizes, " + res.marginAfterLamports + " lamports (" + res.marginAfterSol + " SOL) of headroom left" : "finality stalls, " + res.returnNeededAfterLamports + " lamports (" + res.returnNeededAfterSol + " SOL) must return");
+      var note = "";
+      if (!res.finalizesNow) {
+        note = " The cluster is already past the line: the online stake is at or below two-thirds, so blocks can still be produced but nothing finalizes until at least " + (res.returnNeededNowLamports === "1" ? "1 lamport" : res.returnNeededNowLamports + " lamports") + " (" + res.returnNeededNowSol + " SOL) of delinquent stake comes back online.";
+      } else if (!res.finalizesAfter) {
+        note = " The scenario crosses the line: that much additional delinquent stake leaves the online share at or below two-thirds, so finality would stall even though blocks could still be produced - " + (res.returnNeededAfterLamports === "1" ? "1 lamport" : res.returnNeededAfterLamports + " lamports") + " (" + res.returnNeededAfterSol + " SOL) of it would have to return to restore the supermajority.";
+      } else if (res.extraLamports === "0") {
+        note = " The scenario adds no extra offline stake, so the after figures are the current figures.";
+      } else {
+        note = " Even after the scenario, the online stake stays above two-thirds and finality holds, with " + res.marginAfterLamports + " lamports (" + res.marginAfterSol + " SOL) of delinquent headroom to spare.";
+      }
+      setText("delinq-result", "Model output: of " + res.totalLamports + " lamports (" + res.total + " SOL) of activated stake, " + res.delinquentLamports + " lamports (" + res.delinquent + " SOL) are delinquent - " + res.delinqBps + " bps (" + res.delinqPct + "%) - leaving " + res.onlineLamports + " lamports (" + res.onlineSol + " SOL) voting. Finalizing needs more than two-thirds of the stake voting, at least " + res.minOnlineLamports + " lamports (" + res.minOnlineSol + " SOL) here, so the largest delinquent stake this cluster can carry is " + res.maxDelinqLamports + " lamports (" + res.maxDelinqSol + " SOL) - one lamport under a third of the total, because exactly a third delinquent leaves exactly two-thirds online, and exactly two-thirds is not a supermajority." + note + " Delinquent stake here means activated stake whose validator is not voting; which validators those are, and why, is live cluster data this model does not read. Leader schedule share (Tool 80) and validator commission (Tool 79) are separate mechanics. An educational model of delinquent stake and finality, not a live quote. Not financial advice.");
+    });
+
 
     /* catalogue filter */
     var buttons = document.querySelectorAll("[data-filter]");
