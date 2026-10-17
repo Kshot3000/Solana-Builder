@@ -1515,8 +1515,6 @@ check("guide teaches rent reclaim (Tool 82)", guide.includes("Tool 82") && guide
 check("reclaim tool labelled model / scope stated in index.html", html.includes("An educational model of rent reclaim on account close, not a live quote") && html.includes("deposit, not a fee") && html.includes("cannot close until its balance is zero"));
 check("README documents Tool 82", readme.includes("Rent reclaim planner") && readme.includes("23,311,000"));
 
-console.log(failures === 0 ? "ALL TESTS PASS" : failures + " FAILURES");
-process.exit(failures === 0 ? 0 : 1);
 
 /* Tool 83: stake account funding */
 const sf1 = app.stakeFunding("10", "1");
@@ -1552,3 +1550,6 @@ check("delinq: rejects blanks and junk, a zero or over-cap total, delinquent abo
 check("guide teaches delinquent stake (Tool 84)", guide.includes("Tool 84") && guide.includes("108,333,333.333333333") && guide.includes("eighty-three mechanics"));
 check("delinq tool labelled model / scope stated in index.html", html.includes("An educational model of delinquent stake and finality, not a live quote") && html.includes("more than two-thirds") && html.includes("one lamport under a third"));
 check("README documents Tool 84", readme.includes("Delinquent stake planner") && readme.includes("133,333,333.333333333"));
+
+console.log(failures === 0 ? "ALL TESTS PASS" : failures + " FAILURES");
+process.exit(failures === 0 ? 0 : 1);
