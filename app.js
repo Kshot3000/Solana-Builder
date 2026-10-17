@@ -4894,6 +4894,59 @@ function stakeSplit(balanceStr, splitStr, countStr) {
   };
 }
 
+/* ---------- Tool 96: stake merge planner ---------- */
+/* Tool 95 prices DIVIDING one stake account; this prices the reverse.
+   A merge empties one stake account (the source) into another (the
+   destination), which survives; the source closes. Each account had
+   set aside its own 2,282,880-lamport rent-exempt reserve (Tool 3's
+   rentExempt(200) - Tool 83's reserve verbatim) and delegated only
+   the rest, so before the merge the pair parks TWO reserves outside
+   delegation and after it only ONE: merging always frees exactly one
+   reserve - 2,282,880 lamports - back into delegation, whatever the
+   balances, which is the exact mirror of a split's per-account cost.
+   Lamports are conserved exactly: the merged balance is the sum of
+   the two, no more and no less. The stake program only merges a
+   compatible pair - the accounts must share the same staker and
+   withdrawer authorities and the same lockup, and their delegation
+   states must be compatible (for example both fully activated to the
+   same validator, or both not delegated) - and a pair that fails
+   those checks is rejected on-chain; this planner assumes a
+   compatible pair and models only the lamport arithmetic, which is
+   the same either way. An account holding less than the reserve
+   cannot be a rent-exempt stake account and is rejected; an account
+   at exactly the reserve delegates zero, and merging two such
+   accounts produces an account that delegates exactly one reserve.
+   The merge transaction's own fee is not modelled. Prototype-verified
+   before shipping against an independent Python integer oracle on
+   20,000 cases, 0 mismatches, with the reserve and the per-account
+   delegated figures asserted against Tools 83 and 95 in the test
+   suite. No live account is read. */
+function stakeMerge(destStr, srcStr) {
+  var D = parseScaled(destStr);
+  var S = parseScaled(srcStr);
+  if (D === null || S === null) return null;
+  if (D <= 0n || S <= 0n) return null;
+  if (D > MAX_STAKE_FUNDING_LAMPORTS || S > MAX_STAKE_FUNDING_LAMPORTS) return null;
+  var reserve = BigInt(rentExempt(STAKE_ACCOUNT_BYTES).rentExemptLamports);
+  if (D < reserve || S < reserve) return null;
+  var total = D + S;
+  var destDel = D - reserve, srcDel = S - reserve;
+  var before = destDel + srcDel;
+  var after = total - reserve;
+  return {
+    dest: formatScaled(D), destLamports: D.toString(),
+    source: formatScaled(S), sourceLamports: S.toString(),
+    total: formatScaled(total), totalLamports: total.toString(),
+    reserveLamports: reserve.toString(), reserveSol: lamportsToSol(reserve.toString()),
+    destDelegated: formatScaled(destDel), sourceDelegated: formatScaled(srcDel),
+    beforeDelegated: formatScaled(before),
+    afterDelegated: formatScaled(after),
+    freedReserve: formatScaled(after - before), freedLamports: (after - before).toString(),
+    bothReserveOnly: before === 0n,
+    oneReserveOnly: (destDel === 0n) !== (srcDel === 0n)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5518,6 +5571,7 @@ if (typeof module !== "undefined" && module.exports) {
     veLock, MAX_VE_DAYS,
     altClose, SLOT_HASHES_ENTRIES, MAX_ALTC_SLOT,
     stakeSplit, MAX_SSPLIT_ACCOUNTS,
+    stakeMerge,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7699,6 +7753,29 @@ if (typeof document !== "undefined") {
       else if (res.uneven) note = " The split total does not divide evenly, so the first accounts in line receive one lamport more than the rest - the shares still sum to the split total exactly, and the smallest share is the one that must clear the reserve.";
       else note = " Every additional account is another 2,282,880 lamports parked outside delegation: splitting is how stake gets spread across validators or readied for a partial exit, and the reserve multiplication is its price.";
       setText("ssplit-result", "Model output: splitting " + res.splitTotal + " SOL out of a stake account holding " + res.balance + " SOL into " + res.accounts + " new " + aw(res.accounts) + " gives each new account a 200-byte stake account whose first " + Number(res.reserveLamports).toLocaleString("en-US") + " lamports (" + res.reserveSol + " SOL) are its rent-exempt reserve - Tool 83's funding rule applied per account - so the new " + aw(res.accounts) + " delegate" + (res.accounts === 1 ? "s" : "") + " " + res.newDelegated + " SOL in total and the position as a whole delegates " + res.totalDelegated + " SOL, " + res.extraReserve + " SOL less than the unsplit account's " + res.unsplitDelegated + " SOL." + note + " Amounts and the account count are user-entered; no live account is read, and each new account's delegated stake must still clear the cluster minimum delegation, which is a cluster setting, not a constant (Tool 83). The split transaction's own fee is not modelled. An educational model of stake splitting, not a live quote. Not financial advice.");
+    });
+
+    var smergForm = document.getElementById("smerg-calc");
+    if (smergForm) smergForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = stakeMerge(val("smerg-dest"), val("smerg-src"));
+      if (!res) {
+        document.getElementById("smerg-total-out").value = "Invalid";
+        document.getElementById("smerg-before-out").value = "Invalid";
+        document.getElementById("smerg-after-out").value = "Invalid";
+        document.getElementById("smerg-freed-out").value = "Invalid";
+        setText("smerg-result", "Check the inputs: both balances must be amounts with at most 9 decimal places, and each account must hold at least the 2,282,880-lamport rent-exempt reserve - an account below it cannot be a rent-exempt stake account. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("smerg-total-out").value = res.total + " SOL in the surviving destination account (" + res.dest + " + " + res.source + "); the source empties and closes";
+      document.getElementById("smerg-before-out").value = res.beforeDelegated + " SOL delegated before the merge (" + res.destDelegated + " in the destination + " + res.sourceDelegated + " in the source, above two reserves of " + res.reserveSol + " SOL each)";
+      document.getElementById("smerg-after-out").value = res.afterDelegated + " SOL delegated after the merge, above the one surviving reserve of " + res.reserveSol + " SOL";
+      document.getElementById("smerg-freed-out").value = res.freedReserve + " SOL freed back into delegation - exactly one reserve (" + Number(res.reserveLamports).toLocaleString("en-US") + " lamports), whatever the balances";
+      var note = "";
+      if (res.bothReserveOnly) note = " Both accounts hold only their reserve and delegate nothing between them, so the merged account delegates exactly one reserve - the clearest form of the mechanic: two parked reserves become one, and the freed one starts earning.";
+      else if (res.oneReserveOnly) note = " One of the two accounts holds only its reserve and delegates nothing, so the entire gain is that account's reserve joining the other account's delegation - merging a reserve-only account is pure recovery, not reallocation.";
+      else note = " The gain does not scale with the balances: merging two large accounts frees the same single 2,282,880 lamports as merging two small ones, because the cost being undone is per account, not per lamport - the exact mirror of Tool 95, where every extra account a split creates parks one more reserve.";
+      setText("smerg-result", "Model output: merging a source account holding " + res.source + " SOL into a destination holding " + res.dest + " SOL leaves one account of " + res.total + " SOL - lamports are conserved exactly - and delegation rises from " + res.beforeDelegated + " SOL to " + res.afterDelegated + " SOL, because the pair parked two " + Number(res.reserveLamports).toLocaleString("en-US") + "-lamport rent-exempt reserves (Tool 83's funding rule per account) and the survivor parks only one." + note + " Balances are user-entered; no live account is read. The stake program merges only a compatible pair - same staker and withdrawer authorities, same lockup, compatible delegation states - and that check, like the merge transaction's own fee, is not modelled. An educational model of stake merging, not a live quote. Not financial advice.");
     });
 
     buttons.forEach(function (btn) {

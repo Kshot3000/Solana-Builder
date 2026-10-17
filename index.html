@@ -26,6 +26,40 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>96. Stake merge planner - merging two accounts frees exactly one reserve</h3>
+      <p>Tool 95 prices dividing one stake account; this prices the <strong>reverse</strong>. A merge empties one stake account (the source) into another (the destination), which survives; the source closes. Each account had set aside its own <strong>2,282,880-lamport rent-exempt reserve</strong> (Tool 83) and delegated only the rest, so before the merge the pair parks <strong>two</strong> reserves outside delegation and after it only <strong>one</strong>: <strong>merging always frees exactly one reserve - 0.00228288 SOL - back into delegation, whatever the balances</strong>. At the headline settings - a destination holding <strong>60 SOL</strong> and a source holding <strong>40 SOL</strong> - the merged account holds <strong>100 SOL</strong> (lamports are conserved exactly) and delegation rises from <strong>99.99543424 SOL</strong> to <strong>99.99771712 SOL</strong>. The gain never scales: merging two large accounts frees the same single reserve as merging two small ones, because the cost being undone is per account, not per lamport. Two accounts holding only their reserves delegate nothing between them, yet their merge delegates exactly one reserve. The stake program merges only a compatible pair - same staker and withdrawer authorities, same lockup, compatible delegation states - and that check, like the merge transaction's own fee, is not modelled. An educational model of stake merging, not a live quote. Not financial advice.</p>
+      <form id="smerg-calc">
+        <div class="grid">
+          <div>
+            <label for="smerg-dest">Balance of the destination stake account - the one that survives (SOL)</label>
+            <input id="smerg-dest" name="smerg-dest" inputmode="decimal" value="60">
+          </div>
+          <div>
+            <label for="smerg-src">Balance of the source stake account - the one emptied and closed (SOL)</label>
+            <input id="smerg-src" name="smerg-src" inputmode="decimal" value="40">
+          </div>
+          <div>
+            <label for="smerg-total-out">Combined balance after the merge (model)</label>
+            <input id="smerg-total-out" name="smerg-total-out" readonly>
+          </div>
+          <div>
+            <label for="smerg-before-out">Delegated before the merge (model)</label>
+            <input id="smerg-before-out" name="smerg-before-out" readonly>
+          </div>
+          <div>
+            <label for="smerg-after-out">Delegated after the merge (model)</label>
+            <input id="smerg-after-out" name="smerg-after-out" readonly>
+          </div>
+          <div>
+            <label for="smerg-freed-out">Reserve freed back into delegation (model)</label>
+            <input id="smerg-freed-out" name="smerg-freed-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the stake-merge model</button>
+        <p id="smerg-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>95. Stake split planner - every new account pays its own reserve</h3>
       <p>Tool 83 prices funding one stake account; this prices <strong>dividing</strong> one. A split moves lamports out of an existing stake account into <strong>new 200-byte stake accounts</strong> - to spread stake across validators, or to free part of a position while the rest stays delegated. Every new account is a stake account like any other, so each first sets aside the same <strong>2,282,880-lamport rent-exempt reserve</strong> and only the rest of its share is delegated: <strong>splitting multiplies the reserve cost, it never shares it</strong>. At the headline settings - an account holding <strong>100 SOL</strong>, <strong>30 SOL</strong> split into <strong>3 accounts</strong> - each account receives 10 SOL and delegates <strong>9.99771712 SOL</strong>, the new accounts delegate <strong>29.99315136 SOL</strong> in total, the source keeps <strong>69.99771712 SOL</strong> delegated, and the whole position delegates <strong>99.99086848 SOL</strong> against 99.99771712 SOL unsplit: the split parks <strong>0.00684864 SOL of extra reserves</strong> (3 &#215; 0.00228288 SOL) outside delegation. A full drain is cheaper by one reserve, because the source closes and its reserve travels with its lamports. The split transaction's own fee is not modelled, and each new account's delegated stake must still clear the cluster minimum delegation (Tool 83). An educational model of stake splitting, not a live quote. Not financial advice.</p>
       <form id="ssplit-calc">
@@ -4049,6 +4083,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=92"></script>
+<script src="app.js?v=93"></script>
 </body>
 </html>
