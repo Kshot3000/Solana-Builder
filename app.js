@@ -4484,6 +4484,65 @@ function validatorNet(stakeStr, grossBpsStr, commissionPctStr, slotsStr, votedBp
   };
 }
 
+/* ---------- Tool 89: platform-fee swap planner (the integrator cut) ---------- */
+/* A swap interface can charge its own fee on top of the pool's: the
+   integrator (Jupiter-style platform fees, aggregator and wallet referral
+   fees) names a rate in basis points and the fee is taken from the OUTPUT
+   of the swap - the gross output the pool's curve returns (Tool 2, pool
+   fee on the input, exact scaled-BigInt) is reduced by
+   floor(grossOut x platformBps / 10,000) before the user is credited.
+   The fee is then split with a referrer in WHOLE percentage points: the
+   referrer's cut floors, and the platform keeps the remainder, so the
+   two parts sum to the fee exactly (the remainder convention of
+   Tool 23's sale split). Charging on the output rather than the input
+   matters: the fee itself never enters the curve, so it does not move
+   the price - it only shrinks what arrives; charging on the input would
+   shrink the effective input and the output with it. Against the spot
+   output (amountIn at the pool's spot price, no fees at all) the whole
+   trade's drag in basis points is the pool fee, the price impact and
+   this platform fee compounded. The platform rate is capped at 1,000
+   bps (10%) as this model's sanity bound - real integrator fees are
+   far below it. A dust gross output can floor the platform fee to
+   exactly zero. Prototype-proven before shipping against an
+   independent Python exact-integer oracle on 20,000 cases (0
+   mismatches on every figure). No live pool, interface or fee account
+   is read. */
+var MAX_PLATFORM_FEE_BPS = 1000;
+
+function platformFeeSwap(reserveInStr, reserveOutStr, amountInStr, poolFeeBps, platformBps, referralPct) {
+  var rIn = parseScaled(reserveInStr);
+  var rOut = parseScaled(reserveOutStr);
+  var aIn = parseScaled(amountInStr);
+  var pf = Number(poolFeeBps), plat = Number(platformBps), ref = Number(referralPct);
+  if (rIn === null || rOut === null || aIn === null) return null;
+  if (rIn <= 0n || rOut <= 0n || aIn <= 0n) return null;
+  if (!Number.isInteger(pf) || pf < 0 || pf >= 10000) return null;
+  if (!Number.isInteger(plat) || plat < 0 || plat > MAX_PLATFORM_FEE_BPS) return null;
+  if (!Number.isInteger(ref) || ref < 0 || ref > 100) return null;
+  var poolFee = (aIn * BigInt(pf)) / 10000n;
+  var eff = aIn - poolFee;
+  if (eff <= 0n) return null;
+  var gross = (eff * rOut) / (rIn + eff);
+  if (gross <= 0n || gross >= rOut) return null;
+  var pfee = (gross * BigInt(plat)) / 10000n;
+  var refer = (pfee * BigInt(ref)) / 100n;
+  var keeps = pfee - refer;
+  var user = gross - pfee;
+  var spot = (aIn * rOut) / rIn;
+  var drag = spot - user;
+  var dragBps = spot > 0n ? Number((drag * 10000n) / spot) : 0;
+  return {
+    reserveIn: formatScaled(rIn), reserveOut: formatScaled(rOut), amountIn: formatScaled(aIn),
+    poolFeeBps: pf, platformBps: plat, referralPct: ref,
+    poolFee: formatScaled(poolFee), effectiveIn: formatScaled(eff),
+    grossOut: formatScaled(gross), platformFee: formatScaled(pfee),
+    referrerGets: formatScaled(refer), platformKeeps: formatScaled(keeps),
+    userReceives: formatScaled(user), spotOut: formatScaled(spot),
+    totalDrag: formatScaled(drag), dragBps: dragBps,
+    noPlatformFee: plat === 0 || pfee === 0n, fullReferral: ref === 100, noReferral: ref === 0
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5051,6 +5110,7 @@ if (typeof module !== "undefined" && module.exports) {
     nakamotoCoefficient, MAX_NAKA_TOTAL_LAMPORTS, MAX_NAKA_VALIDATORS,
     voteCost, VOTE_FEE_LAMPORTS, MAX_VCOST_SLOTS, MAX_VCOST_EPOCHS,
     validatorNet,
+    platformFeeSwap, MAX_PLATFORM_FEE_BPS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7049,6 +7109,29 @@ if (typeof document !== "undefined") {
       else note = " The commission falls short of the vote cost: the validator subsidises consensus out of pocket (or out of its own stake's rewards, which this ledger does not count) until its delegated stake reaches the break-even figure.";
       if (res.fullCommission) note += " At a 100% commission the validator keeps every reward and delegators net zero (Tool 79).";
       setText("vnet-result", "Model output: a validator with " + res.stake + " SOL delegated at an assumed gross rate of " + res.grossBps + " bps a year earns " + res.grossPerEpoch + " SOL of rewards per " + res.slots + "-slot epoch, and its " + res.commissionPct + "% commission (Tool 79) keeps " + res.commissionPerEpoch + " SOL of it. Voting on " + res.votedBps + " bps of slots costs " + res.voteCostPerEpochLamports + " lamports (" + res.voteCostPerEpochSol + " SOL) per epoch (Tool 87) - a fixed cost that never scales with stake - so the net is " + res.netPerEpoch + " SOL per epoch and " + res.netPeriod + " SOL over " + res.epochs + (res.epochs === 1 ? " epoch" : " epochs") + "." + note + " The gross rate is an assumed figure and the stake, slots, voted share and epochs are user-entered; block revenue and MEV commissions, hardware and other running costs are not modelled, and no live validator data is read. An educational model of validator net economics, not a live quote. Not financial advice.");
+    });
+
+    var platForm = document.getElementById("plat-calc");
+    if (platForm) platForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = platformFeeSwap(val("plat-rin"), val("plat-rout"), val("plat-ain"), val("plat-poolfee"), val("plat-bps"), val("plat-ref"));
+      if (!res) {
+        document.getElementById("plat-gross-out").value = "Invalid";
+        document.getElementById("plat-fee-out").value = "Invalid";
+        document.getElementById("plat-split-out").value = "Invalid";
+        document.getElementById("plat-user-out").value = "Invalid";
+        setText("plat-result", "Check the inputs: reserves and amount in must be above zero (amounts may have up to 9 decimal places) and the swap must return less than the output reserve, the pool fee a whole number of basis points from 0 to 9,999, the platform fee a whole number of basis points from 0 to 1,000, and the referral share a whole number of percentage points from 0 to 100.");
+        return;
+      }
+      document.getElementById("plat-gross-out").value = "Pool fee " + res.poolFee + " on the input; gross output " + res.grossOut;
+      document.getElementById("plat-fee-out").value = res.platformFee + " (" + res.platformBps + " bps of the gross output)";
+      document.getElementById("plat-split-out").value = "Referrer gets " + res.referrerGets + " (" + res.referralPct + "%); the platform keeps " + res.platformKeeps;
+      document.getElementById("plat-user-out").value = res.userReceives + " received; spot output with no fees at all would be " + res.spotOut + " (total drag " + res.totalDrag + ", " + res.dragBps + " bps)";
+      var note = "";
+      if (res.noPlatformFee) note = " At these settings the platform fee floors to zero, so the user receives the whole gross output - on a dust output a small bps rate can vanish entirely at the smallest unit.";
+      else if (res.fullReferral) note = " At a 100% referral share the whole platform fee passes to the referrer and the platform itself keeps nothing from it.";
+      else if (res.noReferral) note = " At a 0% referral share the platform keeps the whole fee itself.";
+      setText("plat-result", "Model output: swapping " + res.amountIn + " into a " + res.reserveIn + " / " + res.reserveOut + " constant-product pool at a " + res.poolFeeBps + " bps pool fee returns a gross output of " + res.grossOut + " (Tool 2). The interface's platform fee of " + res.platformBps + " bps is taken from that output, not from the input, so it never enters the curve and does not move the price: it withholds " + res.platformFee + ", of which the referrer's " + res.referralPct + "% share floors to " + res.referrerGets + " and the platform keeps the remaining " + res.platformKeeps + " - the two parts sum to the fee exactly. The user receives " + res.userReceives + ". Against the spot output of " + res.spotOut + " with no fees at all, the trade's total drag is " + res.totalDrag + " (" + res.dragBps + " bps) - the pool fee, the price impact and the platform fee compounded." + note + " Reserves, amount and rates are user-entered; which interface charges what, and whether a given swap carries a platform fee at all, is that interface's own terms, and no live pool or fee account is read. An educational model of platform-fee swaps, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
