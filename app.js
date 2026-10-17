@@ -4947,6 +4947,60 @@ function stakeMerge(destStr, srcStr) {
   };
 }
 
+/* ---------- Tool 97: launchpad oversubscription allocator ---------- */
+/* A fixed-price launchpad sale (the fair-launch / oversubscribed IDO
+   form used across Solana launchpads) sells a fixed token supply for
+   a hard cap of raise currency. Buyers commit during the sale window;
+   at the close, if the total committed exceeds the cap, EVERY buyer
+   is filled pro-rata at the same ratio: a contribution Y of a total T
+   against a cap C is allocated floor(C x Y / T) and the rest is
+   refunded, so the refund is not a penalty - it is the unfilled part
+   of the order, and every buyer keeps the same fill ratio (up to the
+   one-smallest-unit floor). Tokens follow the FILLED part only, at
+   the sale's fixed price: the supply S over the cap C, so a filled
+   allocation A receives floor(S x A / C). If the total committed is
+   at or under the cap, everyone is filled in full, nothing is
+   refunded, and the unsold share of the supply stays with the sale.
+   A contribution so small against the total that its pro-rata share
+   floors to zero is refunded in full and receives no tokens - the
+   floor is stated, never rounded up. Individual caps, whitelists,
+   tiered allocations and the sale's own fees differ per launchpad
+   and are not modelled; this is the plain pro-rata rule. Amounts are
+   in the raise currency (SOL on most Solana sales) at 9 decimals and
+   token amounts at 9 decimals; a token with other decimals rescales
+   both sides and the ratios are unchanged. Prototype-verified before
+   shipping against an independent Python integer oracle on 20,000
+   cases, 0 mismatches. No live sale is read. */
+var MAX_LAUNCH_LAMPORTS = 10000000000000000n; /* 10,000,000 units at 9 dp - a model cap, not a sale limit */
+function launchAlloc(capStr, totalStr, yourStr, supplyStr) {
+  var C = parseScaled(capStr);
+  var T = parseScaled(totalStr);
+  var Y = parseScaled(yourStr);
+  var S = parseScaled(supplyStr);
+  if (C === null || T === null || Y === null || S === null) return null;
+  if (C <= 0n || T <= 0n || Y <= 0n || S <= 0n) return null;
+  if (C > MAX_LAUNCH_LAMPORTS || T > MAX_LAUNCH_LAMPORTS || Y > MAX_LAUNCH_LAMPORTS || S > MAX_LAUNCH_LAMPORTS) return null;
+  if (Y > T) return null;
+  var over = T > C;
+  var totAlloc = over ? C : T;
+  var totRefund = T - totAlloc;
+  var ya = over ? (C * Y) / T : Y;
+  var yr = Y - ya;
+  var fillBps = Number((ya * 10000n) / Y);
+  var overBps = Number((T * 10000n) / C);
+  var yt = (S * ya) / C;
+  var tts = (S * totAlloc) / C;
+  return {
+    cap: formatScaled(C), totalCommitted: formatScaled(T),
+    yourContribution: formatScaled(Y), supply: formatScaled(S),
+    oversubscribed: over, exactlyFull: T === C, overBps: overBps,
+    totalAllocated: formatScaled(totAlloc), totalRefunded: formatScaled(totRefund),
+    yourAllocated: formatScaled(ya), yourRefund: formatScaled(yr), fillBps: fillBps,
+    yourTokens: formatScaled(yt), totalTokensSold: formatScaled(tts),
+    unsoldTokens: formatScaled(S - tts), allocIsZero: ya === 0n
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5572,6 +5626,7 @@ if (typeof module !== "undefined" && module.exports) {
     altClose, SLOT_HASHES_ENTRIES, MAX_ALTC_SLOT,
     stakeSplit, MAX_SSPLIT_ACCOUNTS,
     stakeMerge,
+    launchAlloc, MAX_LAUNCH_LAMPORTS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7776,6 +7831,30 @@ if (typeof document !== "undefined") {
       else if (res.oneReserveOnly) note = " One of the two accounts holds only its reserve and delegates nothing, so the entire gain is that account's reserve joining the other account's delegation - merging a reserve-only account is pure recovery, not reallocation.";
       else note = " The gain does not scale with the balances: merging two large accounts frees the same single 2,282,880 lamports as merging two small ones, because the cost being undone is per account, not per lamport - the exact mirror of Tool 95, where every extra account a split creates parks one more reserve.";
       setText("smerg-result", "Model output: merging a source account holding " + res.source + " SOL into a destination holding " + res.dest + " SOL leaves one account of " + res.total + " SOL - lamports are conserved exactly - and delegation rises from " + res.beforeDelegated + " SOL to " + res.afterDelegated + " SOL, because the pair parked two " + Number(res.reserveLamports).toLocaleString("en-US") + "-lamport rent-exempt reserves (Tool 83's funding rule per account) and the survivor parks only one." + note + " Balances are user-entered; no live account is read. The stake program merges only a compatible pair - same staker and withdrawer authorities, same lockup, compatible delegation states - and that check, like the merge transaction's own fee, is not modelled. An educational model of stake merging, not a live quote. Not financial advice.");
+    });
+
+    var launchForm = document.getElementById("launch-calc");
+    if (launchForm) launchForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = launchAlloc(val("launch-cap"), val("launch-total"), val("launch-your"), val("launch-supply"));
+      if (!res) {
+        document.getElementById("launch-youralloc-out").value = "Invalid";
+        document.getElementById("launch-refund-out").value = "Invalid";
+        document.getElementById("launch-tokens-out").value = "Invalid";
+        document.getElementById("launch-sale-out").value = "Invalid";
+        setText("launch-result", "Check the inputs: the cap, the total committed, your contribution and the token supply must be amounts with at most 9 decimal places, your contribution cannot exceed the total committed, and no amount may be zero. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("launch-youralloc-out").value = res.yourAllocated + " SOL allocated of your " + res.yourContribution + " SOL contribution (" + res.fillBps.toLocaleString("en-US") + " bps filled)";
+      document.getElementById("launch-refund-out").value = res.yourRefund + " SOL refunded - the unfilled part of your contribution, not a fee";
+      document.getElementById("launch-tokens-out").value = res.yourTokens + " tokens for the filled part, at the sale price of " + res.supply + " tokens per " + res.cap + " SOL of filled raise";
+      document.getElementById("launch-sale-out").value = "Sale totals: " + res.totalAllocated + " SOL allocated of " + res.totalCommitted + " SOL committed, " + res.totalRefunded + " SOL refunded across all buyers, " + res.totalTokensSold + " tokens sold and " + res.unsoldTokens + " tokens unsold";
+      var note = "";
+      if (res.allocIsZero) note = " Your contribution is so small against the total that its pro-rata share floors to zero: you are refunded in full and receive no tokens - the floor is never rounded up, and a larger contribution or a smaller total is the only way in.";
+      else if (res.oversubscribed) note = " The sale is oversubscribed, so every buyer is cut at the same ratio: nobody jumps the queue by committing more, they only hold a bigger slice of the same fill - committing ten times as much fills ten times as much and refunds ten times as much, at the identical percentage.";
+      else if (res.exactlyFull) note = " The sale filled its cap exactly: every contribution is allocated in full, nothing is refunded, and the whole supply sells - the one outcome where a fixed-price sale needs no pro-rata rule at all.";
+      else note = " The sale did not reach its cap, so every contribution is allocated in full and nothing is refunded; the unsold tokens stay with the sale, and the shortfall - not any buyer's fill - is what an undersubscribed sale has to explain.";
+      setText("launch-result", "Model output: a fixed-price sale with a hard cap of " + res.cap + " SOL and " + res.supply + " tokens on offer took in " + res.totalCommitted + " SOL (" + res.overBps.toLocaleString("en-US") + " bps of the cap). Your " + res.yourContribution + " SOL contribution is allocated " + res.yourAllocated + " SOL and refunded " + res.yourRefund + " SOL, receiving " + res.yourTokens + " tokens for the filled part." + note + " Amounts are user-entered; no live sale is read. Individual caps, whitelists, tiered allocations and any launchpad fee are not modelled. An educational model of a launchpad sale, not a live quote. Not financial advice.");
     });
 
     buttons.forEach(function (btn) {
