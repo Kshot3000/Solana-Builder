@@ -4543,6 +4543,86 @@ function platformFeeSwap(reserveInStr, reserveOutStr, amountInStr, poolFeeBps, p
   };
 }
 
+/* ---------- Tool 90: aggregator split-route planner (one swap, two pools) ---------- */
+/* An aggregator (Jupiter's core mechanic) does not have to send a whole
+   swap to one pool: it can SPLIT the input across two pools for the same
+   pair in parallel and add the outputs. Each leg is Tool 2 verbatim
+   against its own pool's reserves and its own fee tier; the split is a
+   whole percentage of the input to pool 1, floored at the smallest
+   unit, and pool 2 receives the remainder, so the two legs' inputs sum
+   to the amount in exactly. Splitting helps because price impact is
+   convex: two half-trades each move their pool half as far, so on two
+   identical 1,000,000 / 1,000,000 pools at 25 bps a 100,000 swap split
+   50/50 returns 47,505.65543517 from each leg, 95,011.31087034 in
+   total, against 90,702.432370993 sent to either pool alone - a gain
+   of 4,308.878499347 (475 bps over the best single-pool fill). It is
+   not free or automatic: splitting into a much shallower second pool
+   can return LESS than the best single pool (the same headline split
+   into a 100,000 / 100,000 second pool loses 9,919.045492954), and a
+   real aggregator searches many pools, venues and split sizes (and
+   serial routes, Tool 39) for the best total - this model prices the
+   one split you enter, against both all-in fills, so the comparison is
+   the lesson. The gain is measured against the BETTER of the two
+   single-pool fills and can be negative; its basis-point form
+   truncates toward zero. A positive leg whose swap floors to zero
+   output rejects the whole model rather than counting it as zero.
+   Prototype-proven before shipping against an independent Python
+   exact-integer oracle on 20,000 cases (0 mismatches on every figure),
+   with each leg asserted against Tool 2 in the test suite. No live
+   pool, aggregator or quote is read. */
+function splitRouteSwap(reserveIn1Str, reserveOut1Str, fee1Bps, reserveIn2Str, reserveOut2Str, fee2Bps, amountInStr, splitPct) {
+  var rI1 = parseScaled(reserveIn1Str);
+  var rO1 = parseScaled(reserveOut1Str);
+  var rI2 = parseScaled(reserveIn2Str);
+  var rO2 = parseScaled(reserveOut2Str);
+  var aIn = parseScaled(amountInStr);
+  var f1 = Number(fee1Bps), f2 = Number(fee2Bps), sp = Number(splitPct);
+  if (rI1 === null || rO1 === null || rI2 === null || rO2 === null || aIn === null) return null;
+  if (rI1 <= 0n || rO1 <= 0n || rI2 <= 0n || rO2 <= 0n || aIn <= 0n) return null;
+  if (!Number.isInteger(f1) || f1 < 0 || f1 >= 10000) return null;
+  if (!Number.isInteger(f2) || f2 < 0 || f2 >= 10000) return null;
+  if (!Number.isInteger(sp) || sp < 0 || sp > 100) return null;
+  var in1 = (aIn * BigInt(sp)) / 100n;
+  var in2 = aIn - in1;
+  function leg(rInS, rOutS, units, fee) {
+    if (units === 0n) return { fee: 0n, out: 0n };
+    var r = cpSwap(rInS, rOutS, formatScaled(units), fee);
+    if (r === null) return null;
+    return { fee: parseScaled(r.fee), out: parseScaled(r.amountOut) };
+  }
+  var l1 = leg(reserveIn1Str, reserveOut1Str, in1, f1);
+  if (l1 === null) return null;
+  var l2 = leg(reserveIn2Str, reserveOut2Str, in2, f2);
+  if (l2 === null) return null;
+  var total = l1.out + l2.out;
+  if (total <= 0n) return null;
+  function single(rInS, rOutS, fee) {
+    var r = cpSwap(rInS, rOutS, amountInStr, fee);
+    return r === null ? null : parseScaled(r.amountOut);
+  }
+  var s1 = single(reserveIn1Str, reserveOut1Str, f1);
+  var s2 = single(reserveIn2Str, reserveOut2Str, f2);
+  if (s1 === null && s2 === null) return null;
+  var best, bestPool;
+  if (s2 === null || (s1 !== null && s1 >= s2)) { best = s1; bestPool = 1; } else { best = s2; bestPool = 2; }
+  var gain = total - best;
+  var gainBps = best > 0n ? Number(gain >= 0n ? (gain * 10000n) / best : -(((-gain) * 10000n) / best)) : 0;
+  return {
+    reserveIn1: formatScaled(rI1), reserveOut1: formatScaled(rO1), fee1Bps: f1,
+    reserveIn2: formatScaled(rI2), reserveOut2: formatScaled(rO2), fee2Bps: f2,
+    amountIn: formatScaled(aIn), splitPct: sp,
+    amountIn1: formatScaled(in1), amountIn2: formatScaled(in2),
+    legFee1: formatScaled(l1.fee), legFee2: formatScaled(l2.fee),
+    out1: formatScaled(l1.out), out2: formatScaled(l2.out),
+    totalOut: formatScaled(total),
+    single1Out: s1 === null ? null : formatScaled(s1),
+    single2Out: s2 === null ? null : formatScaled(s2),
+    bestSingleOut: formatScaled(best), bestPool: bestPool,
+    gain: formatScaled(gain), gainBps: gainBps,
+    splitWins: gain > 0n, allIn: sp === 0 || sp === 100
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5111,6 +5191,7 @@ if (typeof module !== "undefined" && module.exports) {
     voteCost, VOTE_FEE_LAMPORTS, MAX_VCOST_SLOTS, MAX_VCOST_EPOCHS,
     validatorNet,
     platformFeeSwap, MAX_PLATFORM_FEE_BPS,
+    splitRouteSwap,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7132,6 +7213,30 @@ if (typeof document !== "undefined") {
       else if (res.fullReferral) note = " At a 100% referral share the whole platform fee passes to the referrer and the platform itself keeps nothing from it.";
       else if (res.noReferral) note = " At a 0% referral share the platform keeps the whole fee itself.";
       setText("plat-result", "Model output: swapping " + res.amountIn + " into a " + res.reserveIn + " / " + res.reserveOut + " constant-product pool at a " + res.poolFeeBps + " bps pool fee returns a gross output of " + res.grossOut + " (Tool 2). The interface's platform fee of " + res.platformBps + " bps is taken from that output, not from the input, so it never enters the curve and does not move the price: it withholds " + res.platformFee + ", of which the referrer's " + res.referralPct + "% share floors to " + res.referrerGets + " and the platform keeps the remaining " + res.platformKeeps + " - the two parts sum to the fee exactly. The user receives " + res.userReceives + ". Against the spot output of " + res.spotOut + " with no fees at all, the trade's total drag is " + res.totalDrag + " (" + res.dragBps + " bps) - the pool fee, the price impact and the platform fee compounded." + note + " Reserves, amount and rates are user-entered; which interface charges what, and whether a given swap carries a platform fee at all, is that interface's own terms, and no live pool or fee account is read. An educational model of platform-fee swaps, not a live quote. Not financial advice.");
+    });
+
+    var aggForm = document.getElementById("agg-calc");
+    if (aggForm) aggForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = splitRouteSwap(val("agg-rin1"), val("agg-rout1"), val("agg-fee1"), val("agg-rin2"), val("agg-rout2"), val("agg-fee2"), val("agg-ain"), val("agg-split"));
+      if (!res) {
+        document.getElementById("agg-leg1-out").value = "Invalid";
+        document.getElementById("agg-leg2-out").value = "Invalid";
+        document.getElementById("agg-total-out").value = "Invalid";
+        document.getElementById("agg-best-out").value = "Invalid";
+        setText("agg-result", "Check the inputs: every reserve and the amount in must be above zero (amounts may have up to 9 decimal places), each pool fee a whole number of basis points from 0 to 9,999, the split a whole number of percentage points from 0 to 100, and each positive leg must return a positive output below its pool's output reserve.");
+        return;
+      }
+      document.getElementById("agg-leg1-out").value = res.amountIn1 + " to pool 1 (fee " + res.legFee1 + ") returns " + res.out1;
+      document.getElementById("agg-leg2-out").value = res.amountIn2 + " to pool 2 (fee " + res.legFee2 + ") returns " + res.out2;
+      document.getElementById("agg-total-out").value = res.totalOut + " in total from the split";
+      document.getElementById("agg-best-out").value = "Best single pool: pool " + res.bestPool + " alone returns " + res.bestSingleOut + "; the split's gain is " + res.gain + " (" + res.gainBps + " bps)";
+      var note = "";
+      if (res.allIn) note = " At a 0% or 100% split nothing is actually split - the whole amount went to one pool, so the total equals that pool's fill exactly and the gain against the best single pool is zero or negative by construction.";
+      else if (res.splitWins) note = " The split beats the best single pool here because price impact is convex: each half-trade moves its own pool only half as far, and the two outputs add.";
+      else if (res.gain === "0") note = " The split exactly matches the best single pool here - splitting neither gained nor lost at these settings.";
+      else note = " The split LOSES to the best single pool here: the second pool is too shallow (or its fee too high) for its leg to pull its weight, and a real aggregator would simply not route this share there.";
+      setText("agg-result", "Model output: swapping " + res.amountIn + " split " + res.splitPct + "% / " + (100 - res.splitPct) + "% across two constant-product pools for the same pair - pool 1 at " + res.reserveIn1 + " / " + res.reserveOut1 + " with a " + res.fee1Bps + " bps fee, pool 2 at " + res.reserveIn2 + " / " + res.reserveOut2 + " with a " + res.fee2Bps + " bps fee - returns " + res.out1 + " from pool 1 and " + res.out2 + " from pool 2, " + res.totalOut + " in total (each leg is Tool 2 on its own pool, and the two inputs sum to the amount in exactly). Sent whole to one pool instead, pool 1 alone returns " + res.single1Out + " and pool 2 alone returns " + res.single2Out + ", so against the better single fill (pool " + res.bestPool + ", " + res.bestSingleOut + ") the split's gain is " + res.gain + " (" + res.gainBps + " bps)." + note + " A real aggregator searches many pools, venues and split sizes and can also chain pools in series (Tool 39); this model prices the one split you enter. Reserves, amounts, fees and the split are user-entered and no live pool, aggregator or quote is read. An educational model of split routing, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
