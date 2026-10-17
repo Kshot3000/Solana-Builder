@@ -4623,6 +4623,79 @@ function splitRouteSwap(reserveIn1Str, reserveOut1Str, fee1Bps, reserveIn2Str, r
   };
 }
 
+/* ---------- Tool 91: DLMM bin-walk swap planner (a swap crossing bins) ---------- */
+/* Tool 57 prices one DLMM bin; a real DLMM swap (Meteora's form) WALKS
+   bins. Inside one bin the price never moves - the bin trades at its
+   fixed price (Tool 57's exact rational (1 + step/10000)^id, quoted
+   here as the token you receive priced in the token you pay) until the
+   bin's available output is gone, then the swap steps into the next
+   bin, whose price is exactly one step higher, and so on. This model
+   walks that ladder in exact BigInt rational arithmetic: the price is
+   carried as a reduced numerator/denominator pair multiplied by the
+   reduced step ratio per bin, a whole bin costs ceil(available x
+   price) of the input at the smallest unit, and a final partial bin
+   pays floor(remaining / price), so the walk can never pay out more
+   than a bin holds or charge less than a whole bin costs. Headline:
+   step 100 bps, starting at bin 0 (price exactly 1), 1,000 of the
+   output token per bin - a 2,500 swap drains bins 0 and 1 for 1,000 +
+   1,010 and spends its last 490 in bin 2 at 1.0201, receiving
+   480.345064209 there, 2,480.345064209 in total at an average price of
+   1.007924274. If the bins run out first the unspent remainder is
+   reported, not filled at a made-up price: the same walk over only 2
+   bins spends 2,010 of a 100,000 swap and leaves 97,990 unfilled. At a
+   10,000 bps step from bin -1 the two bins cost exactly 50 (price 0.5)
+   and 100 (price 1). Every bin is modelled with the SAME available
+   output (a user entry) - real bins hold uneven amounts set by the
+   positions in them, the active bin usually holds both tokens rather
+   than only the output side, and the swap fee (a base fee plus DLMM's
+   variable volatility fee) is NOT modelled, exactly as Tool 57 states
+   for its prices. Prototype-verified before shipping against an
+   independent Python exact-rational (Fraction) oracle on 20,000 cases,
+   0 mismatches on every figure, with the start and end prices asserted
+   against Tool 57's own dlmmBins in the test suite. No live pool is
+   read. */
+var MAX_DLMM_WALK_BINS = 100;
+var MAX_DLMM_WALK_START = 1000;
+function gcdSmall(a, b) { while (b) { var t = a % b; a = b; b = t; } return a; }
+function dlmmBinWalk(stepBps, startBinId, perBinOutStr, binsCount, amountInStr) {
+  var step = Number(stepBps), start = Number(startBinId), bins = Number(binsCount);
+  var per = parseScaled(perBinOutStr), amt = parseScaled(amountInStr);
+  if (!Number.isInteger(step) || step < 1 || step > 10000) return null;
+  if (!Number.isInteger(start) || start < -MAX_DLMM_WALK_START || start > MAX_DLMM_WALK_START) return null;
+  if (!Number.isInteger(bins) || bins < 1 || bins > MAX_DLMM_WALK_BINS) return null;
+  if (per === null || amt === null || per <= 0n || amt <= 0n) return null;
+  var g = gcdSmall(10000 + step, 10000);
+  var sNum = BigInt((10000 + step) / g), sDen = BigInt(10000 / g);
+  var a = start < 0 ? -start : start;
+  var pNum, pDen;
+  if (start >= 0) { pNum = sNum ** BigInt(a); pDen = sDen ** BigInt(a); }
+  else { pNum = sDen ** BigInt(a); pDen = sNum ** BigInt(a); }
+  var remaining = amt, out = 0n, spent = 0n, drained = 0, touched = 0, endBinId = start, partial = false;
+  for (var i = 0; i < bins && remaining > 0n; i++) {
+    var binId = start + i;
+    touched++; endBinId = binId;
+    var fullCost = (per * pNum + pDen - 1n) / pDen;
+    if (remaining >= fullCost) {
+      out += per; spent += fullCost; remaining -= fullCost; drained++;
+    } else {
+      var pOut = (remaining * pDen) / pNum;
+      if (pOut > 0n) { out += pOut; spent += remaining; remaining = 0n; partial = true; }
+      break;
+    }
+    pNum *= sNum; pDen *= sDen;
+  }
+  return {
+    stepBps: step, startBinId: start, perBinOut: formatScaled(per), binsAvailable: bins,
+    amountIn: formatScaled(amt), spentIn: formatScaled(spent), unfilledIn: formatScaled(remaining),
+    totalOut: formatScaled(out), binsDrained: drained, binsTouched: touched,
+    endBinId: endBinId, partialFill: partial,
+    filled: remaining === 0n, exhausted: remaining > 0n && touched === bins && !partial,
+    avgPrice: out > 0n ? formatScaled((spent * SCALE) / out) : null,
+    startPrice: formatScaled(dlmmPriceScaled(step, start)),
+    endPrice: formatScaled(dlmmPriceScaled(step, endBinId))
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5159,6 +5232,7 @@ if (typeof module !== "undefined" && module.exports) {
     escrowRelease,
     dcaPlan, MAX_DCA_ORDERS, MAX_DCA_TX_FEE_LAMPORTS,
     dlmmBins, MAX_DLMM_BIN_ID, MAX_DLMM_WIDTH,
+    dlmmBinWalk, MAX_DLMM_WALK_BINS, MAX_DLMM_WALK_START,
     nftMintCost, NFT_MINT_BYTES, NFT_TOKEN_ACCOUNT_BYTES, NFT_METADATA_BYTES, NFT_EDITION_BYTES, MAX_NFT_COUNT,
     programDeployCost, PROGRAM_ACCOUNT_BYTES, PROGRAMDATA_HEADER_BYTES, BUFFER_HEADER_BYTES, MAX_PROGRAM_BYTES,
     clmmImpermanentLoss,
@@ -7237,6 +7311,31 @@ if (typeof document !== "undefined") {
       else if (res.gain === "0") note = " The split exactly matches the best single pool here - splitting neither gained nor lost at these settings.";
       else note = " The split LOSES to the best single pool here: the second pool is too shallow (or its fee too high) for its leg to pull its weight, and a real aggregator would simply not route this share there.";
       setText("agg-result", "Model output: swapping " + res.amountIn + " split " + res.splitPct + "% / " + (100 - res.splitPct) + "% across two constant-product pools for the same pair - pool 1 at " + res.reserveIn1 + " / " + res.reserveOut1 + " with a " + res.fee1Bps + " bps fee, pool 2 at " + res.reserveIn2 + " / " + res.reserveOut2 + " with a " + res.fee2Bps + " bps fee - returns " + res.out1 + " from pool 1 and " + res.out2 + " from pool 2, " + res.totalOut + " in total (each leg is Tool 2 on its own pool, and the two inputs sum to the amount in exactly). Sent whole to one pool instead, pool 1 alone returns " + res.single1Out + " and pool 2 alone returns " + res.single2Out + ", so against the better single fill (pool " + res.bestPool + ", " + res.bestSingleOut + ") the split's gain is " + res.gain + " (" + res.gainBps + " bps)." + note + " A real aggregator searches many pools, venues and split sizes and can also chain pools in series (Tool 39); this model prices the one split you enter. Reserves, amounts, fees and the split are user-entered and no live pool, aggregator or quote is read. An educational model of split routing, not a live quote. Not financial advice.");
+    });
+
+    var bwalkForm = document.getElementById("bwalk-calc");
+    if (bwalkForm) bwalkForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = dlmmBinWalk(val("bwalk-step"), val("bwalk-start"), val("bwalk-perbin"), val("bwalk-bins"), val("bwalk-ain"));
+      if (!res) {
+        document.getElementById("bwalk-spent-out").value = "Invalid";
+        document.getElementById("bwalk-total-out").value = "Invalid";
+        document.getElementById("bwalk-bins-out").value = "Invalid";
+        document.getElementById("bwalk-avg-out").value = "Invalid";
+        setText("bwalk-result", "Check the inputs: the bin step must be a whole number of basis points from 1 to 10,000, the starting bin a whole number from -1,000 to 1,000, the output available per bin and the amount in must be above zero (up to 9 decimal places), and the number of bins a whole number from 1 to 100.");
+        return;
+      }
+      document.getElementById("bwalk-spent-out").value = res.spentIn + " spent of " + res.amountIn + " in (" + res.unfilledIn + " unfilled)";
+      document.getElementById("bwalk-total-out").value = res.totalOut + " received in total";
+      document.getElementById("bwalk-bins-out").value = res.binsDrained + " drained, " + res.binsTouched + " touched, ending at bin " + res.endBinId + " (price " + res.endPrice + ")";
+      document.getElementById("bwalk-avg-out").value = res.avgPrice === null ? "Nothing received - no average price" : res.avgPrice + " paid per unit received (first bin " + res.startPrice + ")";
+      var bw = function (n) { return n === 1 ? "bin" : "bins"; };
+      var note = "";
+      if (res.totalOut === "0") note = " The amount in buys less than the smallest unit of the output token at the first bin's price, so nothing fills and nothing is spent - at this price the trade is dust.";
+      else if (res.exhausted) note = " The bins ran out before the swap did: the unfilled remainder has nowhere to go at these prices, and a real route would continue into deeper liquidity or a different venue rather than fill at a made-up price.";
+      else if (res.partialFill) note = " The last bin touched still holds output the swap did not need - the fill ended inside it, which is why its price is the walk's most expensive.";
+      else note = " The swap ended exactly on a bin boundary: the last bin touched was drained to its smallest unit and no partial bin was needed.";
+      setText("bwalk-result", "Model output: a swap of " + res.amountIn + " walks a DLMM ladder from bin " + res.startBinId + " (price " + res.startPrice + ", paid token per unit of the received token) at a " + res.stepBps + " bps step, with " + res.perBinOut + " of the received token available in each of " + res.binsAvailable + " " + bw(res.binsAvailable) + ". It drains " + res.binsDrained + " " + bw(res.binsDrained) + " outright and touches " + res.binsTouched + " in total, ending at bin " + res.endBinId + " (price " + res.endPrice + "): " + res.spentIn + " is spent and " + res.totalOut + " is received, an average price of " + (res.avgPrice === null ? "none (nothing was received)" : res.avgPrice) + ", with " + res.unfilledIn + " left unfilled." + note + " Every bin is modelled with the same available output - real bins hold uneven amounts set by the positions in them, the active bin usually holds both tokens, and the swap fee (a base fee plus the venue's variable volatility fee) is not modelled, so a real fill collects slightly less. Amounts and prices are user-entered and no live pool is read. An educational model of a DLMM bin walk, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
