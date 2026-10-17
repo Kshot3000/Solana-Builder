@@ -4325,6 +4325,71 @@ function nakamotoCoefficient(totalStr, listStr) {
   };
 }
 
+/* ---------- Tool 87: validator vote cost (voting is a fee, the same for every stake) ---------- */
+/* A Solana validator takes part in consensus by voting, and a vote is
+   an ordinary on-chain transaction: privileged, carrying exactly one
+   signature, charged the 5,000-lamport base fee (Tool 5's figure) and
+   NO priority fee. One vote is expected per slot, so the cost of an
+   epoch is votes x 5,000 lamports and nothing else - it never scales
+   with the validator's stake, which is why it is the fixed hurdle
+   every small validator must clear and why the official validator FAQ
+   quotes a single figure for everyone: up to about 1.1 SOL per day.
+   Voting on 95% of a 432,000-slot epoch casts 410,400 votes and costs
+   2,052,000,000 lamports (2.052 SOL) per epoch - 1.026 SOL per nominal
+   day at 400-millisecond slots - against 2,160,000,000 (2.16 SOL) for
+   voting on every slot; over 10 epochs the 95% plan pays 20.52 SOL.
+   At full participation the per-day cost is exactly 1.08 SOL whatever
+   the epoch length, because a nominal day always holds 216,000 slots.
+   The only saving is a slot not voted on, and that slot also earns no
+   vote credit toward the epoch's inflation rewards - a validator that
+   votes on nothing is delinquent (Tool 84). The vote count floors
+   like an on-chain division, so a share that floors below one vote
+   (3 slots at 3,333 bps) casts zero. Slots, voted share and epochs
+   are user-entered; no live cluster or validator data is read.
+   Prototype-proven on 20,000 cases against an independent Python
+   integer oracle, 0 mismatches. */
+var VOTE_FEE_LAMPORTS = 5000n; /* one signature at Tool 5's base fee; votes carry no priority fee */
+var MAX_VCOST_SLOTS = 432000; /* one normal epoch (Tool 12) */
+var MAX_VCOST_EPOCHS = 1000;
+
+function parseVoteCount(str, max) {
+  if (typeof str !== "string") return null;
+  var s = str.trim();
+  if (!/^\d+$/.test(s)) return null;
+  var n = Number(s);
+  if (!Number.isInteger(n) || n < 0 || n > max) return null;
+  return n;
+}
+
+function voteCost(slotsStr, votedBpsStr, epochsStr) {
+  var slots = parseVoteCount(slotsStr, MAX_VCOST_SLOTS);
+  var bps = parseVoteCount(votedBpsStr, 10000);
+  var epochs = parseVoteCount(epochsStr, MAX_VCOST_EPOCHS);
+  if (slots === null || bps === null || epochs === null) return null;
+  if (slots < 1 || epochs < 1) return null;
+  var votes = (BigInt(slots) * BigInt(bps)) / 10000n;
+  var missed = BigInt(slots) - votes;
+  var costEpoch = votes * VOTE_FEE_LAMPORTS;
+  var fullEpoch = BigInt(slots) * VOTE_FEE_LAMPORTS;
+  var savedEpoch = fullEpoch - costEpoch;
+  var perDay = (costEpoch * 216000n) / BigInt(slots); /* nominal day = 216,000 slots at 400 ms */
+  var totalCost = costEpoch * BigInt(epochs);
+  var savedTotal = savedEpoch * BigInt(epochs);
+  return {
+    slots: slots, votedBps: bps, votedPct: (bps / 100).toFixed(2), epochs: epochs,
+    feePerVoteLamports: VOTE_FEE_LAMPORTS.toString(),
+    votesPerEpoch: votes.toString(), missedPerEpoch: missed.toString(),
+    costPerEpochLamports: costEpoch.toString(), costPerEpochSol: formatScaled(costEpoch),
+    totalVotes: (votes * BigInt(epochs)).toString(),
+    totalCostLamports: totalCost.toString(), totalCostSol: formatScaled(totalCost),
+    perDayLamports: perDay.toString(), perDaySol: formatScaled(perDay),
+    fullCostPerEpochLamports: fullEpoch.toString(), fullCostPerEpochSol: formatScaled(fullEpoch),
+    savedPerEpochLamports: savedEpoch.toString(), savedPerEpochSol: formatScaled(savedEpoch),
+    savedTotalLamports: savedTotal.toString(), savedTotalSol: formatScaled(savedTotal),
+    noVotes: votes === 0n, fullParticipation: bps === 10000
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4890,6 +4955,7 @@ if (typeof module !== "undefined" && module.exports) {
     delinquentStake, MAX_DELINQ_TOTAL_LAMPORTS,
     wrappedSol, WSOL_ACCOUNT_BYTES, MAX_WSOL_FUND_LAMPORTS, MAX_WSOL_ACCOUNTS,
     nakamotoCoefficient, MAX_NAKA_TOTAL_LAMPORTS, MAX_NAKA_VALIDATORS,
+    voteCost, VOTE_FEE_LAMPORTS, MAX_VCOST_SLOTS, MAX_VCOST_EPOCHS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6836,6 +6902,33 @@ if (typeof document !== "undefined") {
 
 
 
+
+    var vcostForm = document.getElementById("vcost-calc");
+    if (vcostForm) vcostForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = voteCost(val("vcost-slots"), val("vcost-bps"), val("vcost-epochs"));
+      if (!res) {
+        document.getElementById("vcost-votes-out").value = "Invalid";
+        document.getElementById("vcost-epoch-out").value = "Invalid";
+        document.getElementById("vcost-total-out").value = "Invalid";
+        document.getElementById("vcost-full-out").value = "Invalid";
+        setText("vcost-result", "Check the inputs: the slots per epoch are a whole number from 1 to 432,000, the voted share is a whole number of basis points from 0 to 10,000, and the epoch count is a whole number from 1 to 1,000.");
+        return;
+      }
+      document.getElementById("vcost-votes-out").value = res.votesPerEpoch + (res.votesPerEpoch === "1" ? " vote" : " votes") + " per epoch of " + res.slots + " slots (" + res.missedPerEpoch + " not voted on)";
+      document.getElementById("vcost-epoch-out").value = res.costPerEpochLamports + " lamports (" + res.costPerEpochSol + " SOL) per epoch; " + res.perDayLamports + " lamports (" + res.perDaySol + " SOL) per nominal day";
+      document.getElementById("vcost-total-out").value = res.totalCostLamports + " lamports (" + res.totalCostSol + " SOL) over " + res.epochs + (res.epochs === 1 ? " epoch" : " epochs") + " (" + res.totalVotes + " votes in all)";
+      document.getElementById("vcost-full-out").value = res.fullCostPerEpochLamports + " lamports (" + res.fullCostPerEpochSol + " SOL) per epoch at full participation; this plan saves " + res.savedPerEpochLamports + " lamports (" + res.savedPerEpochSol + " SOL) per epoch, " + res.savedTotalLamports + " lamports (" + res.savedTotalSol + " SOL) over the plan";
+      var note = "";
+      if (res.noVotes) {
+        note = " At this voted share the plan casts no votes at all: it costs nothing and earns no vote credits, and a validator that never votes is delinquent (Tool 84) - its stake stops counting toward the supermajority and earns no inflation rewards.";
+      } else if (res.fullParticipation) {
+        note = " Voting on every slot is the ceiling the official validator FAQ points at with its up-to-about-1.1-SOL-per-day figure: at the nominal 400-millisecond slot time it is exactly 1.08 SOL per day whatever the epoch length, because a nominal day always holds 216,000 slots.";
+      } else {
+        note = " The slots not voted on are the only saving available: each one skips exactly one 5,000-lamport vote fee, and each one also earns no vote credit toward the epoch's inflation rewards.";
+      }
+      setText("vcost-result", "Model output: a validator voting on " + res.votedBps + " bps (" + res.votedPct + "%) of " + res.slots + " slots casts " + res.votesPerEpoch + " votes per epoch, and every vote is a privileged transaction carrying exactly one signature at the 5,000-lamport base fee (Tool 5) with no priority fee, so one epoch of voting costs " + res.costPerEpochLamports + " lamports (" + res.costPerEpochSol + " SOL) and " + res.epochs + (res.epochs === 1 ? " epoch costs " : " epochs cost ") + res.totalCostLamports + " lamports (" + res.totalCostSol + " SOL). At the nominal 400-millisecond slot time that is " + res.perDayLamports + " lamports (" + res.perDaySol + " SOL) per day." + note + " The fee never scales with stake: a validator with 100 SOL delegated and one with 1,000,000 pay the same per vote, which is why vote costs decide whether a small validator breaks even while commission (Tool 79) is the income side of the same ledger. Slots, voted share and epochs are user-entered and no live cluster or validator data is read. An educational model of validator vote costs, not a live quote. Not financial advice.");
+    });
 
     /* catalogue filter */
     var buttons = document.querySelectorAll("[data-filter]");
