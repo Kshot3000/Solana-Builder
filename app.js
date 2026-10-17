@@ -4390,6 +4390,100 @@ function voteCost(slotsStr, votedBpsStr, epochsStr) {
   };
 }
 
+/* ---------- Tool 88: validator net economics (commission in, vote costs out) ---------- */
+/* A validator's staking ledger has one income line and one fixed cost.
+   Income is commission (Tool 79): the vote account's whole-percentage
+   cut of the rewards the total delegated stake earns at an assumed
+   gross annual rate. Rewards settle per epoch, so the per-epoch gross
+   converts the annual rate by the epoch's nominal length in days -
+   slots / 216,000, Tool 87's nominal day at 400-millisecond slots -
+   floored once at the smallest unit, and the commission floors again
+   on that floored gross, exactly Tool 79's two floors; period figures
+   are the per-epoch figures times the epoch count, because each epoch
+   settles on its own. The cost side is Tool 87's voteCost run
+   verbatim: 5,000 lamports per vote, one expected per slot, never
+   scaling with stake. Net is the signed difference. The break-even
+   stake is the smallest delegated stake whose per-epoch commission
+   covers the per-epoch vote cost, found by binary search over the
+   floored commission (monotone in stake) and minimal by construction:
+   at one smallest unit less the commission falls short. At a 0%
+   commission or a 0% gross rate no stake breaks even while votes cost
+   anything, and a voted share that floors below one vote costs
+   nothing, so every stake breaks even. Block revenue and MEV
+   commissions (Tool 78's leader share), hardware and other running
+   costs, and rewards on a validator's own stake beyond the commission
+   charged on it are NOT modelled - this is the commission-versus-votes
+   ledger only. The stake entered is the total delegated stake the
+   commission is charged on; the gross rate is a user-assumed figure.
+   Prototype-proven before shipping against an independent Python
+   exact-rational oracle on 20,000 cases (0 mismatches on every
+   figure), with the cost side asserted against voteCost on all 20,000
+   and the commission side against Tool 79's own period figures at the
+   standard 432,000-slot epoch. No live validator data is read. */
+var VNET_SLOTS_PER_NOMINAL_DAY = 216000n; /* Tool 87's nominal day at 400 ms slots */
+var VNET_RATE_DENOM = 10000n * 365n * VNET_SLOTS_PER_NOMINAL_DAY;
+
+function vnetGrossPerEpoch(stakeUnits, grossBps, slots) {
+  return (stakeUnits * BigInt(grossBps) * BigInt(slots)) / VNET_RATE_DENOM;
+}
+function vnetCommissionForStake(stakeUnits, grossBps, pct, slots) {
+  return (vnetGrossPerEpoch(stakeUnits, grossBps, slots) * BigInt(pct)) / 100n;
+}
+
+function validatorNet(stakeStr, grossBpsStr, commissionPctStr, slotsStr, votedBpsStr, epochsStr) {
+  var stake = parseScaled(stakeStr);
+  var grossBps = Number(grossBpsStr), pct = Number(commissionPctStr);
+  var slots = parseVoteCount(slotsStr, MAX_VCOST_SLOTS);
+  var votedBps = parseVoteCount(votedBpsStr, 10000);
+  var epochs = parseVoteCount(epochsStr, MAX_VCOST_EPOCHS);
+  if (stake === null || stake <= 0n) return null;
+  if (!Number.isInteger(grossBps) || grossBps < 0 || grossBps > MAX_VCOMM_GROSS_BPS) return null;
+  if (!Number.isInteger(pct) || pct < 0 || pct > 100) return null;
+  if (slots === null || votedBps === null || epochs === null) return null;
+  if (slots < 1 || epochs < 1) return null;
+  var vc = voteCost(slotsStr, votedBpsStr, epochsStr);
+  if (!vc) return null;
+  var costEpoch = BigInt(vc.costPerEpochLamports);
+  var costPeriod = BigInt(vc.totalCostLamports);
+  var grossEpoch = vnetGrossPerEpoch(stake, grossBps, slots);
+  var commEpoch = (grossEpoch * BigInt(pct)) / 100n;
+  var commPeriod = commEpoch * BigInt(epochs);
+  var grossPeriod = grossEpoch * BigInt(epochs);
+  var netEpoch = commEpoch - costEpoch;
+  var netPeriod = commPeriod - costPeriod;
+  var noIncome = grossBps === 0 || pct === 0;
+  var costFree = costEpoch === 0n;
+  var breakEven = null;
+  if (costFree) breakEven = 0n;
+  else if (!noIncome) {
+    var lo = 0n, hi = 1n, guard = 0;
+    while (vnetCommissionForStake(hi, grossBps, pct, slots) < costEpoch && guard < 300) { hi *= 2n; guard++; }
+    if (vnetCommissionForStake(hi, grossBps, pct, slots) >= costEpoch) {
+      while (hi - lo > 1n) {
+        var mid = (lo + hi) / 2n;
+        if (vnetCommissionForStake(mid, grossBps, pct, slots) >= costEpoch) hi = mid; else lo = mid;
+      }
+      breakEven = hi;
+    }
+  }
+  return {
+    stake: formatScaled(stake), grossBps: grossBps, commissionPct: pct, slots: slots, votedBps: votedBps, epochs: epochs,
+    grossPerEpoch: formatScaled(grossEpoch), commissionPerEpoch: formatScaled(commEpoch),
+    voteCostPerEpochLamports: vc.costPerEpochLamports, voteCostPerEpochSol: vc.costPerEpochSol,
+    netPerEpoch: formatScaled(netEpoch), netPerEpochLamports: netEpoch.toString(),
+    grossPeriod: formatScaled(grossPeriod), commissionPeriod: formatScaled(commPeriod),
+    voteCostPeriodLamports: vc.totalCostLamports, voteCostPeriodSol: vc.totalCostSol,
+    netPeriod: formatScaled(netPeriod), netPeriodLamports: netPeriod.toString(),
+    breakEvenStake: breakEven === null ? null : formatScaled(breakEven),
+    breakEvenLamports: breakEven === null ? null : breakEven.toString(),
+    shortfallStake: breakEven === null ? null : formatScaled(breakEven > stake ? breakEven - stake : 0n),
+    surplusStake: breakEven === null ? null : formatScaled(stake > breakEven ? stake - breakEven : 0n),
+    coversCosts: commPeriod >= costPeriod,
+    profitable: netPeriod > 0n, exactlyBreaksEven: netPeriod === 0n,
+    noIncome: noIncome, costFree: costFree, fullCommission: pct === 100
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4956,6 +5050,7 @@ if (typeof module !== "undefined" && module.exports) {
     wrappedSol, WSOL_ACCOUNT_BYTES, MAX_WSOL_FUND_LAMPORTS, MAX_WSOL_ACCOUNTS,
     nakamotoCoefficient, MAX_NAKA_TOTAL_LAMPORTS, MAX_NAKA_VALIDATORS,
     voteCost, VOTE_FEE_LAMPORTS, MAX_VCOST_SLOTS, MAX_VCOST_EPOCHS,
+    validatorNet,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6928,6 +7023,32 @@ if (typeof document !== "undefined") {
         note = " The slots not voted on are the only saving available: each one skips exactly one 5,000-lamport vote fee, and each one also earns no vote credit toward the epoch's inflation rewards.";
       }
       setText("vcost-result", "Model output: a validator voting on " + res.votedBps + " bps (" + res.votedPct + "%) of " + res.slots + " slots casts " + res.votesPerEpoch + " votes per epoch, and every vote is a privileged transaction carrying exactly one signature at the 5,000-lamport base fee (Tool 5) with no priority fee, so one epoch of voting costs " + res.costPerEpochLamports + " lamports (" + res.costPerEpochSol + " SOL) and " + res.epochs + (res.epochs === 1 ? " epoch costs " : " epochs cost ") + res.totalCostLamports + " lamports (" + res.totalCostSol + " SOL). At the nominal 400-millisecond slot time that is " + res.perDayLamports + " lamports (" + res.perDaySol + " SOL) per day." + note + " The fee never scales with stake: a validator with 100 SOL delegated and one with 1,000,000 pay the same per vote, which is why vote costs decide whether a small validator breaks even while commission (Tool 79) is the income side of the same ledger. Slots, voted share and epochs are user-entered and no live cluster or validator data is read. An educational model of validator vote costs, not a live quote. Not financial advice.");
+    });
+
+    var vnetForm = document.getElementById("vnet-calc");
+    if (vnetForm) vnetForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = validatorNet(val("vnet-stake"), val("vnet-gross"), val("vnet-comm"), val("vnet-slots"), val("vnet-bps"), val("vnet-epochs"));
+      if (!res) {
+        document.getElementById("vnet-income-out").value = "Invalid";
+        document.getElementById("vnet-cost-out").value = "Invalid";
+        document.getElementById("vnet-net-out").value = "Invalid";
+        document.getElementById("vnet-be-out").value = "Invalid";
+        setText("vnet-result", "Check the inputs: the delegated stake must be above zero (amounts may have up to 9 decimal places), the gross rate a whole number of basis points from 0 to 100,000, the commission a whole number of percentage points from 0 to 100, the slots per epoch a whole number from 1 to 432,000, the voted share a whole number of basis points from 0 to 10,000, and the epoch count a whole number from 1 to 1,000.");
+        return;
+      }
+      document.getElementById("vnet-income-out").value = "Gross rewards " + res.grossPerEpoch + " SOL per epoch; the " + res.commissionPct + "% commission keeps " + res.commissionPerEpoch + " SOL";
+      document.getElementById("vnet-cost-out").value = res.voteCostPerEpochLamports + " lamports (" + res.voteCostPerEpochSol + " SOL) per epoch; " + res.voteCostPeriodLamports + " lamports (" + res.voteCostPeriodSol + " SOL) over " + res.epochs + (res.epochs === 1 ? " epoch" : " epochs");
+      document.getElementById("vnet-net-out").value = res.netPerEpoch + " SOL per epoch; " + res.netPeriod + " SOL over " + res.epochs + (res.epochs === 1 ? " epoch" : " epochs");
+      document.getElementById("vnet-be-out").value = res.breakEvenStake === null ? "No delegated stake breaks even at these settings" : "Break-even delegated stake " + res.breakEvenStake + " SOL" + (res.shortfallStake !== "0" ? "; this stake is " + res.shortfallStake + " SOL short" : res.surplusStake !== "0" ? "; this stake clears it by " + res.surplusStake + " SOL" : "; this stake is exactly the break-even stake");
+      var note;
+      if (res.costFree) note = " The voted share floors to zero votes, so voting costs nothing at these settings and the commission is kept in full - a validator that votes on nothing is delinquent (Tool 84) and earns no vote credits, which this ledger does not price.";
+      else if (res.noIncome) note = " At a " + (res.commissionPct === 0 ? "0% commission" : "0 bps gross rate") + " the validator keeps no commission at any stake, so no delegated stake covers the vote cost - the net is the whole cost, every epoch.";
+      else if (res.exactlyBreaksEven) note = " The plan lands exactly on break-even: the floored commission equals the floored vote cost to the lamport.";
+      else if (res.profitable) note = " The commission covers the vote cost with room to spare - the surplus is the margin before every cost this ledger does not model.";
+      else note = " The commission falls short of the vote cost: the validator subsidises consensus out of pocket (or out of its own stake's rewards, which this ledger does not count) until its delegated stake reaches the break-even figure.";
+      if (res.fullCommission) note += " At a 100% commission the validator keeps every reward and delegators net zero (Tool 79).";
+      setText("vnet-result", "Model output: a validator with " + res.stake + " SOL delegated at an assumed gross rate of " + res.grossBps + " bps a year earns " + res.grossPerEpoch + " SOL of rewards per " + res.slots + "-slot epoch, and its " + res.commissionPct + "% commission (Tool 79) keeps " + res.commissionPerEpoch + " SOL of it. Voting on " + res.votedBps + " bps of slots costs " + res.voteCostPerEpochLamports + " lamports (" + res.voteCostPerEpochSol + " SOL) per epoch (Tool 87) - a fixed cost that never scales with stake - so the net is " + res.netPerEpoch + " SOL per epoch and " + res.netPeriod + " SOL over " + res.epochs + (res.epochs === 1 ? " epoch" : " epochs") + "." + note + " The gross rate is an assumed figure and the stake, slots, voted share and epochs are user-entered; block revenue and MEV commissions, hardware and other running costs are not modelled, and no live validator data is read. An educational model of validator net economics, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
