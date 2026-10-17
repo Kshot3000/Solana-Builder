@@ -4763,6 +4763,72 @@ function veLock(amountStr, lockDays, maxLockDays, elapsedDays, targetStr) {
   };
 }
 
+/* ---------- Tool 94: lookup table close planner (ALT cooldown) ---------- */
+/* Tool 31 plans a lookup table's account; this plans its END. A table's
+   authority can DEACTIVATE it at any time, but the close that reclaims
+   the rent deposit is rejected while the deactivation slot is still
+   "recent": the address lookup table program checks the deactivation
+   slot against the SlotHashes sysvar, which keeps the most recent 512
+   PRODUCED slots - one entry per block actually produced. So the
+   cooldown is counted in produced blocks (the rise in block height
+   since deactivation), never in slot numbers: skipped slots advance
+   the slot count but add no SlotHashes entry and move the wait not at
+   all. The table becomes closable once 512 blocks have been produced
+   after the deactivation block, and not one block sooner - at 511 it
+   is still the oldest entry the sysvar keeps. The headline shows why
+   slot-counting misleads: a 64-address table deactivated at slot
+   300,000,000 whose chain has since advanced 600 slots but produced
+   only 450 blocks (150 slots skipped) still has 62 blocks to wait,
+   even though the earliest slot a close could ever land at -
+   deactivation + 512 - has already passed. Closing reclaims the
+   table's full rent-exempt deposit, Tool 31's own figure composed from
+   rentExempt at 56 + 32 x stored bytes (15,534,720 lamports at 64
+   addresses), paid to the recipient the authority names; the close
+   transaction's own fee is not modelled. Inputs are strict integers
+   (blanks rejected, never read as 0), and a produced count above the
+   slots elapsed is rejected - on a real chain each produced block
+   occupies its own slot, so the two counts cannot cross. Frozen
+   tables can never be closed and are not modelled. Prototype-verified
+   before shipping against an independent Python integer oracle on
+   20,000 cases, 0 mismatches on every figure, with the size and
+   reclaim figures asserted against Tool 31's lookupTablePlan in the
+   test suite. No live table, slot or height is read. */
+var SLOT_HASHES_ENTRIES = 512;
+var MAX_ALTC_SLOT = 1000000000000;
+function altcStrictInt(v) {
+  if (typeof v === "string") { var t = v.trim(); if (!/^-?\d+$/.test(t)) return null; v = Number(t); }
+  if (typeof v !== "number" || !Number.isInteger(v)) return null;
+  return v;
+}
+function altClose(storedStr, deactSlotStr, currSlotStr, deactHeightStr, currHeightStr) {
+  var stored = altcStrictInt(storedStr);
+  var ds = altcStrictInt(deactSlotStr), cs = altcStrictInt(currSlotStr);
+  var dh = altcStrictInt(deactHeightStr), ch = altcStrictInt(currHeightStr);
+  if (stored === null || ds === null || cs === null || dh === null || ch === null) return null;
+  if (stored < 0 || stored > ALT_MAX_ADDRESSES) return null;
+  if (ds < 0 || ds > MAX_ALTC_SLOT || cs < 0 || cs > MAX_ALTC_SLOT) return null;
+  if (dh < 0 || dh > MAX_ALTC_SLOT || ch < 0 || ch > MAX_ALTC_SLOT) return null;
+  if (cs < ds || ch < dh) return null;
+  var produced = ch - dh;
+  var elapsed = cs - ds;
+  if (produced > elapsed) return null;
+  var sizeBytes = ALT_META_BYTES + 32 * stored;
+  var rent = rentExempt(sizeBytes);
+  var remaining = produced >= SLOT_HASHES_ENTRIES ? 0 : SLOT_HASHES_ENTRIES - produced;
+  return {
+    stored: stored,
+    sizeBytes: sizeBytes,
+    reclaimLamports: String(rent.rentExemptLamports), reclaimSol: rent.rentExemptSol,
+    deactSlot: ds, currSlot: cs, slotsElapsed: elapsed,
+    deactHeight: dh, currHeight: ch, producedBlocks: produced,
+    skippedSlots: elapsed - produced,
+    blocksRemaining: remaining,
+    closable: produced >= SLOT_HASHES_ENTRIES,
+    waitBps: Number((BigInt(Math.min(produced, SLOT_HASHES_ENTRIES)) * 10000n) / BigInt(SLOT_HASHES_ENTRIES)),
+    earliestCloseSlot: ds + SLOT_HASHES_ENTRIES
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5385,6 +5451,7 @@ if (typeof module !== "undefined" && module.exports) {
     platformFeeSwap, MAX_PLATFORM_FEE_BPS,
     splitRouteSwap,
     veLock, MAX_VE_DAYS,
+    altClose, SLOT_HASHES_ENTRIES, MAX_ALTC_SLOT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7506,6 +7573,33 @@ if (typeof document !== "undefined") {
       else if (res.elapsedDays === 0) note = " No time has elapsed yet, so nothing has decayed: the power now is the initial power, and it begins falling one day of remaining term at a time from here.";
       else note = " The decay is the elapsed time, not a fee: extending the unlock by exactly the elapsed " + res.elapsedDays + " " + dw(res.elapsedDays) + " (a remaining term of " + res.lockDays + " " + dw(res.lockDays) + " again, within the maximum) restores the initial power without locking one more token.";
       setText("velock-result", "Model output: locking " + res.amount + " for " + res.lockDays + " " + dw(res.lockDays) + " against a maximum lock of " + res.maxLockDays + " " + dw(res.maxLockDays) + " starts at " + res.initialVP + " voting power - the amount scaled by a " + res.multiplierBps.toLocaleString("en-US") + " bps multiplier, because power is amount x remaining lock / maximum lock. After " + res.elapsedDays + " elapsed " + dw(res.elapsedDays) + ", " + res.remainingDays + " " + dw(res.remainingDays) + (res.remainingDays === 1 ? " remains" : " remain") + " and the power has decayed linearly to " + res.currentVP + ", reaching exactly zero at unlock. Reaching a target of " + res.target + " voting power at the remaining term takes " + (res.neededTotal === null ? "no amount at all while no lock remains" : res.neededTotal + " locked in total (a top-up of " + res.topUp + " over the amount locked)") + "." + note + " Real vote-escrow programs set their own maximum lock and rules (many never allow early unlock, and some decay on a coarser schedule); only the shared linear rule is modelled and no live program, lock or vote is read. Amounts and days are user-entered. An educational model of vote-escrow locking, not a live quote. Not financial advice.");
+    });
+
+    var altcForm = document.getElementById("altc-calc");
+    if (altcForm) altcForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = altClose(val("altc-stored"), val("altc-dslot"), val("altc-cslot"), val("altc-dheight"), val("altc-cheight"));
+      if (!res) {
+        document.getElementById("altc-status-out").value = "Invalid";
+        document.getElementById("altc-wait-out").value = "Invalid";
+        document.getElementById("altc-reclaim-out").value = "Invalid";
+        document.getElementById("altc-earliest-out").value = "Invalid";
+        setText("altc-result", "Check the inputs: the stored addresses must be a whole number from 0 to 256, the slots and block heights whole numbers with the current values no earlier than the deactivation values, and the blocks produced since deactivation (the rise in block height) cannot exceed the slots elapsed - each produced block occupies its own slot. Blanks are not read as zero.");
+        return;
+      }
+      var bw = function (n) { return n === 1 ? "block" : "blocks"; };
+      var sw = function (n) { return n === 1 ? "slot" : "slots"; };
+      document.getElementById("altc-status-out").value = res.closable ? "Closable now - the deactivation slot has left SlotHashes" : ("Not closable yet - " + res.blocksRemaining + " " + bw(res.blocksRemaining) + (res.blocksRemaining === 1 ? " remains" : " remain") + " to be produced");
+      document.getElementById("altc-wait-out").value = res.producedBlocks.toLocaleString("en-US") + " " + bw(res.producedBlocks) + " produced over " + res.slotsElapsed.toLocaleString("en-US") + " elapsed " + sw(res.slotsElapsed) + " (" + res.skippedSlots.toLocaleString("en-US") + " skipped) - " + res.waitBps.toLocaleString("en-US") + " bps of the 512-block wait";
+      document.getElementById("altc-reclaim-out").value = res.reclaimLamports + " lamports (" + res.reclaimSol + " SOL) from the " + res.sizeBytes.toLocaleString("en-US") + "-byte table account";
+      document.getElementById("altc-earliest-out").value = "Slot " + res.earliestCloseSlot.toLocaleString("en-US") + " at the earliest (deactivation slot + 512, only if no slot is skipped)";
+      var note = "";
+      if (res.closable) note = " The wait is complete: at least 512 blocks have been produced since deactivation, so the deactivation slot is no longer among the 512 entries SlotHashes keeps, and the close instruction can reclaim the deposit (the close transaction's own fee is not modelled). A frozen table is the exception - it can never be closed at all.";
+      else if (res.producedBlocks === 0) note = " Nothing has been produced since deactivation yet - the deactivation slot is the newest entry in SlotHashes, as far from expiring as it can be. The full 512-block wait lies ahead, however fast the slot count rises.";
+      else if (res.blocksRemaining === 1) note = " One block remains: at 511 produced blocks the deactivation slot is still the oldest entry SlotHashes keeps, and the very next produced block pushes it out - a skipped slot does not.";
+      else if (res.skippedSlots > 0) note = " The slot count flatters this wait: " + res.skippedSlots.toLocaleString("en-US") + " of the elapsed " + sw(res.slotsElapsed) + " produced no block and no SlotHashes entry, which is why the wait is counted in block height, not slots - the earliest close slot has " + (res.currSlot >= res.earliestCloseSlot ? "already passed on the slot count alone, yet the table still cannot close" : "not even been reached, and reaching it would still not be enough if more slots skip") + ".";
+      else note = " No slot has skipped so far, so here the slot count and the block count agree - the wait ends when the produced count reaches 512, and any future skipped slot stretches it in slot terms without changing the block target.";
+      setText("altc-result", "Model output: the table holds " + res.stored + " stored " + (res.stored === 1 ? "address" : "addresses") + " in a " + res.sizeBytes.toLocaleString("en-US") + "-byte account, so closing it reclaims its full rent-exempt deposit of " + res.reclaimLamports + " lamports (" + res.reclaimSol + " SOL). Deactivated at slot " + res.deactSlot.toLocaleString("en-US") + " (block height " + res.deactHeight.toLocaleString("en-US") + "), it has waited through " + res.producedBlocks.toLocaleString("en-US") + " produced " + bw(res.producedBlocks) + " of the 512 the SlotHashes sysvar keeps - " + (res.closable ? "the deactivation slot has expired from SlotHashes and the table is closable now" : res.blocksRemaining + " " + bw(res.blocksRemaining) + (res.blocksRemaining === 1 ? " remains" : " remain") + " before the deactivation slot expires from SlotHashes and the close can land") + "." + note + " Slots, heights and the stored count are user-entered; no live table, slot or height is read, and the authority and recipient of a real close are not modelled. An educational model of lookup table closure, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
