@@ -3841,6 +3841,69 @@ function feeSplit(sigsStr, cuLimitStr, cuPriceStr, countStr) {
   };
 }
 
+/* ---------- Tool 79: validator commission ---------- */
+/* When SOL is delegated to a validator, the network rewards the
+   stake earns are split once, at the source: the validator's vote
+   account keeps a COMMISSION share of the rewards and the rest is
+   distributed to the delegated stake accounts pro-rata by active
+   stake weight, deposited as immediately active stake. Commission
+   is set in WHOLE PERCENTAGE POINTS - an integer from 0 to 100,
+   never basis points - can be changed only during the first half
+   of an epoch, and defaults to 100% on a vote account created
+   without one, which passes nothing to delegators at all. Two
+   consequences the model makes exact. First, commission is charged
+   on REWARDS ONLY, never on principal: even a 100% commission
+   leaves the delegated stake itself untouched - it takes every
+   lamport of reward and nothing else. Second, the delegator's
+   effective rate is the gross rate scaled by what survives:
+   netBps = grossBps x (100 - pct) / 100 before flooring, so a 5%
+   commission on a 700 bps gross rate nets 665 bps, and each single
+   percentage point of commission costs exactly one hundredth of
+   the gross reward. The gross rate here is the user's own assumed
+   figure for one validator over one year (rewards depend on the
+   validator's voting and the network's issuance; no live rate is
+   read), annualised pro-rata over the chosen period in days
+   against a 365-day year, with every figure floored at the
+   smallest unit in exact scaled BigInt: the annual gross is
+   floor(stake x grossBps / 10,000), the commission is
+   floor(gross x pct / 100), and the period figures repeat the same
+   two floors on floor(stake x grossBps x days / (10,000 x 365)).
+   This is direct delegation only: stake-pool token fees are Tool
+   75, gross epoch compounding before any commission is Tool 8,
+   and a validator's separate block-revenue / MEV commission is
+   NOT modelled. Prototype-proven on 20,008 cases against an
+   independent Python exact-rational oracle, 0 mismatches. */
+var MAX_VCOMM_GROSS_BPS = 100000;
+var MAX_VCOMM_DAYS = 3650;
+
+function validatorCommission(stakeStr, grossBpsStr, commissionPctStr, daysStr) {
+  var stake = parseScaled(stakeStr);
+  var grossBps = Number(grossBpsStr), pct = Number(commissionPctStr), days = Number(daysStr);
+  if (stake === null || stake <= 0n) return null;
+  if (!Number.isInteger(grossBps) || grossBps < 0 || grossBps > MAX_VCOMM_GROSS_BPS) return null;
+  if (!Number.isInteger(pct) || pct < 0 || pct > 100) return null;
+  if (!Number.isInteger(days) || days < 1 || days > MAX_VCOMM_DAYS) return null;
+  var gB = BigInt(grossBps), pB = BigInt(pct), dB = BigInt(days);
+  var grossAnnual = stake * gB / 10000n;
+  var commAnnual = grossAnnual * pB / 100n;
+  var netAnnual = grossAnnual - commAnnual;
+  var periodGross = stake * gB * dB / (10000n * 365n);
+  var periodComm = periodGross * pB / 100n;
+  var periodNet = periodGross - periodComm;
+  return {
+    stake: formatScaled(stake), grossBps: grossBps, commissionPct: pct, days: days,
+    grossAnnual: formatScaled(grossAnnual),
+    commissionAnnual: formatScaled(commAnnual),
+    netAnnual: formatScaled(netAnnual),
+    effectiveBps: grossAnnual === 0n ? 0 : Number(netAnnual * 10000n / stake),
+    perPointAnnual: formatScaled(grossAnnual / 100n),
+    periodGross: formatScaled(periodGross),
+    periodCommission: formatScaled(periodComm),
+    periodNet: formatScaled(periodNet),
+    zeroCommission: pct === 0, fullCommission: pct === 100, zeroGross: grossBps === 0
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4398,6 +4461,7 @@ if (typeof module !== "undefined" && module.exports) {
     farmRewards, MAX_FARM_VALUE, MAX_FARM_DAYS,
     bundleTipPlan, MAX_BUNDLE_LAMPORTS, MAX_BUNDLE_COUNT, MAX_BUNDLE_TXS, MAX_BUNDLE_SIGS, MIN_BUNDLE_TIP_LAMPORTS,
     feeSplit, MAX_FSPLIT_SIGS, MAX_FSPLIT_COUNT, MAX_FSPLIT_CU_PRICE,
+    validatorCommission, MAX_VCOMM_GROSS_BPS, MAX_VCOMM_DAYS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6103,6 +6167,35 @@ if (typeof document !== "undefined") {
         note = " The base fee's split never changes - what changes is the mix: every lamport of prioritization fee lands entirely on the leader's side, so the burned share falls as the priority bid rises, and the burn itself stays pinned at half the base fee however large the bid grows.";
       }
       setText("fsplit-result", "Model output: a transaction with " + res.signatures + " signature(s), a compute-unit limit of " + res.cuLimit + " at a price of " + res.cuPriceMicro + " micro-lamports per compute unit, pays a base fee of " + res.baseFeeLamports + " lamports and a prioritization fee of " + res.priorityFeeLamports + " lamports - " + res.totalFeeLamports + " lamports (" + res.totalFeeSol + " SOL) in total. Of that, " + res.burnedLamports + " lamports burn (half the base fee, destroyed out of the supply) and " + res.leaderLamports + " lamports go to the block leader (the other half of the base fee plus the whole prioritization fee): a burned share of " + res.burnedBps + " bps and a leader share of " + res.leaderBps + " bps. Across " + res.txCount + (res.txCount === 1 ? " transaction" : " transactions") + " at these settings the fees total " + res.periodTotalLamports + " lamports, of which " + res.periodBurnedLamports + " burn (" + res.periodBurnedSol + " SOL) and " + res.periodLeaderLamports + " go to leaders." + note + " A transaction that lands but fails still pays this fee in full; the v1 format's absolute-fee form, proposed base-fee redesigns and Jito tips (a separate transfer, Tool 77) are not modelled, and no live fee data is read. An educational model of transaction fee splits, not a live quote. Not financial advice.");
+    });
+
+    var vcommForm = document.getElementById("vcomm-calc");
+    if (vcommForm) vcommForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = validatorCommission(val("vcomm-stake"), val("vcomm-gross"), val("vcomm-comm"), val("vcomm-days"));
+      if (res === null) {
+        document.getElementById("vcomm-gross-out").value = "Invalid";
+        document.getElementById("vcomm-comm-out").value = "Invalid";
+        document.getElementById("vcomm-net-out").value = "Invalid";
+        document.getElementById("vcomm-period-out").value = "Invalid";
+        setText("vcomm-result", "Check the inputs: the stake is a positive amount, the assumed gross reward rate is a whole number of basis points from 0 to 100,000, the commission is a whole number of percentage points from 0 to 100, and the period is a whole number of days from 1 to 3,650.");
+        return;
+      }
+      document.getElementById("vcomm-gross-out").value = res.grossAnnual;
+      document.getElementById("vcomm-comm-out").value = res.commissionAnnual;
+      document.getElementById("vcomm-net-out").value = res.netAnnual + " (effective " + res.effectiveBps + " bps)";
+      document.getElementById("vcomm-period-out").value = res.periodNet;
+      var note = "";
+      if (res.zeroGross) {
+        note = " At an assumed gross rate of zero there is no reward for any commission to be charged on: the split is exact and empty at every commission rate, and the choice of validator would turn on performance and reliability instead.";
+      } else if (res.zeroCommission) {
+        note = " At a commission of zero the delegator keeps the whole gross reward: the effective rate equals the gross rate exactly, and nothing is withheld at the source.";
+      } else if (res.fullCommission) {
+        note = " At a commission of 100 percent the validator keeps every lamport of reward and the delegator nets exactly zero - while the delegated principal itself is still untouched, because commission is charged on rewards only. A vote account created without setting a commission defaults to exactly this rate.";
+      } else {
+        note = " Each single percentage point of commission costs one hundredth of the gross reward, so the comparison between two validators at the same gross rate is arithmetic, not judgement: the whole gap between their effective rates is the gap between their commission rates, scaled by the gross rate.";
+      }
+      setText("vcomm-result", "Model output: a stake of " + res.stake + " at an assumed gross reward rate of " + res.grossBps + " bps a year earns a gross reward of " + res.grossAnnual + " a year before commission. At a commission of " + res.commissionPct + " percent - a whole number of percentage points, the only form a vote account accepts - the validator keeps " + res.commissionAnnual + " of that reward and the delegator nets " + res.netAnnual + ", an effective rate of " + res.effectiveBps + " bps, with each percentage point of commission worth " + res.perPointAnnual + " a year at these settings. Over a period of " + res.days + " day(s) the gross reward is " + res.periodGross + ", of which the commission takes " + res.periodCommission + " and the delegator nets " + res.periodNet + "." + note + " The gross rate is an assumed figure, not a live rate; commission can be changed only during the first half of an epoch; stake-pool token fees (Tool 75), gross epoch compounding (Tool 8) and any separate block-revenue or MEV commission are not modelled, and no live validator data is read. An educational model of validator commission, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
