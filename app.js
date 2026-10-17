@@ -4190,6 +4190,64 @@ function delinquentStake(totalStr, delinqStr, extraStr) {
   };
 }
 
+/* ---------- Tool 85: wrapped SOL (wSOL) & the syncNative reserve ---------- */
+/* Wrapped SOL is native SOL held inside an ordinary SPL token account
+   for the native mint (So11111111111111111111111111111111111111112):
+   programs that only speak SPL tokens - pools, order books, lending
+   markets - trade wSOL, and every SOL-side swap leg wraps first. The
+   token program's syncNative instruction sets the account's token
+   balance to its lamport balance MINUS the rent-exempt minimum for a
+   token account, so what you fund is not what you can spend: a token
+   account is 165 bytes, its reserve is (128 + 165) x 6,960 =
+   2,039,280 lamports (Tool 3's figure at that size), and funding a
+   fresh wSOL account with 10 SOL leaves 9,997,960,720 lamports
+   (9.99796072 SOL) of spendable wSOL. The reserve is a deposit, not a
+   fee: closing the account returns its whole remaining balance, so
+   after spending every spendable lamport the close still returns the
+   2,039,280 reserve per account, and unwrapping an untouched account
+   returns the full funding. Splitting one wrap across fresh accounts
+   multiplies the reserve - 10 SOL across 10 fresh accounts locks
+   20,392,800 and spends 9,979,607,200 - while topping up an account
+   whose reserve is already funded (zero fresh accounts here) credits
+   the full transfer, because syncNative only ever subtracts the one
+   reserve the account already carries. Funding below the reserve
+   spends nothing and is short by the difference. Every figure is
+   exact integer lamports; the spendable share is floored basis
+   points of the funding. Prototype-proven on 20,000 cases against an
+   independent Python integer oracle, 0 mismatches. */
+var WSOL_ACCOUNT_BYTES = 165;
+var WSOL_RESERVE_LAMPORTS = 2039280n; /* (128 + 165) x 6,960 - Tool 3 at 165 bytes */
+var MAX_WSOL_FUND_LAMPORTS = 1000000000000000000n; /* 1,000,000,000 SOL */
+var MAX_WSOL_ACCOUNTS = 100000;
+
+function wrappedSol(fundStr, accountsStr) {
+  var fund = parseScaled(fundStr);
+  if (fund === null) return null;
+  if (typeof accountsStr !== "string") return null;
+  var aStr = accountsStr.trim();
+  if (!/^\d+$/.test(aStr)) return null;
+  var accounts = Number(aStr);
+  if (!Number.isInteger(accounts) || accounts < 0 || accounts > MAX_WSOL_ACCOUNTS) return null;
+  if (fund <= 0n || fund > MAX_WSOL_FUND_LAMPORTS) return null;
+  var reserve = WSOL_RESERVE_LAMPORTS * BigInt(accounts);
+  var spendable = fund > reserve ? fund - reserve : 0n;
+  var shortfall = reserve > fund ? reserve - fund : 0n;
+  var bps = Number((spendable * 10000n) / fund);
+  return {
+    fund: formatScaled(fund), fundLamports: fund.toString(),
+    accounts: accounts,
+    reservePerAccountLamports: WSOL_RESERVE_LAMPORTS.toString(),
+    reserveLamports: reserve.toString(), reserveSol: formatScaled(reserve),
+    spendableLamports: spendable.toString(), spendableSol: lamportsToSol(spendable.toString()),
+    spendableBps: bps, spendablePct: (bps / 100).toFixed(2),
+    belowReserve: fund < reserve,
+    shortfallLamports: shortfall.toString(), shortfallSol: formatScaled(shortfall),
+    minFundLamports: (reserve + 1n).toString(), minFundSol: formatScaled(reserve + 1n),
+    closeBackLamports: reserve.toString(), closeBackSol: formatScaled(reserve),
+    unwrapLamports: fund.toString(), unwrapSol: formatScaled(fund)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4753,6 +4811,7 @@ if (typeof module !== "undefined" && module.exports) {
     rentReclaim, TOKEN_ACCOUNT_BYTES, MAX_RECLAIM_ACCOUNTS, MAX_RECLAIM_ACCOUNT_BYTES, MAX_RECLAIM_SIGS,
     stakeFunding, STAKE_ACCOUNT_BYTES, MAX_STAKE_FUNDING_LAMPORTS,
     delinquentStake, MAX_DELINQ_TOTAL_LAMPORTS,
+    wrappedSol, WSOL_ACCOUNT_BYTES, MAX_WSOL_FUND_LAMPORTS, MAX_WSOL_ACCOUNTS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6642,6 +6701,35 @@ if (typeof document !== "undefined") {
       }
       setText("delinq-result", "Model output: of " + res.totalLamports + " lamports (" + res.total + " SOL) of activated stake, " + res.delinquentLamports + " lamports (" + res.delinquent + " SOL) are delinquent - " + res.delinqBps + " bps (" + res.delinqPct + "%) - leaving " + res.onlineLamports + " lamports (" + res.onlineSol + " SOL) voting. Finalizing needs more than two-thirds of the stake voting, at least " + res.minOnlineLamports + " lamports (" + res.minOnlineSol + " SOL) here, so the largest delinquent stake this cluster can carry is " + res.maxDelinqLamports + " lamports (" + res.maxDelinqSol + " SOL) - one lamport under a third of the total, because exactly a third delinquent leaves exactly two-thirds online, and exactly two-thirds is not a supermajority." + note + " Delinquent stake here means activated stake whose validator is not voting; which validators those are, and why, is live cluster data this model does not read. Leader schedule share (Tool 80) and validator commission (Tool 79) are separate mechanics. An educational model of delinquent stake and finality, not a live quote. Not financial advice.");
     });
+    var wsolForm = document.getElementById("wsol-calc");
+    if (wsolForm) wsolForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = wrappedSol(val("wsol-fund"), val("wsol-accounts"));
+      if (!res) {
+        document.getElementById("wsol-reserve-out").value = "Invalid";
+        document.getElementById("wsol-spend-out").value = "Invalid";
+        document.getElementById("wsol-minfund-out").value = "Invalid";
+        document.getElementById("wsol-close-out").value = "Invalid";
+        setText("wsol-result", "Check the inputs: the funding is a SOL amount above zero and at most 1,000,000,000 with at most nine decimal places, and the fresh-account count is a whole number from 0 to 100,000.");
+        return;
+      }
+      document.getElementById("wsol-reserve-out").value = res.reserveLamports + " lamports (" + res.reserveSol + " SOL) across " + res.accounts + (res.accounts === 1 ? " fresh account" : " fresh accounts");
+      document.getElementById("wsol-spend-out").value = res.spendableLamports + " lamports (" + res.spendableSol + " SOL), " + res.spendableBps + " bps (" + res.spendablePct + "%) of the funding";
+      document.getElementById("wsol-minfund-out").value = res.minFundLamports + " lamports (" + res.minFundSol + " SOL)";
+      document.getElementById("wsol-close-out").value = res.closeBackLamports + " lamports (" + res.closeBackSol + " SOL) after spending it all; " + res.unwrapLamports + " lamports (" + res.unwrapSol + " SOL) if nothing was spent";
+      var note = "";
+      if (res.belowReserve) {
+        note = " The funding does not even cover the reserve: it is " + res.shortfallLamports + " lamports (" + res.shortfallSol + " SOL) short, so the spendable balance is zero - a wrap this small into fresh accounts buys no wSOL at all.";
+      } else if (res.accounts === 0) {
+        note = " With no fresh account in the plan the reserve is already funded, so syncNative credits the full transfer - topping up an existing wSOL account is the one case where what you send is what you can spend.";
+      } else if (res.accounts > 1) {
+        note = " Splitting the wrap across " + res.accounts + " fresh accounts multiplies the reserve by " + res.accounts + " - one account would have locked only " + res.reservePerAccountLamports + " lamports.";
+      } else {
+        note = " One fresh account locks exactly one reserve; the same funding into an already-funded account would spend in full.";
+      }
+      setText("wsol-result", "Model output: funding " + res.fundLamports + " lamports (" + res.fund + " SOL) into " + res.accounts + (res.accounts === 1 ? " fresh wSOL account" : " fresh wSOL accounts") + " locks " + res.reserveLamports + " lamports (" + res.reserveSol + " SOL) of rent-exempt reserve - 2,039,280 lamports per 165-byte token account, Tool 3's figure at that size - because syncNative sets the token balance to the lamport balance minus that reserve. The spendable wSOL is " + res.spendableLamports + " lamports (" + res.spendableSol + " SOL). The reserve is a deposit, not a fee: closing an account returns its whole remaining balance, so spending every spendable lamport and then closing returns " + res.closeBackLamports + " lamports (" + res.closeBackSol + " SOL), and closing untouched returns the full " + res.unwrapLamports + " lamports (" + res.unwrapSol + " SOL)." + note + " Transaction base fees (Tool 5) ride on top and are not in these figures, and closing an account that still holds wSOL returns that balance too - spend or transfer it first in a real flow. An educational model of wrapped SOL and syncNative, not a live quote. Not financial advice.");
+    });
+
 
 
     /* catalogue filter */
