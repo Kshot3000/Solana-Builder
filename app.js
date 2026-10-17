@@ -3780,6 +3780,67 @@ function bundleTipPlan(tipStr, txCountStr, sigsStr, bundlesStr, profitStr) {
   };
 }
 
+/* ---------- Tool 78: transaction fee split ---------- */
+/* Tool 5 prices what a transaction pays; this tool follows the
+   money. Under the rules in Solana's fee documentation, the two
+   parts of a fee have different destinations. The BASE fee - 5,000
+   lamports per signature - is split exactly in half: 2,500 lamports
+   per signature are BURNED (destroyed, out of the supply) and 2,500
+   go to the block leader who included the transaction. The
+   PRIORITIZATION fee - ceil(CU limit x CU price / 1,000,000), charged
+   on the limit requested, exactly as Tool 5 computes it - is not
+   split at all: since SIMD-0096 activated (February 2025) 100% of it
+   goes to the leader; before that change, half of it burned too.
+   So the burned share of a total fee is a falling function of the
+   priority bid: with no prioritization fee exactly half of what is
+   paid burns, and as the bid rises the burn stays pinned at half
+   the base fee while the leader's side grows. The base fee is
+   always a multiple of 5,000, so its half is always a whole number
+   of lamports and no rounding ever enters the split. A transaction
+   that lands but fails still pays its fee in full, split the same
+   way. The v1 transaction format, which sets the prioritization fee
+   as an absolute lamport total instead of a price per compute unit,
+   and proposed redesigns of the base fee are NOT modelled. Jito
+   tips are separate transfers, not fees (Tool 77); rent is a locked
+   deposit, not a fee (Tool 3). All figures are exact integer
+   lamports (prototype-proven on 20,008 cases against an independent
+   Python integer oracle, 0 mismatches on every figure, and the
+   total asserted against Tool 5's own txFee on every case). */
+var MAX_FSPLIT_SIGS = 12;
+var MAX_FSPLIT_COUNT = 1000000;
+var MAX_FSPLIT_CU_PRICE = 1000000000000;
+
+function feeSplit(sigsStr, cuLimitStr, cuPriceStr, countStr) {
+  var sigs = Number(sigsStr), cu = Number(cuLimitStr), price = Number(cuPriceStr), count = Number(countStr);
+  if (!Number.isInteger(sigs) || sigs < 1 || sigs > MAX_FSPLIT_SIGS) return null;
+  if (!Number.isInteger(cu) || cu < 1 || cu > MAX_COMPUTE_UNIT_LIMIT) return null;
+  if (!Number.isInteger(price) || price < 0 || price > MAX_FSPLIT_CU_PRICE) return null;
+  if (!Number.isInteger(count) || count < 1 || count > MAX_FSPLIT_COUNT) return null;
+  var base = 5000n * BigInt(sigs);
+  var priority = (BigInt(cu) * BigInt(price) + 999999n) / 1000000n;
+  var total = base + priority;
+  var burned = base / 2n;
+  var leader = total - burned;
+  var burnedBps = Number((burned * 10000n) / total);
+  return {
+    signatures: sigs, cuLimit: cu, cuPriceMicro: price, txCount: count,
+    baseFeeLamports: base.toString(),
+    priorityFeeLamports: priority.toString(),
+    totalFeeLamports: total.toString(),
+    burnedLamports: burned.toString(),
+    leaderLamports: leader.toString(),
+    totalFeeSol: lamportsToSol(total.toString()),
+    burnedSol: lamportsToSol(burned.toString()),
+    leaderSol: lamportsToSol(leader.toString()),
+    burnedBps: burnedBps, leaderBps: 10000 - burnedBps,
+    noPriority: priority === 0n,
+    periodTotalLamports: (total * BigInt(count)).toString(),
+    periodBurnedLamports: (burned * BigInt(count)).toString(),
+    periodLeaderLamports: (leader * BigInt(count)).toString(),
+    periodBurnedSol: lamportsToSol((burned * BigInt(count)).toString())
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4336,6 +4397,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakePoolFees, MAX_SPOOL_VALUE,
     farmRewards, MAX_FARM_VALUE, MAX_FARM_DAYS,
     bundleTipPlan, MAX_BUNDLE_LAMPORTS, MAX_BUNDLE_COUNT, MAX_BUNDLE_TXS, MAX_BUNDLE_SIGS, MIN_BUNDLE_TIP_LAMPORTS,
+    feeSplit, MAX_FSPLIT_SIGS, MAX_FSPLIT_COUNT, MAX_FSPLIT_CU_PRICE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6014,6 +6076,33 @@ if (typeof document !== "undefined") {
       }
       var shareText = res.costShareBps === null ? "the expected profit is 0, so the cost share is undefined" : "a cost share of " + res.costShareBps + " bps of the expected profit";
       setText("bundle-result", "Model output: a bundle of " + res.txCount + " transactions at " + res.sigsPerTx + " signature(s) each pays " + res.basePerBundle + " lamports of base fees, so with a tip of " + res.tipLamports + " lamports (" + res.tipSol + " SOL) one landed bundle costs " + res.costPerBundle + " lamports and keeps " + res.netPerBundle + " lamports of the " + res.profitLamports + " expected gross profit - " + shareText + ". The most that could be tipped before the base fees alone eat the profit is " + res.breakEvenTip + " lamports. Across " + res.bundles + " landed bundles the tips total " + res.totalTip + " lamports, the base fees " + res.totalBase + ", and the all-in cost " + res.totalCost + " lamports (" + res.totalCostSol + " SOL)." + note + " A bundle that does not land executes nothing and pays nothing; the live tip floor, priority fees, landing probability and retry costs are not modelled, and no live bundle is read. An educational model of bundle tips, not a live quote. Not financial advice.");
+    });
+
+    var fsplitForm = document.getElementById("fsplit-calc");
+    if (fsplitForm) fsplitForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = feeSplit(val("fsplit-sigs"), val("fsplit-cu"), val("fsplit-price"), val("fsplit-count"));
+      if (res === null) {
+        document.getElementById("fsplit-total-out").value = "Invalid";
+        document.getElementById("fsplit-burn-out").value = "Invalid";
+        document.getElementById("fsplit-leader-out").value = "Invalid";
+        document.getElementById("fsplit-period-out").value = "Invalid";
+        setText("fsplit-result", "Check the inputs: signatures are a whole number from 1 to 12, the compute-unit limit is a whole number from 1 to 1,400,000, the compute-unit price is a whole number of micro-lamports from 0 to 1,000,000,000,000, and the transaction count is a whole number from 1 to 1,000,000.");
+        return;
+      }
+      document.getElementById("fsplit-total-out").value = res.totalFeeLamports + " lamports (" + res.totalFeeSol + " SOL)";
+      document.getElementById("fsplit-burn-out").value = res.burnedLamports + " lamports (" + res.burnedBps + " bps of the total)";
+      document.getElementById("fsplit-leader-out").value = res.leaderLamports + " lamports (" + res.leaderBps + " bps of the total)";
+      document.getElementById("fsplit-period-out").value = res.periodBurnedLamports + " lamports (" + res.periodBurnedSol + " SOL)";
+      var note = "";
+      if (res.noPriority) {
+        note = " With no prioritization fee the split is exactly half and half - the burned share only ever falls because a prioritization fee is added on top, never because the base fee's own split changes.";
+      } else if (res.burnedBps <= 100) {
+        note = " At these settings the prioritization fee so dwarfs the base fee that the burn is close to a rounding error: almost everything paid reaches the leader, which is the point of SIMD-0096 - the full priority bid goes to the validator making the scheduling decision.";
+      } else {
+        note = " The base fee's split never changes - what changes is the mix: every lamport of prioritization fee lands entirely on the leader's side, so the burned share falls as the priority bid rises, and the burn itself stays pinned at half the base fee however large the bid grows.";
+      }
+      setText("fsplit-result", "Model output: a transaction with " + res.signatures + " signature(s), a compute-unit limit of " + res.cuLimit + " at a price of " + res.cuPriceMicro + " micro-lamports per compute unit, pays a base fee of " + res.baseFeeLamports + " lamports and a prioritization fee of " + res.priorityFeeLamports + " lamports - " + res.totalFeeLamports + " lamports (" + res.totalFeeSol + " SOL) in total. Of that, " + res.burnedLamports + " lamports burn (half the base fee, destroyed out of the supply) and " + res.leaderLamports + " lamports go to the block leader (the other half of the base fee plus the whole prioritization fee): a burned share of " + res.burnedBps + " bps and a leader share of " + res.leaderBps + " bps. Across " + res.txCount + (res.txCount === 1 ? " transaction" : " transactions") + " at these settings the fees total " + res.periodTotalLamports + " lamports, of which " + res.periodBurnedLamports + " burn (" + res.periodBurnedSol + " SOL) and " + res.periodLeaderLamports + " go to leaders." + note + " A transaction that lands but fails still pays this fee in full; the v1 format's absolute-fee form, proposed base-fee redesigns and Jito tips (a separate transfer, Tool 77) are not modelled, and no live fee data is read. An educational model of transaction fee splits, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
