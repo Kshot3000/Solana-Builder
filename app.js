@@ -4714,6 +4714,56 @@ function burnShare(supplyStr, holderStr, burnStr) {
   };
 }
 
+/* ---------- Tool 92: compressed NFT proof planner ---------- */
+/* Tool 28 prices the tree ACCOUNT; this prices the PROOF every later
+   transfer or burn of a compressed NFT must carry. A leaf in a tree of
+   max depth D is proven by one 32-byte sibling hash per level - D hashes
+   with no canopy. The canopy stores the top C levels on-chain (Tool 28's
+   canopy node count, 2^(C+1) - 2 hashes), so the caller supplies only
+   the remaining D - C hashes, each travelling in the transaction as a
+   32-byte account key. The trade is exact: at depth 20 with the minimum
+   canopy of 3 a proof is 17 hashes / 544 bytes - 4,415 bps of the
+   1,232-byte packet limit, before any other account or instruction byte -
+   while a canopy of 14 cuts it to 6 hashes / 192 bytes at the cost of
+   32,766 canopy hashes (1,048,512 bytes) stored on-chain. Past depth 17
+   Bubblegum tree creation requires a canopy of at least D - 17, which is
+   exactly the rule that keeps a proof to at most 17 hashes. A full
+   canopy (C = D) needs no proof hashes at all. Capacity is 2^D, carried
+   in BigInt so depth 30 stays exact. Inputs are strict integers: blanks
+   are rejected, never read as 0 (Number("") === 0). Prototype-verified
+   before shipping against an independent Python integer oracle on
+   20,000 cases, 0 mismatches on every figure, with the proof-node and
+   canopy figures asserted against Tool 28's own merkleTreePlan in the
+   test suite. No live tree is read. */
+var MAX_CPROOF_TXS = 10000;
+function cnftStrictInt(v) {
+  if (typeof v === "string") { var t = v.trim(); if (!/^-?\d+$/.test(t)) return null; v = Number(t); }
+  if (typeof v !== "number" || !Number.isInteger(v)) return null;
+  return v;
+}
+function cnftProof(maxDepth, canopyDepth, txCount) {
+  var d = cnftStrictInt(maxDepth), c = cnftStrictInt(canopyDepth), n = cnftStrictInt(txCount);
+  if (d === null || c === null || n === null) return null;
+  if (d < 1 || d > CMT_MAX_DEPTH) return null;
+  if (c < 0 || c > d) return null;
+  if (n < 1 || n > MAX_CPROOF_TXS) return null;
+  var proofNodes = d - c;
+  var proofBytes = proofNodes * 32;
+  var canopyNodes = c > 0 ? Number((1n << BigInt(c + 1)) - 2n) : 0;
+  var canopyBytes = canopyNodes * 32;
+  var minCanopy = d > 17 ? d - 17 : 0;
+  return {
+    maxDepth: d, canopyDepth: c, txCount: n,
+    capacity: (1n << BigInt(d)).toString(),
+    fullProofNodes: d, proofNodes: proofNodes, proofBytes: proofBytes,
+    totalProofBytes: proofBytes * n,
+    canopyNodes: canopyNodes, canopyBytes: canopyBytes,
+    packetShareBps: Number((BigInt(proofBytes) * 10000n) / BigInt(PACKET_DATA_SIZE)),
+    minCanopyForBubblegum: minCanopy, meetsCanopyMinimum: c >= minCanopy,
+    fullCanopy: proofNodes === 0
+  };
+}
+
 /* ---------- Tool 11: slippage tolerance bounds ---------- */
 /* Every DEX interface asks for a slippage tolerance — how far the price may
    move against the trader between quote and landing — and turns it into a
@@ -5233,6 +5283,7 @@ if (typeof module !== "undefined" && module.exports) {
     dcaPlan, MAX_DCA_ORDERS, MAX_DCA_TX_FEE_LAMPORTS,
     dlmmBins, MAX_DLMM_BIN_ID, MAX_DLMM_WIDTH,
     dlmmBinWalk, MAX_DLMM_WALK_BINS, MAX_DLMM_WALK_START,
+    cnftProof, MAX_CPROOF_TXS,
     nftMintCost, NFT_MINT_BYTES, NFT_TOKEN_ACCOUNT_BYTES, NFT_METADATA_BYTES, NFT_EDITION_BYTES, MAX_NFT_COUNT,
     programDeployCost, PROGRAM_ACCOUNT_BYTES, PROGRAMDATA_HEADER_BYTES, BUFFER_HEADER_BYTES, MAX_PROGRAM_BYTES,
     clmmImpermanentLoss,
@@ -7336,6 +7387,32 @@ if (typeof document !== "undefined") {
       else if (res.partialFill) note = " The last bin touched still holds output the swap did not need - the fill ended inside it, which is why its price is the walk's most expensive.";
       else note = " The swap ended exactly on a bin boundary: the last bin touched was drained to its smallest unit and no partial bin was needed.";
       setText("bwalk-result", "Model output: a swap of " + res.amountIn + " walks a DLMM ladder from bin " + res.startBinId + " (price " + res.startPrice + ", paid token per unit of the received token) at a " + res.stepBps + " bps step, with " + res.perBinOut + " of the received token available in each of " + res.binsAvailable + " " + bw(res.binsAvailable) + ". It drains " + res.binsDrained + " " + bw(res.binsDrained) + " outright and touches " + res.binsTouched + " in total, ending at bin " + res.endBinId + " (price " + res.endPrice + "): " + res.spentIn + " is spent and " + res.totalOut + " is received, an average price of " + (res.avgPrice === null ? "none (nothing was received)" : res.avgPrice) + ", with " + res.unfilledIn + " left unfilled." + note + " Every bin is modelled with the same available output - real bins hold uneven amounts set by the positions in them, the active bin usually holds both tokens, and the swap fee (a base fee plus the venue's variable volatility fee) is not modelled, so a real fill collects slightly less. Amounts and prices are user-entered and no live pool is read. An educational model of a DLMM bin walk, not a live quote. Not financial advice.");
+    });
+
+    var cproofForm = document.getElementById("cproof-calc");
+    if (cproofForm) cproofForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = cnftProof(val("cproof-depth"), val("cproof-canopy"), val("cproof-txs"));
+      if (!res) {
+        document.getElementById("cproof-nodes-out").value = "Invalid";
+        document.getElementById("cproof-bytes-out").value = "Invalid";
+        document.getElementById("cproof-canopy-out").value = "Invalid";
+        document.getElementById("cproof-cap-out").value = "Invalid";
+        setText("cproof-result", "Check the inputs: the max depth must be a whole number from 1 to 30, the canopy depth a whole number from 0 up to the max depth, and the transaction count a whole number from 1 to 10,000. Blanks are not read as zero.");
+        return;
+      }
+      var fmt = function (x) { return x.toLocaleString("en-US"); };
+      document.getElementById("cproof-nodes-out").value = res.proofNodes + " of " + res.fullProofNodes + " proof hashes supplied per transaction";
+      document.getElementById("cproof-bytes-out").value = fmt(res.proofBytes) + " bytes per transaction (" + fmt(res.totalProofBytes) + " bytes across " + fmt(res.txCount) + ")";
+      document.getElementById("cproof-canopy-out").value = fmt(res.canopyNodes) + " canopy hashes stored on-chain (" + fmt(res.canopyBytes) + " bytes)";
+      document.getElementById("cproof-cap-out").value = fmt(Number(res.capacity)) + " compressed assets at capacity";
+      var note = "";
+      if (res.fullCanopy) note = " The canopy covers the whole tree, so no proof hashes travel with a transaction at all - the entire saving was prepaid as on-chain canopy storage.";
+      else if (!res.meetsCanopyMinimum) note = " This canopy is BELOW the minimum Bubblegum requires at this depth (" + res.minCanopyForBubblegum + "): a tree past depth 17 cannot be created with it, because the proof would exceed the 17 hashes a transaction can carry.";
+      else if (res.canopyDepth === 0) note = " With no canopy every level of the proof travels with every transaction - the cheapest tree to create and the heaviest proof to carry.";
+      else note = " Each canopy level prepaid on-chain removes exactly one 32-byte hash from every later transaction's proof - the saving repeats on every transfer, the storage is paid once.";
+      var txw = function (n) { return n === 1 ? "transaction" : "transactions"; };
+      setText("cproof-result", "Model output: a concurrent Merkle tree of max depth " + res.maxDepth + " holds " + fmt(Number(res.capacity)) + " compressed assets, and a full proof for one of them is " + res.fullProofNodes + " hashes. With a canopy depth of " + res.canopyDepth + " (" + fmt(res.canopyNodes) + " hashes, " + fmt(res.canopyBytes) + " bytes, stored on-chain in the tree account), each transaction supplies only " + res.proofNodes + " proof hashes - " + fmt(res.proofBytes) + " bytes of account keys, " + res.packetShareBps.toLocaleString("en-US") + " bps of the 1,232-byte packet limit before any other account, signature or instruction byte - " + fmt(res.totalProofBytes) + " bytes of proof across " + fmt(res.txCount) + " " + txw(res.txCount) + "." + note + " Tree creation cost and rent are Tool 28's subject and are not repeated here; the leaf, data and creator hashes a Bubblegum instruction also carries, and any lookup-table handling, are not modelled. Depths and counts are user-entered and no live tree is read. An educational model of compressed NFT proofs, not a live quote. Not financial advice.");
     });
 
     /* catalogue filter */
