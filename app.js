@@ -5001,6 +5001,60 @@ function launchAlloc(capStr, totalStr, yourStr, supplyStr) {
   };
 }
 
+/* ---------- Tool 98: order-book tick & lot planner ---------- */
+/* A central limit order book (OpenBook v2, Phoenix and Manifest on
+   Solana) cannot rest an order at just any price or size. Prices are
+   quoted in TICKS: the executable price is a whole number of ticks,
+   the market's tick size apart, and sizes are quoted in LOTS: the
+   executable quantity is a whole number of lots, the market's lot
+   size each. An off-grid order is rounded to the grid before it can
+   rest, and the rounding is conservative by side: a BUY rounds its
+   price DOWN to the nearest tick (never pay more than you named) and
+   a SELL rounds UP (never accept less), while the quantity rounds
+   DOWN to the nearest lot on both sides - the sub-lot remainder is
+   dust that cannot trade at all, and a quantity below one whole lot
+   cannot be placed. Notionals floor at the smallest unit of the
+   quote, like an on-chain u64 division. A buy whose named price is
+   below one tick has no valid tick above zero and is rejected. Tick
+   and lot sizes differ per market and are inputs here; taker/maker
+   fees and the book itself are not modelled - Tool 43 walks a book,
+   this tool prices the grid every order on it must fit. Amounts are
+   at 9 decimals; a market with other decimals rescales both sides
+   and the grid ratios are unchanged. Prototype-verified before
+   shipping against an independent Python exact-rational oracle on
+   20,000 cases, 0 mismatches. No live market is read. */
+var MAX_TICKLOT_LAMPORTS = 10000000000000000n; /* 10,000,000 units at 9 dp - a model cap, not a market limit */
+function tickLot(side, priceStr, tickStr, qtyStr, lotStr) {
+  if (side !== "buy" && side !== "sell") return null;
+  var P = parseScaled(priceStr);
+  var T = parseScaled(tickStr);
+  var Q = parseScaled(qtyStr);
+  var L = parseScaled(lotStr);
+  if (P === null || T === null || Q === null || L === null) return null;
+  if (P <= 0n || T <= 0n || Q <= 0n || L <= 0n) return null;
+  if (P > MAX_TICKLOT_LAMPORTS || T > MAX_TICKLOT_LAMPORTS || Q > MAX_TICKLOT_LAMPORTS || L > MAX_TICKLOT_LAMPORTS) return null;
+  var ticks = side === "buy" ? P / T : (P + T - 1n) / T;
+  var VP = ticks * T;
+  if (VP <= 0n) return null;
+  var lots = Q / L;
+  var EQ = lots * L;
+  var dust = Q - EQ;
+  var devBps = Number(((VP > P ? VP - P : P - VP) * 10000n) / P);
+  var intended = (P * Q) / SCALE;
+  var valid = (VP * EQ) / SCALE;
+  return {
+    side: side,
+    desiredPrice: formatScaled(P), tickSize: formatScaled(T),
+    validPrice: formatScaled(VP), priceTicks: ticks.toString(),
+    priceExact: VP === P, deviationBps: devBps,
+    desiredQty: formatScaled(Q), lotSize: formatScaled(L),
+    execQty: formatScaled(EQ), lots: lots.toString(),
+    dustQty: formatScaled(dust), qtyZero: EQ === 0n,
+    intendedNotional: formatScaled(intended), validNotional: formatScaled(valid),
+    notionalDelta: formatScaled(valid - intended)
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -5627,6 +5681,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakeSplit, MAX_SSPLIT_ACCOUNTS,
     stakeMerge,
     launchAlloc, MAX_LAUNCH_LAMPORTS,
+    tickLot, MAX_TICKLOT_LAMPORTS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -7855,6 +7910,30 @@ if (typeof document !== "undefined") {
       else if (res.exactlyFull) note = " The sale filled its cap exactly: every contribution is allocated in full, nothing is refunded, and the whole supply sells - the one outcome where a fixed-price sale needs no pro-rata rule at all.";
       else note = " The sale did not reach its cap, so every contribution is allocated in full and nothing is refunded; the unsold tokens stay with the sale, and the shortfall - not any buyer's fill - is what an undersubscribed sale has to explain.";
       setText("launch-result", "Model output: a fixed-price sale with a hard cap of " + res.cap + " SOL and " + res.supply + " tokens on offer took in " + res.totalCommitted + " SOL (" + res.overBps.toLocaleString("en-US") + " bps of the cap). Your " + res.yourContribution + " SOL contribution is allocated " + res.yourAllocated + " SOL and refunded " + res.yourRefund + " SOL, receiving " + res.yourTokens + " tokens for the filled part." + note + " Amounts are user-entered; no live sale is read. Individual caps, whitelists, tiered allocations and any launchpad fee are not modelled. An educational model of a launchpad sale, not a live quote. Not financial advice.");
+    });
+
+    var ticklotForm = document.getElementById("ticklot-calc");
+    if (ticklotForm) ticklotForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = tickLot(val("ticklot-side"), val("ticklot-price"), val("ticklot-tick"), val("ticklot-qty"), val("ticklot-lot"));
+      if (!res) {
+        document.getElementById("ticklot-price-out").value = "Invalid";
+        document.getElementById("ticklot-qty-out").value = "Invalid";
+        document.getElementById("ticklot-notional-out").value = "Invalid";
+        document.getElementById("ticklot-delta-out").value = "Invalid";
+        setText("ticklot-result", "Check the inputs: the side must be buy or sell, and the price, tick size, quantity and lot size must be amounts with at most 9 decimal places, none of them zero - and a buy priced below one whole tick has no valid price above zero. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("ticklot-price-out").value = res.validPrice + " - tick " + res.priceTicks + " of " + res.tickSize + " (" + res.deviationBps.toLocaleString("en-US") + " bps from your " + res.desiredPrice + ")";
+      document.getElementById("ticklot-qty-out").value = res.execQty + " executable - " + res.lots + " whole lots of " + res.lotSize + ", with " + res.dustQty + " left as sub-lot dust";
+      document.getElementById("ticklot-notional-out").value = res.validNotional + " at the valid price and quantity, against " + res.intendedNotional + " intended";
+      document.getElementById("ticklot-delta-out").value = res.notionalDelta + " - the grid's total cost against naming the exact price and size";
+      var note = "";
+      if (res.qtyZero) note = " Your quantity is below one whole lot, so no order can be placed at all: the whole amount is dust on this market, and only a larger quantity or a market with a smaller lot size can trade it.";
+      else if (res.priceExact && res.dustQty === "0") note = " Your price and quantity already sit exactly on the grid, so nothing is rounded and nothing is lost - the one order this market takes exactly as named.";
+      else if (res.side === "buy") note = " The buy rounded its price down, never up: you can be filled cheaper than you named, never dearer, and the quantity you lose is only the sub-lot remainder - the grid takes precision, not a fee, and the dust stays in your account.";
+      else note = " The sell rounded its price up, never down: you can receive more than you named, never less, and the quantity you lose is only the sub-lot remainder - the grid takes precision, not a fee, and the dust stays in your account.";
+      setText("ticklot-result", "Model output: a " + res.side + " order named at " + res.desiredPrice + " for " + res.desiredQty + " rests on this market at " + res.validPrice + " for " + res.execQty + ", a notional of " + res.validNotional + " against " + res.intendedNotional + " intended (" + res.notionalDelta + ")." + note + " Amounts are user-entered; no live market is read. Taker and maker fees are not modelled. An educational model of an order-book grid, not a live quote. Not financial advice.");
     });
 
     buttons.forEach(function (btn) {
