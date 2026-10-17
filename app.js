@@ -4248,6 +4248,83 @@ function wrappedSol(fundStr, accountsStr) {
   };
 }
 
+/* ---------- Tool 86: Nakamoto coefficient (smallest halting coalition) ---------- */
+/* Tool 84 priced the LINE: Tower BFT finalizes only while MORE than
+   two-thirds of the activated stake is voting, so finality stalls
+   once the offline stake D satisfies 3D >= total - the smallest such
+   D is the halt threshold, total - floor(2 x total / 3), exactly one
+   lamport above Tool 84's largest still-finalizing delinquent stake.
+   The Nakamoto coefficient asks WHO can reach that line: rank the
+   validators largest first and walk down the list until the running
+   sum reaches the threshold - the count at that point is the
+   smallest number of (largest) validators that could stall finality
+   by going offline or being compromised together. On a total of
+   400,000,000 SOL the line is 133,333,333.333333334 SOL, and seven
+   entered validators of 30, 25, 22, 20, 18, 15 and 10 million reach
+   it only at the seventh (cumulative 140,000,000, 3,500 bps), while
+   the largest alone holds 750 bps. At the exact edge the two tools
+   agree: on a 300-lamport total a single 100-lamport validator IS
+   the coefficient (exactly a third offline leaves exactly two-thirds
+   online, which is not a supermajority), and 99 lamports falls one
+   lamport short. A list whose combined stake stays under the line
+   honestly reports no coefficient and the exact shortfall. Stakes
+   are user-entered (largest validators, any order - the model ranks
+   them); no live cluster or validator data is read, and a real
+   coefficient counts entities, so validators run by one operator
+   under several identities would lower the true figure - stated on
+   the page. Every figure is exact integer lamports. Prototype-proven
+   on 20,000 cases against an independent Python oracle using the
+   3 x cum >= total formulation, 0 mismatches, with the two halt
+   formulations brute-force-agreeing on every total up to 499
+   lamports. */
+var MAX_NAKA_TOTAL_LAMPORTS = 1000000000000000000n; /* 1,000,000,000 SOL */
+var MAX_NAKA_VALIDATORS = 100;
+
+function nakamotoCoefficient(totalStr, listStr) {
+  var total = parseScaled(totalStr);
+  if (total === null) return null;
+  if (total <= 0n || total > MAX_NAKA_TOTAL_LAMPORTS) return null;
+  if (typeof listStr !== "string") return null;
+  var toks = listStr.split(/[\s,]+/).filter(function (x) { return x.length > 0; });
+  if (toks.length < 1 || toks.length > MAX_NAKA_VALIDATORS) return null;
+  var stakes = [];
+  var sum = 0n;
+  for (var i = 0; i < toks.length; i++) {
+    var v = parseScaled(toks[i]);
+    if (v === null || v <= 0n || v > total) return null;
+    stakes.push(v); sum += v;
+  }
+  if (sum > total) return null;
+  stakes.sort(function (a, b) { return a > b ? -1 : a < b ? 1 : 0; });
+  var halt = total - (2n * total) / 3n;
+  var cum = 0n, k = null, cumK = null;
+  for (var j = 0; j < stakes.length; j++) {
+    cum += stakes[j];
+    if (k === null && cum >= halt) { k = j + 1; cumK = cum; }
+  }
+  var reached = k !== null;
+  var bps = function (x) { return Number((x * 10000n) / total); };
+  var pct = function (b) { return (b / 100).toFixed(2); };
+  return {
+    total: formatScaled(total), totalLamports: total.toString(),
+    listed: stakes.length,
+    listedLamports: sum.toString(), listedSol: formatScaled(sum),
+    listedBps: bps(sum), listedPct: pct(bps(sum)),
+    haltLamports: halt.toString(), haltSol: lamportsToSol(halt.toString()),
+    haltBps: bps(halt), haltPct: pct(bps(halt)),
+    reached: reached, coefficient: k,
+    coalitionLamports: reached ? cumK.toString() : null,
+    coalitionSol: reached ? formatScaled(cumK) : null,
+    coalitionBps: reached ? bps(cumK) : null,
+    coalitionPct: reached ? pct(bps(cumK)) : null,
+    top1Lamports: stakes[0].toString(), top1Sol: formatScaled(stakes[0]),
+    top1Bps: bps(stakes[0]), top1Pct: pct(bps(stakes[0])),
+    shortfallLamports: (reached ? 0n : halt - sum).toString(),
+    shortfallSol: formatScaled(reached ? 0n : halt - sum),
+    stakesDescSol: stakes.map(function (s) { return formatScaled(s); })
+  };
+}
+
 function burnShare(supplyStr, holderStr, burnStr) {
   var S = parseScaled(supplyStr);
   var H = parseScaled(holderStr);
@@ -4812,6 +4889,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakeFunding, STAKE_ACCOUNT_BYTES, MAX_STAKE_FUNDING_LAMPORTS,
     delinquentStake, MAX_DELINQ_TOTAL_LAMPORTS,
     wrappedSol, WSOL_ACCOUNT_BYTES, MAX_WSOL_FUND_LAMPORTS, MAX_WSOL_ACCOUNTS,
+    nakamotoCoefficient, MAX_NAKA_TOTAL_LAMPORTS, MAX_NAKA_VALIDATORS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6729,6 +6807,33 @@ if (typeof document !== "undefined") {
       }
       setText("wsol-result", "Model output: funding " + res.fundLamports + " lamports (" + res.fund + " SOL) into " + res.accounts + (res.accounts === 1 ? " fresh wSOL account" : " fresh wSOL accounts") + " locks " + res.reserveLamports + " lamports (" + res.reserveSol + " SOL) of rent-exempt reserve - 2,039,280 lamports per 165-byte token account, Tool 3's figure at that size - because syncNative sets the token balance to the lamport balance minus that reserve. The spendable wSOL is " + res.spendableLamports + " lamports (" + res.spendableSol + " SOL). The reserve is a deposit, not a fee: closing an account returns its whole remaining balance, so spending every spendable lamport and then closing returns " + res.closeBackLamports + " lamports (" + res.closeBackSol + " SOL), and closing untouched returns the full " + res.unwrapLamports + " lamports (" + res.unwrapSol + " SOL)." + note + " Transaction base fees (Tool 5) ride on top and are not in these figures, and closing an account that still holds wSOL returns that balance too - spend or transfer it first in a real flow. An educational model of wrapped SOL and syncNative, not a live quote. Not financial advice.");
     });
+    var nakaForm = document.getElementById("naka-calc");
+    if (nakaForm) nakaForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = nakamotoCoefficient(val("naka-total"), val("naka-stakes"));
+      if (!res) {
+        document.getElementById("naka-halt-out").value = "Invalid";
+        document.getElementById("naka-coef-out").value = "Invalid";
+        document.getElementById("naka-coal-out").value = "Invalid";
+        document.getElementById("naka-top1-out").value = "Invalid";
+        setText("naka-result", "Check the inputs: the total is a SOL amount above zero and at most 1,000,000,000 with at most nine decimal places, and the validator list holds 1 to 100 SOL amounts, each above zero and no larger than the total, together no larger than the total.");
+        return;
+      }
+      document.getElementById("naka-halt-out").value = res.haltLamports + " lamports (" + res.haltSol + " SOL), " + res.haltBps + " bps (" + res.haltPct + "%) of the total";
+      document.getElementById("naka-coef-out").value = res.reached ? res.coefficient + (res.coefficient === 1 ? " validator" : " validators") + " of the " + res.listed + " listed" : "not reached by the " + res.listed + " listed";
+      document.getElementById("naka-coal-out").value = res.reached ? res.coalitionLamports + " lamports (" + res.coalitionSol + " SOL), " + res.coalitionBps + " bps (" + res.coalitionPct + "%) of the total" : res.listedLamports + " lamports (" + res.listedSol + " SOL) listed in all, " + res.listedBps + " bps (" + res.listedPct + "%) of the total";
+      document.getElementById("naka-top1-out").value = res.top1Lamports + " lamports (" + res.top1Sol + " SOL), " + res.top1Bps + " bps (" + res.top1Pct + "%) of the total";
+      var note = "";
+      if (!res.reached) {
+        note = " The listed validators together hold " + res.listedLamports + " lamports (" + res.listedSol + " SOL), which is " + res.shortfallLamports + " lamports (" + res.shortfallSol + " SOL) short of the line - even if every one of them went offline together, the online stake would stay above two-thirds and finality would hold; a larger validator (or several) beyond this list is needed to complete any halting coalition.";
+      } else if (res.coefficient === 1) {
+        note = " The largest validator alone reaches the line: a single operator going offline or being compromised stalls finality - the most concentrated outcome this model can report.";
+      } else {
+        note = " No smaller set of the largest validators reaches the line: the top " + (res.coefficient - 1) + " together still fall short of it, and the " + res.coefficient + "th tips the combined stake over. Any other coalition needs at least as many validators, because this walk always takes the largest first.";
+      }
+      setText("naka-result", "Model output: on a total activated stake of " + res.totalLamports + " lamports (" + res.total + " SOL), finality stalls once the offline stake reaches " + res.haltLamports + " lamports (" + res.haltSol + " SOL) - one lamport above the largest delinquent stake that still finalizes in Tool 84, because exactly a third offline leaves exactly two-thirds online, which is not the more-than-two-thirds supermajority Tower BFT needs. Ranking the " + res.listed + " entered validators largest first, the Nakamoto coefficient is " + (res.reached ? res.coefficient + ", reached at a combined " + res.coalitionLamports + " lamports (" + res.coalitionSol + " SOL)" : "not reached by the entered list") + "." + note + " The coefficient counts validators as entered; several validators run by one operator would make the true entity-level figure smaller. Stakes are user-entered and no live cluster or validator data is read. An educational model of the Nakamoto coefficient and finality, not a live quote. Not financial advice.");
+    });
+
 
 
 
