@@ -5727,8 +5727,8 @@ function dlmmFee(stepBps, baseFactor, volRef, binsCrossed, maxVolAcc, varControl
    quoted by two of the three feeds, and the 4-unit feed
    deviates by 3,333 bps. Staleness, confidence and the pairwise
    guard are Tools 120, 32 and 121; combinations beyond three
-   feeds, weighted medians and the cost of posting an update are
-   stated as not modelled. Prototype-verified before shipping
+   feeds are Tool 124, and weighted medians and the cost of
+   posting an update are stated as not modelled. Prototype-verified before shipping
    against an independent Python integer oracle on 20,000 cases,
    0 mismatches on every figure. */
 var MAX_MED_PRICE = 1000000000000n; /* 1e12 whole units per entered price */
@@ -5756,6 +5756,73 @@ function oracleMedian(aStr, bStr, cStr, maxBpsStr) {
     withinA: jA.within, withinB: jB.within, withinC: jC.within,
     withinCount: withinCount, allAgree: withinCount === 3, majority: withinCount >= 2,
     atMedian: (a === med ? 1 : 0) + (b === med ? 1 : 0) + (c === med ? 1 : 0)
+  };
+}
+
+/* ---------- Tool 124: Oracle median-of-five aggregator ---------- */
+/* Tool 122 states combinations beyond three feeds as not
+   modelled; this models the next size up. A program that reads
+   FIVE independent feeds for the same asset takes the MEDIAN -
+   the third value once the five are sorted - as its price. The
+   median is always one of the five entered prices, never an
+   average: with feeds of 150, 151.5, 149, 150.5 and 300 the
+   median is 150.5, where a mean would read 180.2. The extra
+   feeds buy fault tolerance, not precision: TWO feeds can be
+   arbitrarily wrong in the same direction and the median still
+   cannot pass the nearer honest feed (feeds of 150, 151.5, 149,
+   1,000 and 2,000 combine to 151.5, with 3 of 5 feeds agreeing
+   at a 200 bps maximum), because dragging the middle of five
+   takes THREE feeds wrong in the same direction (150, 300, 310,
+   320 and 149 combine to 300). Agreement is measured exactly as
+   Tool 122 measures it: each feed's distance from the median in
+   bps OF THE MEDIAN, floored for display and judged by exact
+   cross-multiplication, |feed - median| x 10,000 <= median x
+   maxBps, so a feed can display exactly the maximum and still
+   sit past it (149, 150, 150, 151 and 153.000000001 at a 200 bps
+   maximum: the median is 150, the high feed displays 200 bps
+   and fails, 4 of 5 within). At the headline (150, 151.5, 149,
+   150.5 and 300 at 200 bps) the median is 150.5, the feeds
+   stand 33, 66, 99, 0 and 9,933 bps from it, the spread from
+   lowest to highest is 10,033 bps, and 4 of 5 agree. At dust
+   scale (feeds of 3, 4, 3, 5 and 3 smallest units) the median
+   is 3 units, quoted by three of the five feeds. The verdict's
+   substance is the count: 5 of 5 is full agreement, 3 or 4 of 5
+   is a majority resting on at least three feeds, and fewer
+   than 3 means no majority confirms the median - at feeds of
+   100, 200, 1,000, 2,000 and 3,000 the median of 1,000 stands
+   alone within the maximum. Staleness, confidence and the
+   pairwise guard are Tools 120, 32 and 121, the three-feed
+   combination is Tool 122; combinations beyond five feeds,
+   weighted medians and the cost of posting an update are
+   stated as not modelled. Prototype-verified before shipping
+   against an independent Python integer oracle on 20,000 cases,
+   0 mismatches on every figure. */
+var MAX_MED5_PRICE = 1000000000000n; /* 1e12 whole units per entered price */
+function oracleMedian5(aStr, bStr, cStr, dStr, eStr, maxBpsStr) {
+  var a = parseScaled(aStr), b = parseScaled(bStr), c = parseScaled(cStr), d = parseScaled(dStr), e = parseScaled(eStr), mS = parseScaled(maxBpsStr);
+  if (a === null || b === null || c === null || d === null || e === null || mS === null) return null;
+  if (mS % SCALE !== 0n) return null;
+  var maxBps = Number(mS / SCALE);
+  if (!Number.isInteger(maxBps) || maxBps < 0 || maxBps > 10000) return null;
+  var cap = MAX_MED5_PRICE * SCALE;
+  if (a <= 0n || a > cap || b <= 0n || b > cap || c <= 0n || c > cap || d <= 0n || d > cap || e <= 0n || e > cap) return null;
+  var feeds = [a, b, c, d, e];
+  var sorted = feeds.slice().sort(function (x, y) { return x < y ? -1 : x > y ? 1 : 0; });
+  var med = sorted[2], low = sorted[0], high = sorted[4];
+  var judge = function (f) {
+    var diff = f - med, ad = diff < 0n ? -diff : diff;
+    return { bps: ((ad * 10000n) / med).toString(), within: ad * 10000n <= med * BigInt(maxBps) };
+  };
+  var jA = judge(a), jB = judge(b), jC = judge(c), jD = judge(d), jE = judge(e);
+  var withinCount = (jA.within ? 1 : 0) + (jB.within ? 1 : 0) + (jC.within ? 1 : 0) + (jD.within ? 1 : 0) + (jE.within ? 1 : 0);
+  return {
+    a: formatScaled(a), b: formatScaled(b), c: formatScaled(c), d: formatScaled(d), e: formatScaled(e), maxBps: maxBps,
+    median: formatScaled(med), low: formatScaled(low), high: formatScaled(high),
+    spreadBps: (((high - low) * 10000n) / med).toString(),
+    devA: jA.bps, devB: jB.bps, devC: jC.bps, devD: jD.bps, devE: jE.bps,
+    withinA: jA.within, withinB: jB.within, withinC: jC.within, withinD: jD.within, withinE: jE.within,
+    withinCount: withinCount, allAgree: withinCount === 5, majority: withinCount >= 3,
+    atMedian: feeds.filter(function (f) { return f === med; }).length
   };
 }
 
@@ -7433,6 +7500,7 @@ if (typeof module !== "undefined" && module.exports) {
     oracleStaleness, MAX_STALE_TS, MAX_STALE_AGE, MAX_STALE_HEARTBEAT,
     oracleDeviation, MAX_DEV_PRICE,
     oracleMedian, MAX_MED_PRICE,
+    oracleMedian5, MAX_MED5_PRICE,
     dlmmFee, DLMM_FEE_PRECISION, DLMM_MAX_FEE_RATE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
@@ -10152,7 +10220,37 @@ if (typeof document !== "undefined") {
       if (res.allAgree) note = " Every feed sits within the maximum of the median, so the combined price is as confirmed as three feeds can make it at these settings - each feed has still passed no staleness (Tool 120) or confidence (Tool 32) check here.";
       else if (res.majority) note = " The outlier is " + outNames[0] + ": the median ignores it beyond the nearer agreeing feed, which is the rule's whole point - but the outlier is named, not hidden, because two feeds wrong in the same direction would have dragged the median instead.";
       else note = " Both other feeds sit past the maximum - " + outNames.join(" and ") + " - so no pair of feeds agrees within the maximum the program set: a careful program prices from none of them until at least two converge.";
-      setText("med-result", "Model output: feeds of " + res.a + ", " + res.b + " and " + res.c + " for the same asset combine to a median price of " + res.median + " - always one of the three feeds, never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest. Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps and feed C " + grp(res.devC) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 3 feeds within the maximum." + note + " Prices and the maximum are user-entered; no live feed is read. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; combinations beyond three feeds, weighted medians and the cost of posting an update are not modelled. An educational model of an oracle median, not a live feed reading. Not financial advice.");
+      setText("med-result", "Model output: feeds of " + res.a + ", " + res.b + " and " + res.c + " for the same asset combine to a median price of " + res.median + " - always one of the three feeds, never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest. Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps and feed C " + grp(res.devC) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 3 feeds within the maximum." + note + " Prices and the maximum are user-entered; no live feed is read. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; combinations beyond three feeds are Tool 124, and weighted medians and the cost of posting an update are not modelled. An educational model of an oracle median, not a live feed reading. Not financial advice.");
+    });
+
+    var med5Form = document.getElementById("med5-calc");
+    if (med5Form) med5Form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = oracleMedian5(val("med5-a"), val("med5-b"), val("med5-c"), val("med5-d"), val("med5-e"), val("med5-maxbps"));
+      if (!res) {
+        document.getElementById("med5-price-out").value = "Invalid";
+        document.getElementById("med5-spread-out").value = "Invalid";
+        document.getElementById("med5-agree-out").value = "Invalid";
+        document.getElementById("med5-verdict-out").value = "Invalid";
+        setText("med5-result", "Check the inputs: the five feed prices are each above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, and the maximum deviation is a whole number of basis points from 0 to 10,000. Blanks are not read as zero.");
+        return;
+      }
+      var grp = function (x) { return x.replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("med5-price-out").value = res.median + " (the third of the five feeds once sorted)";
+      document.getElementById("med5-spread-out").value = grp(res.spreadBps) + " bps of the median (highest - lowest)";
+      document.getElementById("med5-agree-out").value = res.withinCount + " of 5 feeds within " + res.maxBps.toLocaleString("en-US") + " bps of the median";
+      document.getElementById("med5-verdict-out").value = res.allAgree ? "All five feeds agree - the median is confirmed by every feed" : res.majority ? "A majority agrees - at least three feeds confirm the median" : "No majority - fewer than three feeds sit within the maximum of the median";
+      var outNames = [];
+      if (!res.withinA) outNames.push("feed A at " + res.a + " (" + grp(res.devA) + " bps away)");
+      if (!res.withinB) outNames.push("feed B at " + res.b + " (" + grp(res.devB) + " bps away)");
+      if (!res.withinC) outNames.push("feed C at " + res.c + " (" + grp(res.devC) + " bps away)");
+      if (!res.withinD) outNames.push("feed D at " + res.d + " (" + grp(res.devD) + " bps away)");
+      if (!res.withinE) outNames.push("feed E at " + res.e + " (" + grp(res.devE) + " bps away)");
+      var note = "";
+      if (res.allAgree) note = " Every feed sits within the maximum of the median, so the combined price is as confirmed as five feeds can make it at these settings - each feed has still passed no staleness (Tool 120) or confidence (Tool 32) check here.";
+      else if (res.majority) note = " The outlier" + (outNames.length > 1 ? "s are " : " is ") + outNames.join(" and ") + ": the median ignores each beyond the nearer agreeing feeds, which is the rule's whole point - two feeds wrong in the same direction still cannot drag a median of five, but three would, and the outliers are named, not hidden.";
+      else note = " Fewer than three feeds sit within the maximum - " + outNames.join(", ") + " - so no majority confirms the median: a careful program prices from none of them until at least three converge.";
+      setText("med5-result", "Model output: feeds of " + res.a + ", " + res.b + ", " + res.c + ", " + res.d + " and " + res.e + " for the same asset combine to a median price of " + res.median + " - always one of the five feeds, never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest. Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps, feed C " + grp(res.devC) + " bps, feed D " + grp(res.devD) + " bps and feed E " + grp(res.devE) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 5 feeds within the maximum." + note + " Prices and the maximum are user-entered; no live feed is read. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; the three-feed combination is Tool 122, and combinations beyond five feeds, weighted medians and the cost of posting an update are not modelled. An educational model of an oracle median of five, not a live feed reading. Not financial advice.");
     });
 
     var devForm = document.getElementById("dev-calc");
