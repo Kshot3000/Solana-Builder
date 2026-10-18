@@ -26,6 +26,48 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>118. Cross-chain bridge transfer planner - the fixed fee is the same at every size</h3>
+      <p>Moving an asset between Solana and another chain through a bridge - the Wormhole, deBridge and Allbridge pattern - is priced in <strong>two parts that behave oppositely</strong>. A <strong>percent fee</strong> in bps on the amount sent scales with the transfer; a <strong>fixed fee</strong> in the same asset, the part that pays for execution and delivery on the destination chain, is <strong>the same at every size</strong>. The percent fee comes off first, floored at the smallest unit, and the fixed fee comes out of what remains - if the remainder does not exceed the fixed fee, <strong>nothing is delivered at all</strong>. At the headline settings - <strong>1,000</strong> sent at <strong>10 bps</strong> with a fixed fee of <strong>2</strong> - the percent fee is <strong>1</strong>, the delivery is <strong>997</strong> and the total cost is <strong>3</strong>, an effective <strong>30 bps</strong>. The same settings on a transfer of <strong>10</strong> deliver only <strong>7.99</strong>: the cost is 2.01, an effective <strong>2,010 bps</strong>, because the fixed 2 is spread over a hundredth of the amount. And a transfer can be too small to deliver anything - the smallest amount that delivers even one smallest unit at those settings is <strong>2.002002003</strong>. Source-chain gas paid in the native token, any price difference between the sent asset and the asset delivered, transfer times, and a Token-2022 transfer fee on the delivered token (Tool 13) are not modelled. Amounts and fees are user-entered; no live bridge is read. An educational model of a cross-chain bridge transfer, not a live quote. Not financial advice.</p>
+      <form id="bridge-calc">
+        <div class="grid">
+          <div>
+            <label for="bridge-amount">Amount sent (units, model)</label>
+            <input id="bridge-amount" name="bridge-amount" inputmode="decimal" value="1000">
+          </div>
+          <div>
+            <label for="bridge-bps">Percent fee (bps, model)</label>
+            <input id="bridge-bps" name="bridge-bps" inputmode="numeric" value="10">
+          </div>
+          <div>
+            <label for="bridge-fixed">Fixed fee (units, same asset, model)</label>
+            <input id="bridge-fixed" name="bridge-fixed" inputmode="decimal" value="2">
+          </div>
+          <div>
+            <label for="bridge-pct-out">Percent fee paid (model)</label>
+            <input id="bridge-pct-out" name="bridge-pct-out" readonly>
+          </div>
+          <div>
+            <label for="bridge-after-out">After the percent fee (model)</label>
+            <input id="bridge-after-out" name="bridge-after-out" readonly>
+          </div>
+          <div>
+            <label for="bridge-receive-out">Delivered on the destination chain (model)</label>
+            <input id="bridge-receive-out" name="bridge-receive-out" readonly>
+          </div>
+          <div>
+            <label for="bridge-cost-out">Total cost (model)</label>
+            <input id="bridge-cost-out" name="bridge-cost-out" readonly>
+          </div>
+          <div>
+            <label for="bridge-min-out">Smallest transfer that delivers anything (model)</label>
+            <input id="bridge-min-out" name="bridge-min-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the bridge transfer model</button>
+        <p id="bridge-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>117. Maker / taker fee &amp; rebate planner - one matched trade, split three ways</h3>
       <p>Every central limit order book on Solana - Phoenix, OpenBook, Drift, Zeta - prices the two sides of one matched trade <strong>differently</strong>. The <strong>taker</strong>, whose order crosses the book and removes liquidity, pays a fee of the entered bps on the trade's <strong>notional</strong> (price &#215; quantity, floored at the smallest unit). The <strong>maker</strong>, whose resting order was already there, is paid a <strong>rebate</strong> on the same notional, funded out of that taker fee - and the venue keeps what is left, so the three parts always sum exactly. At the headline settings - <strong>10</strong> at <strong>150</strong>, a notional of <strong>1,500</strong>, a <strong>10 bps</strong> taker fee and a <strong>3 bps</strong> maker rebate - the taker pays <strong>1.5</strong>, the maker receives <strong>0.45</strong> (3,000 bps of the fee) and the venue keeps <strong>1.05</strong>; the taker buying pays 1,501.5 in total while the maker selling receives 1,500.45. A rebate set equal to the taker fee leaves the venue exactly nothing, and a dust trade whose notional is one smallest unit pays <strong>no fee at all</strong>, because the fee floors to zero - the smallest notional that pays even one smallest unit of fee at 10 bps is <strong>0.000001</strong>. Tool 98 prices the tick and lot grid an order rests on and states venue fees as not modelled; this prices them. Tiered or volume-based fee schedules, rebates subsidized beyond the taker fee, and fees charged in the base asset are not modelled. Amounts and rates are user-entered; no live venue is read. An educational model of maker and taker fees, not a live quote. Not financial advice.</p>
       <form id="mtfee-calc">
@@ -5084,6 +5126,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=114"></script>
+<script src="app.js?v=115"></script>
 </body>
 </html>
