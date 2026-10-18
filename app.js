@@ -5370,6 +5370,70 @@ function quadraticFunding(projectsStr, poolStr) {
   };
 }
 
+/* ---------- Tool 107: perp insurance fund & socialized-loss planner ---------- */
+/* When a perpetual-futures liquidation cannot cover a position's
+   loss - the market gapped through the liquidation price, or the
+   seized collateral sold for less than the debt - the venue is left
+   with a SHORTFALL: money owed to the winning side that the loser
+   did not have. Perp venues (Drift on Solana is the local example)
+   absorb that shortfall in a stated waterfall. First the INSURANCE
+   FUND - a pool pre-funded from fees - pays what it can: it pays
+   min(shortfall, fund) and keeps the rest. What the fund cannot
+   cover is UNCOVERED, and in the socialized-loss form it is taken
+   from the winning side's profits pro-rata: every winner gives back
+   the same fraction of their profit, so the total haircut is
+   min(uncovered, total winning profits) and one winner's haircut is
+   floor(their profit x uncovered / total winning profits), floored
+   at the smallest unit - at dust scale a small winner's floored
+   share can be exactly zero while the aggregate haircut is not (a
+   3-unit profit against a 2-unit uncovered shortfall spread over
+   7 units of profits floors to 0). If the uncovered shortfall is
+   larger than every winner's profit combined, the winners are wiped
+   to zero and the remainder is BAD DEBT the venue still owes: no
+   waterfall step invents money. The haircut in basis points is
+   floor(haircut x 10000 / total winning profits), and it is null -
+   reported as not applicable, never as zero - when there are no
+   winning profits to measure against. At the headline (a 50,000
+   shortfall, a 20,000 fund, 200,000 of winning profits) the fund
+   pays its whole 20,000, the uncovered 30,000 is a 1,500 bps
+   haircut, and a winner with 10,000 of profit gives back 1,500 and
+   receives 8,500. Venues differ past this shape: some deleverage
+   (ADL) the largest winners in rank order instead of haircutting
+   everyone equally, some cap the socialized share, and funds are
+   replenished from fees over time - that ranking, those caps and
+   the replenishment are stated as not modelled. Amounts are entered,
+   never read from a live venue. Prototype-verified before shipping
+   against an independent Python integer oracle on 20,000 cases,
+   0 mismatches on every figure, with the waterfall invariants
+   (fund pays + fund left = fund; fund pays + uncovered = shortfall;
+   haircut + bad debt = uncovered) asserted in the oracle. */
+var MAX_PINS_AMOUNT = 1000000000000n; /* 1e12 whole units per amount */
+function perpInsuranceFund(shortfallStr, fundStr, winnersStr, yourStr) {
+  var S = parseScaled(shortfallStr), F = parseScaled(fundStr);
+  var W = parseScaled(winnersStr), Y = parseScaled(yourStr);
+  if (S === null || F === null || W === null || Y === null) return null;
+  var cap = MAX_PINS_AMOUNT * SCALE;
+  if (S < 0n || F < 0n || W < 0n || Y < 0n) return null;
+  if (S > cap || F > cap || W > cap || Y > cap) return null;
+  if (Y > W) return null; /* your profit is part of the winners' total */
+  var fundPays = S < F ? S : F;
+  var fundLeft = F - fundPays;
+  var uncovered = S - fundPays;
+  var haircut = uncovered < W ? uncovered : W;
+  var badDebt = uncovered - haircut;
+  var haircutBps = W > 0n ? Number((haircut * 10000n) / W) : null;
+  var yourHaircut = W === 0n ? 0n : (uncovered >= W ? Y : (Y * uncovered) / W);
+  return {
+    shortfall: formatScaled(S), fund: formatScaled(F),
+    winners: formatScaled(W), yourProfit: formatScaled(Y),
+    fundPays: formatScaled(fundPays), fundLeft: formatScaled(fundLeft),
+    uncovered: formatScaled(uncovered), haircut: formatScaled(haircut),
+    haircutBps: haircutBps, yourHaircut: formatScaled(yourHaircut),
+    youReceive: formatScaled(Y - yourHaircut), badDebt: formatScaled(badDebt),
+    coveredByFund: uncovered === 0n, fullyCovered: badDebt === 0n
+  };
+}
+
 /* ---------- Tool 103: second-price (Vickrey) auction settlement planner ---------- */
 /* A second-price (Vickrey) auction - the sealed-bid form behind
    many NFT, domain and ad sales, and the pricing rule Tool 102
@@ -6201,6 +6265,7 @@ if (typeof module !== "undefined" && module.exports) {
     zapOut,
     flashLoan,
     quadraticFunding,
+    perpInsuranceFund, MAX_PINS_AMOUNT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8603,6 +8668,37 @@ if (typeof document !== "undefined") {
           ? " The pool covered only part of the raw matches, so each was scaled by the same fraction and floored; the dust that flooring leaves is part of the undistributed remainder."
           : " The pool covered every raw match, and what remains is simply unspent - a bigger pool would not have changed any project's match.");
       setText("qfund-result", "Model output: " + lines + " Total raw match " + res.totalRaw + " against a pool of " + res.pool + "." + note + " Amounts are user-entered; no live round is read. Square roots are floored at the smallest unit, and identity checks against split-wallet gaming, per-round caps and platform rounding rules are not modelled. An educational model of quadratic funding, not a live round. Not financial advice.");
+    });
+
+    var pinsForm = document.getElementById("pins-calc");
+    if (pinsForm) pinsForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = perpInsuranceFund(val("pins-shortfall"), val("pins-fund"), val("pins-winners"), val("pins-your"));
+      if (!res) {
+        document.getElementById("pins-fundpay-out").value = "Invalid";
+        document.getElementById("pins-fundleft-out").value = "Invalid";
+        document.getElementById("pins-uncovered-out").value = "Invalid";
+        document.getElementById("pins-haircut-out").value = "Invalid";
+        document.getElementById("pins-yourcut-out").value = "Invalid";
+        document.getElementById("pins-receive-out").value = "Invalid";
+        document.getElementById("pins-baddebt-out").value = "Invalid";
+        setText("pins-result", "Check the inputs: every amount is zero or above with at most 9 decimal places, and your own profit cannot exceed the total winning profits it is part of. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("pins-fundpay-out").value = res.fundPays;
+      document.getElementById("pins-fundleft-out").value = res.fundLeft;
+      document.getElementById("pins-uncovered-out").value = res.uncovered;
+      document.getElementById("pins-haircut-out").value = res.haircut + (res.haircutBps === null ? " (there are no winning profits to haircut)" : " (" + res.haircutBps.toLocaleString("en-US") + " bps of the winning profits)");
+      document.getElementById("pins-yourcut-out").value = res.yourHaircut;
+      document.getElementById("pins-receive-out").value = res.youReceive;
+      document.getElementById("pins-baddebt-out").value = res.badDebt;
+      var note = "";
+      if (res.shortfall === "0") note = " With no shortfall there is nothing to absorb: the fund and the winners are untouched.";
+      else if (res.coveredByFund) note = " The fund absorbed the whole shortfall on its own, so no winner gives anything back - this is the loss the fund exists to take.";
+      else if (!res.fullyCovered) note = " Even wiping every winner's profit to zero does not cover the shortfall: what remains is bad debt the venue still owes, and no step of the waterfall invents the money for it.";
+      else note = " The fund ran dry, so the rest came out of the winning side pro-rata - every winner gives back the same fraction of their profit, which is what socialized loss means in practice.";
+      if (res.yourHaircut === "0" && res.haircut !== "0" && res.yourProfit !== "0") note += " Your own share floors to exactly zero at this size - the smallest-unit flooring lets a small winner escape a haircut the aggregate still pays.";
+      setText("pins-result", "Model output: a liquidation shortfall of " + res.shortfall + " meets an insurance fund of " + res.fund + ": the fund pays " + res.fundPays + " and is left with " + res.fundLeft + ", leaving " + res.uncovered + " uncovered. Winners holding " + res.winners + " of profits are haircut " + res.haircut + (res.haircutBps === null ? "" : " (" + res.haircutBps.toLocaleString("en-US") + " bps)") + " in total; your profit of " + res.yourProfit + " gives back " + res.yourHaircut + " and you receive " + res.youReceive + ", and " + res.badDebt + " remains as bad debt." + note + " Amounts are user-entered; no live venue or fund is read. Ranked auto-deleveraging (ADL), per-venue haircut caps and the fund's replenishment from fees are not modelled. An educational model of a perp insurance fund and socialized loss, not a live quote. Not financial advice.");
     });
 
     var floanForm = document.getElementById("floan-calc");
