@@ -26,6 +26,60 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>116. Auto-compounding planner - what reinvesting earns after the cost of reinvesting</h3>
+      <p>Yield aggregators and auto-compounding vaults harvest a position's rewards and <strong>re-deposit</strong> them, so later rewards are priced on a larger balance. Each compound period here earns <strong>balance &#215; APR &#247; compounds per year</strong>, floored at the smallest unit, and pays the entered <strong>cost per compound</strong> out of the balance before the next period - and that cost is the whole judgement. At the headline settings - <strong>10,000</strong> at <strong>1,200 bps</strong> compounded <strong>monthly</strong> at a cost of <strong>1</strong> over <strong>365 days</strong> - the balance reaches <strong>11,255.567798302</strong> against <strong>11,200</strong> left uncompounded: compounding gains <strong>55.567798302</strong>. Compounding <strong>daily</strong> at no cost reaches <strong>11,274.746156186</strong>, so frequency alone buys less than intuition suggests. When the cost exactly equals a period's interest - <strong>100</strong> a month at the headline settings - the balance <strong>never grows</strong> and finishes at 10,000 while simple interest would have paid 1,200; and a small position whose period interest sits below the cost <strong>shrinks every period until it is gone</strong>: 10 compounded daily at a cost of 0.05 is exhausted at compound <strong>207</strong> of 365, at a size whose break-even principal is <strong>152.083336375</strong> - the smallest balance whose first compound's interest clears the cost. The APR is held flat for the whole horizon: reward-rate changes, the price of a reward token sold into the position, harvest slippage, and aggregator performance fees are not modelled. Amounts and the rate are user-entered; no live market is read. An educational model of auto-compounding, not a live quote. Not financial advice.</p>
+      <form id="acomp-calc">
+        <div class="grid">
+          <div>
+            <label for="acomp-principal">Principal (units, model)</label>
+            <input id="acomp-principal" name="acomp-principal" inputmode="decimal" value="10000">
+          </div>
+          <div>
+            <label for="acomp-apr">APR (bps, model)</label>
+            <input id="acomp-apr" name="acomp-apr" inputmode="numeric" value="1200">
+          </div>
+          <div>
+            <label for="acomp-peryear">Compounds per year (model)</label>
+            <input id="acomp-peryear" name="acomp-peryear" inputmode="numeric" value="12">
+          </div>
+          <div>
+            <label for="acomp-cost">Cost per compound (units, model)</label>
+            <input id="acomp-cost" name="acomp-cost" inputmode="decimal" value="1">
+          </div>
+          <div>
+            <label for="acomp-days">Horizon (days, model)</label>
+            <input id="acomp-days" name="acomp-days" inputmode="numeric" value="365">
+          </div>
+          <div>
+            <label for="acomp-final-out">Final balance (model)</label>
+            <input id="acomp-final-out" name="acomp-final-out" readonly>
+          </div>
+          <div>
+            <label for="acomp-net-out">Net gain and effective APY (model)</label>
+            <input id="acomp-net-out" name="acomp-net-out" readonly>
+          </div>
+          <div>
+            <label for="acomp-gross-out">Gross interest earned (model)</label>
+            <input id="acomp-gross-out" name="acomp-gross-out" readonly>
+          </div>
+          <div>
+            <label for="acomp-costs-out">Total compounding costs (model)</label>
+            <input id="acomp-costs-out" name="acomp-costs-out" readonly>
+          </div>
+          <div>
+            <label for="acomp-simple-out">Against leaving it uncompounded (model)</label>
+            <input id="acomp-simple-out" name="acomp-simple-out" readonly>
+          </div>
+          <div>
+            <label for="acomp-be-out">Break-even principal at this frequency (model)</label>
+            <input id="acomp-be-out" name="acomp-be-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the compounding model</button>
+        <p id="acomp-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>115. Lending health restoration planner - two cures for one position, priced side by side</h3>
       <p>Tool 20 judges a lending position; when its <strong>health factor</strong> sits below a target the borrower chooses, there are exactly two cures, and they are <strong>not priced alike</strong>. <strong>Adding collateral</strong> must lift the position's value to <strong>debt &#215; target &#247; threshold</strong> - the value whose threshold share covers the debt at the target health - while <strong>repaying debt</strong> must cut the debt to <strong>value &#215; threshold &#247; target</strong>. A repaid unit counts <strong>in full</strong>; an added unit of collateral value counts only at the <strong>threshold rate</strong>, so at any threshold below 100% repaying is the cheaper cure in quote outlay. At the headline settings - <strong>10</strong> units at <strong>100</strong> (worth <strong>1,000</strong>) against <strong>900</strong> of debt at an <strong>8,000 bps</strong> threshold, a current health of <strong>0.888888888</strong> that is already liquidatable - reaching a target health of <strong>1.5</strong> takes <strong>6.875</strong> more units (worth <strong>687.5</strong>) or a repayment of <strong>366.666666667</strong> leaving <strong>533.333333333</strong> of debt: a difference of <strong>320.833333333</strong> of outlay. The comparison is outlay only, and the page says so: added collateral stays in the position and remains yours, while a repayment extinguishes debt for good. Both cures are the smallest that reach the target in exact scaled integers - one smallest unit less falls short - except where a dust position's discrete units overshoot: collateral of <strong>0.000000003</strong> worth the same against <strong>0.000000002</strong> of debt cures to a health of <strong>1.6</strong>, not 1.5, by adding a single smallest unit, because no smaller collateral exists. A position whose collateral value floors to zero can be cured only by repaying in full. Interest accrual, liquidation penalties, partial liquidation, several collateral or debt assets, and the price moving while a cure is prepared are not modelled. Amounts and prices are user-entered; no live market is read. An educational model of lending health restoration, not a live quote. Not financial advice.</p>
       <form id="cure-calc">
@@ -4976,6 +5030,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=112"></script>
+<script src="app.js?v=113"></script>
 </body>
 </html>
