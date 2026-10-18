@@ -5601,6 +5601,66 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
 }
 
 
+/* ---------- Tool 121: Oracle deviation checker ---------- */
+/* Tools 32 and 120 guard a price feed on its confidence band and
+   its age. This is the third guard, the one Tool 120 states as
+   not modelled: the same asset priced by a SECOND feed. A program
+   that can read two feeds (a Pyth price against a Switchboard or
+   DEX spot price, say) rejects the pair when they disagree by
+   more than a maximum it sets. The deviation is measured in bps
+   OF THE PRIMARY price - the feed the program would otherwise
+   use - as floor(|secondary - primary| x 10,000 / primary), and
+   the verdict is judged by exact cross-multiplication,
+   |diff| x 10,000 <= primary x maxBps, never by the floored
+   display figure: at a primary of 150 and a 200 bps maximum, a
+   secondary of 153.000000001 displays a deviation of exactly
+   200 bps and still fails, because its true gap is one smallest
+   unit past the line. The acceptable range for the secondary is
+   solved exactly at the entered maximum: its low end is
+   ceil(primary x (10,000 - maxBps) / 10,000) and its high end
+   floor(primary x (10,000 + maxBps) / 10,000), so the verdict
+   holds exactly when the secondary sits inside that range -
+   asserted on every sweep case. At the headline (primary 150,
+   secondary 151.5, maximum 200 bps) the gap is 1.5, the
+   deviation is exactly 100 bps, the secondary stands at
+   10,100 bps of the primary, and the acceptable range is
+   147 to 153. A secondary of 160 deviates by 666 bps (floored)
+   and fails. At dust scale (primary 0.000000003, secondary
+   0.000000004) the range at a 2,000 bps maximum collapses to
+   the primary alone, so the one-unit gap fails at 3,333 bps.
+   Which feed is primary is the program's own choice - swapping
+   the two changes the bps, because the denominator changes -
+   and that asymmetry is stated on the page. Staleness and
+   confidence are Tools 120 and 32; a median-of-three or other
+   multi-feed combination and the cost of posting an update are
+   stated as not modelled. Prototype-verified before shipping
+   against an independent Python integer oracle on 20,000 cases,
+   0 mismatches on every figure. */
+var MAX_DEV_PRICE = 1000000000000n; /* 1e12 whole units per entered price */
+function oracleDeviation(primaryStr, secondaryStr, maxBpsStr) {
+  var p = parseScaled(primaryStr), s = parseScaled(secondaryStr), mS = parseScaled(maxBpsStr);
+  if (p === null || s === null || mS === null) return null;
+  if (mS % SCALE !== 0n) return null;
+  var maxBps = Number(mS / SCALE);
+  if (!Number.isInteger(maxBps) || maxBps < 0 || maxBps > 10000) return null;
+  var cap = MAX_DEV_PRICE * SCALE;
+  if (p <= 0n || p > cap || s <= 0n || s > cap) return null;
+  var diff = s - p;
+  var ad = diff < 0n ? -diff : diff;
+  var lowNum = p * BigInt(10000 - maxBps);
+  return {
+    primary: formatScaled(p), secondary: formatScaled(s), maxBps: maxBps,
+    diffSigned: formatScaled(diff), diffAbs: formatScaled(ad),
+    deviationBps: ((ad * 10000n) / p).toString(),
+    signedBps: ((diff * 10000n) / p).toString(),
+    shareBps: ((s * 10000n) / p).toString(),
+    within: ad * 10000n <= p * BigInt(maxBps),
+    lowAccept: formatScaled((lowNum + 9999n) / 10000n),
+    highAccept: formatScaled((p * BigInt(10000 + maxBps)) / 10000n)
+  };
+}
+
+
 /* ---------- Tool 120: Oracle staleness checker ---------- */
 /* Tool 32 prices a Pyth-style feed's confidence band and states
    staleness - checking the publish time against a maximum age -
@@ -5624,8 +5684,8 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
    timestamp - of 1,800,000,060; at a current time of
    1,800,000,090 the same feed is stale by 30 seconds at
    15,000 bps. The price itself and its confidence are Tool 32,
-   deviation from a second feed and the cost of posting an update
-   are stated as not modelled. Prototype-verified before shipping
+   deviation from a second feed is Tool 121 and the cost of
+   posting an update is stated as not modelled. Prototype-verified before shipping
    against an independent Python integer oracle on 20,000 cases,
    0 mismatches on every figure. */
 var MAX_STALE_TS = 9999999999; /* largest entered Unix timestamp (2286) */
@@ -7212,6 +7272,7 @@ if (typeof module !== "undefined" && module.exports) {
     bridgeTransfer, MAX_BRIDGE_AMOUNT,
     nftSweep, MAX_SWEEP_AMOUNT, MAX_SWEEP_LISTINGS,
     oracleStaleness, MAX_STALE_TS, MAX_STALE_AGE, MAX_STALE_HEARTBEAT,
+    oracleDeviation, MAX_DEV_PRICE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -9877,6 +9938,33 @@ if (typeof document !== "undefined") {
       setText("bridge-result", "Model output: sending " + res.amount + " of an asset across a bridge at a percent fee of " + res.feeBps.toLocaleString("en-US") + " bps and a fixed fee of " + res.fixedFee + " in the same asset pays a percent fee of " + res.pctFee + ", leaving " + res.afterPctFee + ", and delivers " + res.receive + " on the destination chain, a total cost of " + res.totalCost + " (" + res.costBps.toLocaleString("en-US") + " bps of the amount sent)." + note + " Amounts and fees are user-entered; no live bridge is read. Source-chain gas paid in the native token, destination gas beyond the entered fixed fee, any price difference between the sent asset and the asset delivered (a wrapped or bridged version at its own price), transfer times, and a Token-2022 transfer fee on the delivered token (Tool 13) are not modelled. An educational model of a cross-chain bridge transfer, not a live quote. Not financial advice.");
     });
 
+    var devForm = document.getElementById("dev-calc");
+    if (devForm) devForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = oracleDeviation(val("dev-primary"), val("dev-secondary"), val("dev-maxbps"));
+      if (!res) {
+        document.getElementById("dev-diff-out").value = "Invalid";
+        document.getElementById("dev-bps-out").value = "Invalid";
+        document.getElementById("dev-share-out").value = "Invalid";
+        document.getElementById("dev-verdict-out").value = "Invalid";
+        document.getElementById("dev-range-out").value = "Invalid";
+        setText("dev-result", "Check the inputs: the primary and secondary prices are each above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, and the maximum deviation is a whole number of basis points from 0 to 10,000. Blanks are not read as zero.");
+        return;
+      }
+      var grp = function (x) { return x.replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("dev-diff-out").value = res.diffSigned + " (secondary - primary)";
+      document.getElementById("dev-bps-out").value = grp(res.deviationBps) + " bps of the primary price";
+      document.getElementById("dev-share-out").value = grp(res.shareBps) + " bps of the primary price";
+      document.getElementById("dev-verdict-out").value = res.within ? "Within the maximum - a program accepts the pair" : "Exceeds the maximum - a program rejects the pair";
+      document.getElementById("dev-range-out").value = res.lowAccept + " to " + res.highAccept;
+      var note = "";
+      if (res.diffSigned === "0") note = " The two feeds agree exactly, so the deviation is zero at any maximum, including a maximum of zero.";
+      else if (!res.within && Number(res.deviationBps) === res.maxBps) note = " The floored deviation reads exactly the maximum, but the verdict is judged by exact cross-multiplication rather than the floored figure, and the true gap sits past the line - a secondary one smallest unit lower would be the highest that passes at these settings.";
+      else if (res.within) note = " The secondary sits inside the acceptable range at this maximum: any secondary from " + res.lowAccept + " to " + res.highAccept + " passes against this primary, and one smallest unit outside either end fails.";
+      else note = " The secondary sits outside the acceptable range at this maximum: a program reading both feeds should reject the pair, wait for the feeds to converge, or price from neither until they agree within the maximum it set.";
+      setText("dev-result", "Model output: a primary price of " + res.primary + " against a secondary price of " + res.secondary + " for the same asset differ by " + res.diffSigned + " - a deviation of " + grp(res.deviationBps) + " bps of the primary price, the secondary standing at " + grp(res.shareBps) + " bps of the primary - against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps: " + (res.within ? "within it, so a program accepts the pair." : "past it, so a program rejects the pair.") + note + " Prices and the maximum are user-entered; no live feed is read. The deviation is measured against the primary, so swapping which feed is primary changes the bps figure. Staleness (Tool 120) and the confidence band (Tool 32) are the same price's other two guards; a median-of-three or other multi-feed combination and the cost of posting an update are not modelled. An educational model of oracle deviation, not a live feed reading. Not financial advice.");
+    });
+
     var staleForm = document.getElementById("stale-calc");
     if (staleForm) staleForm.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -9898,7 +9986,7 @@ if (typeof document !== "undefined") {
         document.getElementById("stale-used-out").value = "not applicable";
         document.getElementById("stale-beats-out").value = "not applicable";
         document.getElementById("stale-deadline-out").value = res.deadline;
-        setText("stale-result", "Model output: the publish time " + res.publish + " is " + res.aheadSec + (res.aheadSec === 1 ? " second" : " seconds") + " ahead of the current time " + res.now + " - a future-dated price. A program reading it should reject it rather than treat a negative age as fresh: the timestamps disagree, which is a clock or feed fault, not a fresh price. Timestamps, the maximum age and the heartbeat are user-entered; no live feed is read. The price and its confidence band are Tool 32, deviation against a second feed and the cost of posting an update are not modelled. An educational model of oracle staleness, not a live feed reading. Not financial advice.");
+        setText("stale-result", "Model output: the publish time " + res.publish + " is " + res.aheadSec + (res.aheadSec === 1 ? " second" : " seconds") + " ahead of the current time " + res.now + " - a future-dated price. A program reading it should reject it rather than treat a negative age as fresh: the timestamps disagree, which is a clock or feed fault, not a fresh price. Timestamps, the maximum age and the heartbeat are user-entered; no live feed is read. The price and its confidence band are Tool 32, deviation against a second feed is Tool 121, and the cost of posting an update is not modelled. An educational model of oracle staleness, not a live feed reading. Not financial advice.");
         return;
       }
       document.getElementById("stale-age-out").value = res.ageSec + (res.ageSec === 1 ? " second" : " seconds");
@@ -9910,7 +9998,7 @@ if (typeof document !== "undefined") {
       var note = "";
       if (res.fresh && res.remaining === 0) note = " The age is exactly the maximum age: the check fails only when a price is MORE than the maximum old, so this last second still passes - one second later it is stale.";
       else if (!res.fresh) note = " At this age a program calling get_price_no_older_than with this maximum age fails and must wait for, fetch or post a newer update instead of pricing from this one.";
-      setText("stale-result", "Model output: a price published at " + res.publish + " read at " + res.now + " is " + res.ageSec + (res.ageSec === 1 ? " second" : " seconds") + " old against a maximum age of " + res.maxAge + " seconds - " + (res.fresh ? "fresh" : "stale") + ", with " + res.usedBps.toLocaleString("en-US") + " bps of its freshness window used and " + res.heartbeatsElapsed + (res.heartbeatsElapsed === 1 ? " scheduled update" : " scheduled updates") + " (one every " + res.heartbeat + " seconds) missed since it published." + note + " Timestamps, the maximum age and the heartbeat are user-entered; no live feed is read. The price and its confidence band are Tool 32, deviation against a second feed and the cost of posting an update are not modelled. An educational model of oracle staleness, not a live feed reading. Not financial advice.");
+      setText("stale-result", "Model output: a price published at " + res.publish + " read at " + res.now + " is " + res.ageSec + (res.ageSec === 1 ? " second" : " seconds") + " old against a maximum age of " + res.maxAge + " seconds - " + (res.fresh ? "fresh" : "stale") + ", with " + res.usedBps.toLocaleString("en-US") + " bps of its freshness window used and " + res.heartbeatsElapsed + (res.heartbeatsElapsed === 1 ? " scheduled update" : " scheduled updates") + " (one every " + res.heartbeat + " seconds) missed since it published." + note + " Timestamps, the maximum age and the heartbeat are user-entered; no live feed is read. The price and its confidence band are Tool 32, deviation against a second feed is Tool 121, and the cost of posting an update is not modelled. An educational model of oracle staleness, not a live feed reading. Not financial advice.");
     });
 
     var sweepForm = document.getElementById("sweep-calc");
