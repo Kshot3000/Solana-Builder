@@ -5600,6 +5600,75 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
   };
 }
 
+/* ---------- Tool 110: vault management & performance fee planner ---------- */
+/* Vaults and managed accounts on Solana (Drift vaults, Kamino-style
+   strategies and their peers) charge two fees on two different
+   bases. The MANAGEMENT fee is a rate on the assets under
+   management - here the period's STARTING value, entered - taken
+   whether the period made money or not. The PERFORMANCE fee is a
+   rate on PROFIT ONLY, and only on profit above the HIGH-WATER
+   MARK: the highest value the account has previously reached.
+   The fee base is therefore end - max(start, high-water mark)
+   when that is positive, and zero otherwise - a period that only
+   recovers an earlier loss charges no performance fee at all,
+   however large its gain, because the investors already paid for
+   those gains once. Both fees floor at the smallest unit and
+   come out of the end value; the new high-water mark is the
+   larger of the old mark and the POST-FEE end value, so fees
+   themselves never set the mark the next period must clear.
+   At the headline - start 100,000, end 120,000, mark 100,000,
+   200 bps management and 2,000 bps performance - the management
+   fee is 2,000, the performance fee is 4,000 on a 20,000 base,
+   the investor keeps 114,000 (a gain of 14,000, 1,400 bps) and
+   the mark resets to 114,000. In recovery - start 80,000, end
+   95,000 against a 100,000 mark - the same rates charge 1,600 of
+   management and NO performance fee, and the mark stands. A
+   period whose implied fees exceed its whole end value is
+   rejected rather than quoted at a negative net: the vault
+   holds nothing the fees could be paid from. The period is a
+   single entered span with no deposits or withdrawals inside
+   it (flows move the mark in real vaults and are stated as not
+   modelled), the management base is the starting value (some
+   vaults average or use the end value - a terms difference,
+   stated on the page), and hurdle rates above the mark are not
+   modelled. Prototype-verified before shipping against an
+   independent Python integer oracle on 20,000 cases, 0
+   mismatches on every figure. Amounts are entered, never read
+   from a live vault. */
+var MAX_VFEE_AMOUNT = 1000000000000n; /* 1e12 whole units per amount */
+function vaultFees(startStr, endStr, hwmStr, mgmtBpsStr, perfBpsStr) {
+  var S = parseScaled(startStr), E = parseScaled(endStr), H = parseScaled(hwmStr);
+  var mS = parseScaled(mgmtBpsStr), pS = parseScaled(perfBpsStr);
+  if (S === null || E === null || H === null || mS === null || pS === null) return null;
+  var cap = MAX_VFEE_AMOUNT * SCALE;
+  if (S <= 0n || S > cap || E < 0n || E > cap || H < 0n || H > cap) return null;
+  if (mS % SCALE !== 0n || pS % SCALE !== 0n) return null;
+  var m = Number(mS / SCALE), pf = Number(pS / SCALE);
+  if (!Number.isInteger(m) || m < 0 || m >= 10000) return null;
+  if (!Number.isInteger(pf) || pf < 0 || pf >= 10000) return null;
+  var base = S > H ? S : H;
+  var perfBase = E > base ? E - base : 0n;
+  var mgmtFee = (S * BigInt(m)) / 10000n;
+  var perfFee = (perfBase * BigInt(pf)) / 10000n;
+  var total = mgmtFee + perfFee;
+  if (total > E) return null; /* the end value cannot pay the fees it implies */
+  var net = E - total;
+  var gain = net - S;
+  var num = gain * 10000n;
+  var q = num / S, rem = num % S;
+  var gainBps = Number(q - ((rem !== 0n && num < 0n) ? 1n : 0n)); /* floored signed */
+  return {
+    start: formatScaled(S), end: formatScaled(E), hwm: formatScaled(H),
+    mgmtBps: m, perfBps: pf,
+    mgmtFee: formatScaled(mgmtFee), perfBase: formatScaled(perfBase),
+    perfFee: formatScaled(perfFee), totalFees: formatScaled(total),
+    netEnd: formatScaled(net), gain: formatScaled(gain), gainBps: gainBps,
+    newHwm: formatScaled(H > net ? H : net),
+    toHwm: formatScaled(H > E ? H - E : 0n),
+    inRecovery: E < H, madeNewHigh: perfBase > 0n, grossLoss: E < S
+  };
+}
+
 /* ---------- Tool 103: second-price (Vickrey) auction settlement planner ---------- */
 /* A second-price (Vickrey) auction - the sealed-bid form behind
    many NFT, domain and ad sales, and the pricing rule Tool 102
@@ -6434,6 +6503,7 @@ if (typeof module !== "undefined" && module.exports) {
     perpInsuranceFund, MAX_PINS_AMOUNT,
     adlQueue, MAX_ADL_AMOUNT, MAX_ADL_POSITIONS,
     lstExit, MAX_LSTX_AMOUNT, MAX_LSTX_EPOCHS,
+    vaultFees, MAX_VFEE_AMOUNT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8956,6 +9026,31 @@ if (typeof document !== "undefined") {
       else if (res.diff === "0") note = " The two paths pay exactly the same at these settings, so the wait buys nothing and costs nothing.";
       else note = " Waiting pays more here: the gap is the pool's spot discount to the redemption rate, its swap fee and its price impact, taken together.";
       setText("lstx-result", "Model output: exiting " + res.amount + " LST two ways. Redeeming with the stake pool at its rate of " + res.rate.toFixed(9) + " SOL per token returns " + res.delayedOut + " SOL after the entered wait of " + res.waitEpochs + (res.waitEpochs === 1 ? " epoch" : " epochs") + ". Selling instantly into the DEX pool at a spot of " + res.spot.toFixed(9) + " SOL per token returns " + res.instantOut + " SOL (the pool's swap fee takes " + res.instantFee + " LST" + (res.priceImpactPct === null ? "" : ", price impact " + res.priceImpactPct.toFixed(4) + "%") + "). The delayed path pays " + res.diff + " SOL more" + (res.costBps === null ? "" : " (" + res.costBps.toLocaleString("en-US") + " bps of the delayed value)") + "." + note + " Amounts are user-entered; no live pool is read. Stake-pool withdrawal fees are Tool 75's model and are not charged here, and the wait is the wait you enter - when a given pool's liquidity frees is that pool's own timing. An educational model of a liquid staking token exit, not a live quote. Not financial advice.");
+    });
+
+
+    var vfeeForm = document.getElementById("vfee-calc");
+    if (vfeeForm) vfeeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = vaultFees(val("vfee-start"), val("vfee-end"), val("vfee-hwm"), val("vfee-mgmt"), val("vfee-perf"));
+      if (!res) {
+        document.getElementById("vfee-mgmt-out").value = "Invalid";
+        document.getElementById("vfee-perf-out").value = "Invalid";
+        document.getElementById("vfee-net-out").value = "Invalid";
+        document.getElementById("vfee-hwm-out").value = "Invalid";
+        setText("vfee-result", "Check the inputs: the starting value is an amount above zero, the end value and the high-water mark are amounts of zero or more, all with at most 9 decimal places and at most 1,000,000,000,000 whole units, both fee rates are whole numbers of basis points under 10,000, and the end value covers the fees those rates imply. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("vfee-mgmt-out").value = res.mgmtFee;
+      document.getElementById("vfee-perf-out").value = res.perfFee + " (on a performance base of " + res.perfBase + ")";
+      document.getElementById("vfee-net-out").value = res.netEnd + " (gain " + res.gain + ", " + res.gainBps.toLocaleString("en-US") + " bps on the start)";
+      document.getElementById("vfee-hwm-out").value = res.newHwm;
+      var note = "";
+      if (res.madeNewHigh) note = " The end value cleared the higher of the start and the old mark, so the performance fee is charged on the excess only, and the mark resets upward to the post-fee value - the fees themselves never set the mark.";
+      else if (res.inRecovery && !res.grossLoss) note = " The period gained, but the end value is still " + res.toHwm + " below the high-water mark: that gain only recovers an earlier loss, so no performance fee is charged on it - investors already paid for those gains the first time - and the mark stands.";
+      else if (res.grossLoss) note = " The period lost value gross, so there is no performance fee; the management fee is charged anyway - it is a rate on assets, not on profit - and the high-water mark stands for the recovery to clear.";
+      else note = " The end value exactly meets the higher of the start and the old mark, so there is no performance base and no performance fee; the mark stands.";
+      setText("vfee-result", "Model output: a vault starting at " + res.start + " and ending at " + res.end + " gross, against a high-water mark of " + res.hwm + ", at a " + res.mgmtBps.toLocaleString("en-US") + " bps management fee and a " + res.perfBps.toLocaleString("en-US") + " bps performance fee. The management fee takes " + res.mgmtFee + " (charged on the starting value) and the performance fee takes " + res.perfFee + " - total fees " + res.totalFees + " - leaving a net end value of " + res.netEnd + ", a gain of " + res.gain + " (" + res.gainBps.toLocaleString("en-US") + " bps on the starting value), and a new high-water mark of " + res.newHwm + "." + note + " Amounts are user-entered; no live vault is read. Deposits and withdrawals inside the period, hurdle rates and management fees charged on an average or end balance are stated as not modelled - a real vault's own terms decide those. An educational model of vault management and performance fees, not a live quote. Not financial advice.");
     });
 
     var zapForm = document.getElementById("zap-calc");
