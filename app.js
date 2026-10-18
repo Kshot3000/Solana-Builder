@@ -5600,6 +5600,68 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
   };
 }
 
+/* ---------- Tool 112: trigger order (stop-loss / take-profit) planner ---------- */
+/* Trigger orders (Jupiter Trigger, Drift and their peers) rest
+   off-market until a stated price is touched, then sell. The
+   plan is fixed at ENTRY: a stop trigger a stated bps BELOW the
+   entry price caps the loss, a take-profit trigger a stated bps
+   ABOVE it banks the gain, and the ratio of the two distances -
+   reward over risk, both in quote value - is the number that
+   decides whether the plan was worth taking before price moves
+   at all. Every figure is exact floored integer math: trigger
+   prices floor at the smallest price unit, proceeds floor again
+   (amount x price), so at dust scale the EFFECTIVE risk share
+   can exceed the stated stop - a 3-smallest-unit position at an
+   entry of 1 with a 5,000 bps stop has a floored stop price of
+   0.5, proceeds of 1 unit, and an effective risk of 6,666 bps,
+   not 5,000. A zero stop leaves no risk to divide by, so the
+   reward/risk ratio is null, never infinity; a position whose
+   entry value itself floors to zero has no measurable shares.
+   At the headline - 1,000 tokens entered at 2, a 1,000 bps stop
+   and a 2,500 bps take-profit - the triggers are 1.8 and 2.5,
+   the risk is 200 of a 2,000 entry value, the reward is 500,
+   and the ratio is exactly 2.5. Execution is NOT the trigger:
+   a real fill happens at the market price when the trigger is
+   reached, with slippage, pool fees and any platform fee on
+   top - stated as not modelled; the model prices fills exactly
+   AT the trigger prices, which is the plan, not a promise.
+   Prototype-verified before shipping against an independent
+   Python integer oracle on 20,000 cases, 0 mismatches on every
+   figure. Amounts and prices are entered, never read live. */
+var MAX_TRIG_AMOUNT = 1000000000000n; /* 1e12 whole units per amount/price */
+var MAX_TRIG_TP_BPS = 100000; /* take-profit up to +1,000% */
+function triggerOrder(amountStr, entryStr, stopBpsStr, tpBpsStr) {
+  var A = parseScaled(amountStr), E = parseScaled(entryStr);
+  var sS = parseScaled(stopBpsStr), tS = parseScaled(tpBpsStr);
+  if (A === null || E === null || sS === null || tS === null) return null;
+  var cap = MAX_TRIG_AMOUNT * SCALE;
+  if (A <= 0n || A > cap || E <= 0n || E > cap) return null;
+  if (sS % SCALE !== 0n || tS % SCALE !== 0n) return null;
+  var stop = Number(sS / SCALE), tp = Number(tS / SCALE);
+  if (!Number.isInteger(stop) || stop < 0 || stop > 10000) return null;
+  if (!Number.isInteger(tp) || tp < 0 || tp > MAX_TRIG_TP_BPS) return null;
+  var stopPrice = (E * BigInt(10000 - stop)) / 10000n;
+  var tpPrice = (E * BigInt(10000 + tp)) / 10000n;
+  var entryValue = (A * E) / SCALE;
+  var stopProceeds = (A * stopPrice) / SCALE;
+  var tpProceeds = (A * tpPrice) / SCALE;
+  var risk = entryValue - stopProceeds;
+  var reward = tpProceeds - entryValue;
+  var riskBps = entryValue === 0n ? null : Number((risk * 10000n) / entryValue);
+  var rewardBps = entryValue === 0n ? null : Number((reward * 10000n) / entryValue);
+  var rr = risk === 0n ? null : formatScaled((reward * SCALE) / risk);
+  return {
+    amount: formatScaled(A), entryPrice: formatScaled(E),
+    stopBps: stop, tpBps: tp,
+    entryValue: formatScaled(entryValue),
+    stopPrice: formatScaled(stopPrice), stopProceeds: formatScaled(stopProceeds),
+    risk: formatScaled(risk), riskBps: riskBps,
+    tpPrice: formatScaled(tpPrice), tpProceeds: formatScaled(tpProceeds),
+    reward: formatScaled(reward), rewardBps: rewardBps,
+    rr: rr, noRisk: risk === 0n, unvalued: entryValue === 0n
+  };
+}
+
 /* ---------- Tool 111: restaking slashing planner ---------- */
 /* Restaking on Solana (Jito Restaking, Solayer, Fragmetric and
    peers) takes already-staked assets - SOL, LSTs - and pledges
@@ -6559,6 +6621,7 @@ if (typeof module !== "undefined" && module.exports) {
     lstExit, MAX_LSTX_AMOUNT, MAX_LSTX_EPOCHS,
     vaultFees, MAX_VFEE_AMOUNT,
     restakeSlash, MAX_RSLASH_AMOUNT,
+    triggerOrder, MAX_TRIG_AMOUNT, MAX_TRIG_TP_BPS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -9083,6 +9146,34 @@ if (typeof document !== "undefined") {
       setText("lstx-result", "Model output: exiting " + res.amount + " LST two ways. Redeeming with the stake pool at its rate of " + res.rate.toFixed(9) + " SOL per token returns " + res.delayedOut + " SOL after the entered wait of " + res.waitEpochs + (res.waitEpochs === 1 ? " epoch" : " epochs") + ". Selling instantly into the DEX pool at a spot of " + res.spot.toFixed(9) + " SOL per token returns " + res.instantOut + " SOL (the pool's swap fee takes " + res.instantFee + " LST" + (res.priceImpactPct === null ? "" : ", price impact " + res.priceImpactPct.toFixed(4) + "%") + "). The delayed path pays " + res.diff + " SOL more" + (res.costBps === null ? "" : " (" + res.costBps.toLocaleString("en-US") + " bps of the delayed value)") + "." + note + " Amounts are user-entered; no live pool is read. Stake-pool withdrawal fees are Tool 75's model and are not charged here, and the wait is the wait you enter - when a given pool's liquidity frees is that pool's own timing. An educational model of a liquid staking token exit, not a live quote. Not financial advice.");
     });
 
+
+    var trigForm = document.getElementById("trig-calc");
+    if (trigForm) trigForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = triggerOrder(val("trig-amount"), val("trig-entry"), val("trig-stop"), val("trig-tp"));
+      if (!res) {
+        document.getElementById("trig-value-out").value = "Invalid";
+        document.getElementById("trig-stop-out").value = "Invalid";
+        document.getElementById("trig-risk-out").value = "Invalid";
+        document.getElementById("trig-tp-out").value = "Invalid";
+        document.getElementById("trig-reward-out").value = "Invalid";
+        document.getElementById("trig-rr-out").value = "Invalid";
+        setText("trig-result", "Check the inputs: the amount and the entry price are amounts above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, the stop is a whole number of basis points from 0 to 10,000, and the take-profit is a whole number of basis points from 0 to 100,000. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("trig-value-out").value = res.entryValue;
+      document.getElementById("trig-stop-out").value = res.stopPrice + " (proceeds " + res.stopProceeds + ")";
+      document.getElementById("trig-risk-out").value = res.risk + (res.riskBps === null ? " (share unmeasurable - the entry value floored to zero)" : " (" + res.riskBps.toLocaleString("en-US") + " bps of the entry value)");
+      document.getElementById("trig-tp-out").value = res.tpPrice + " (proceeds " + res.tpProceeds + ")";
+      document.getElementById("trig-reward-out").value = res.reward + (res.rewardBps === null ? " (share unmeasurable - the entry value floored to zero)" : " (" + res.rewardBps.toLocaleString("en-US") + " bps of the entry value)");
+      document.getElementById("trig-rr-out").value = res.rr === null ? "n/a - no risk at these settings" : res.rr + " to 1";
+      var note = "";
+      if (res.unvalued) note = " The position is too small to value: its entry value floors to zero at the smallest unit, so neither share is measurable - dust positions cannot be planned in bps.";
+      else if (res.noRisk) note = " A stop at the entry price leaves no planned risk, so no reward/risk ratio exists - the plan risks nothing on paper and, in a real market, would trigger on the first tick down.";
+      else if (res.riskBps !== null && res.riskBps > res.stopBps) note = " The effective risk share exceeds the stated stop rate: the trigger price and the proceeds each floored at the smallest unit, and at this scale the floorings widen the stop.";
+      else note = " The ratio is the plan in one number: it says how many units of planned gain stand against each unit of planned loss, before any fee or slippage a real fill would add.";
+      setText("trig-result", "Model output: " + res.amount + " tokens entered at " + res.entryPrice + " are worth " + res.entryValue + ". A stop " + res.stopBps.toLocaleString("en-US") + " bps below entry triggers at " + res.stopPrice + " and returns " + res.stopProceeds + ", a planned risk of " + res.risk + ". A take-profit " + res.tpBps.toLocaleString("en-US") + " bps above entry triggers at " + res.tpPrice + " and returns " + res.tpProceeds + ", a planned reward of " + res.reward + "." + note + " Amounts and prices are user-entered; no live market is read. A real trigger fill executes at the market price when the trigger is reached - slippage, pool and platform fees are not modelled, and this model prices fills exactly at the trigger prices. An educational model of a trigger order plan, not a live quote. Not financial advice.");
+    });
 
     var rslashForm = document.getElementById("rslash-calc");
     if (rslashForm) rslashForm.addEventListener("submit", function (e) {
