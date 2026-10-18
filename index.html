@@ -26,6 +26,60 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>117. Maker / taker fee &amp; rebate planner - one matched trade, split three ways</h3>
+      <p>Every central limit order book on Solana - Phoenix, OpenBook, Drift, Zeta - prices the two sides of one matched trade <strong>differently</strong>. The <strong>taker</strong>, whose order crosses the book and removes liquidity, pays a fee of the entered bps on the trade's <strong>notional</strong> (price &#215; quantity, floored at the smallest unit). The <strong>maker</strong>, whose resting order was already there, is paid a <strong>rebate</strong> on the same notional, funded out of that taker fee - and the venue keeps what is left, so the three parts always sum exactly. At the headline settings - <strong>10</strong> at <strong>150</strong>, a notional of <strong>1,500</strong>, a <strong>10 bps</strong> taker fee and a <strong>3 bps</strong> maker rebate - the taker pays <strong>1.5</strong>, the maker receives <strong>0.45</strong> (3,000 bps of the fee) and the venue keeps <strong>1.05</strong>; the taker buying pays 1,501.5 in total while the maker selling receives 1,500.45. A rebate set equal to the taker fee leaves the venue exactly nothing, and a dust trade whose notional is one smallest unit pays <strong>no fee at all</strong>, because the fee floors to zero - the smallest notional that pays even one smallest unit of fee at 10 bps is <strong>0.000001</strong>. Tool 98 prices the tick and lot grid an order rests on and states venue fees as not modelled; this prices them. Tiered or volume-based fee schedules, rebates subsidized beyond the taker fee, and fees charged in the base asset are not modelled. Amounts and rates are user-entered; no live venue is read. An educational model of maker and taker fees, not a live quote. Not financial advice.</p>
+      <form id="mtfee-calc">
+        <div class="grid">
+          <div>
+            <label for="mtfee-price">Price (quote per base, model)</label>
+            <input id="mtfee-price" name="mtfee-price" inputmode="decimal" value="150">
+          </div>
+          <div>
+            <label for="mtfee-qty">Quantity (base units, model)</label>
+            <input id="mtfee-qty" name="mtfee-qty" inputmode="decimal" value="10">
+          </div>
+          <div>
+            <label for="mtfee-taker">Taker fee (bps, model)</label>
+            <input id="mtfee-taker" name="mtfee-taker" inputmode="numeric" value="10">
+          </div>
+          <div>
+            <label for="mtfee-rebate">Maker rebate (bps, model)</label>
+            <input id="mtfee-rebate" name="mtfee-rebate" inputmode="numeric" value="3">
+          </div>
+          <div>
+            <label for="mtfee-notional-out">Notional (model)</label>
+            <input id="mtfee-notional-out" name="mtfee-notional-out" readonly>
+          </div>
+          <div>
+            <label for="mtfee-fee-out">Taker fee paid (model)</label>
+            <input id="mtfee-fee-out" name="mtfee-fee-out" readonly>
+          </div>
+          <div>
+            <label for="mtfee-rebate-out">Maker rebate received (model)</label>
+            <input id="mtfee-rebate-out" name="mtfee-rebate-out" readonly>
+          </div>
+          <div>
+            <label for="mtfee-keeps-out">Venue keeps (model)</label>
+            <input id="mtfee-keeps-out" name="mtfee-keeps-out" readonly>
+          </div>
+          <div>
+            <label for="mtfee-taker-out">Taker's settlement (model)</label>
+            <input id="mtfee-taker-out" name="mtfee-taker-out" readonly>
+          </div>
+          <div>
+            <label for="mtfee-maker-out">Maker's settlement (model)</label>
+            <input id="mtfee-maker-out" name="mtfee-maker-out" readonly>
+          </div>
+          <div>
+            <label for="mtfee-min-out">Smallest notional that pays a fee (model)</label>
+            <input id="mtfee-min-out" name="mtfee-min-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Run the maker / taker model</button>
+        <p id="mtfee-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>116. Auto-compounding planner - what reinvesting earns after the cost of reinvesting</h3>
       <p>Yield aggregators and auto-compounding vaults harvest a position's rewards and <strong>re-deposit</strong> them, so later rewards are priced on a larger balance. Each compound period here earns <strong>balance &#215; APR &#247; compounds per year</strong>, floored at the smallest unit, and pays the entered <strong>cost per compound</strong> out of the balance before the next period - and that cost is the whole judgement. At the headline settings - <strong>10,000</strong> at <strong>1,200 bps</strong> compounded <strong>monthly</strong> at a cost of <strong>1</strong> over <strong>365 days</strong> - the balance reaches <strong>11,255.567798302</strong> against <strong>11,200</strong> left uncompounded: compounding gains <strong>55.567798302</strong>. Compounding <strong>daily</strong> at no cost reaches <strong>11,274.746156186</strong>, so frequency alone buys less than intuition suggests. When the cost exactly equals a period's interest - <strong>100</strong> a month at the headline settings - the balance <strong>never grows</strong> and finishes at 10,000 while simple interest would have paid 1,200; and a small position whose period interest sits below the cost <strong>shrinks every period until it is gone</strong>: 10 compounded daily at a cost of 0.05 is exhausted at compound <strong>207</strong> of 365, at a size whose break-even principal is <strong>152.083336375</strong> - the smallest balance whose first compound's interest clears the cost. The APR is held flat for the whole horizon: reward-rate changes, the price of a reward token sold into the position, harvest slippage, and aggregator performance fees are not modelled. Amounts and the rate are user-entered; no live market is read. An educational model of auto-compounding, not a live quote. Not financial advice.</p>
       <form id="acomp-calc">
@@ -5030,6 +5084,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=113"></script>
+<script src="app.js?v=114"></script>
 </body>
 </html>
