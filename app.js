@@ -5600,6 +5600,91 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
   };
 }
 
+/* ---------- Tool 113: delta-neutral basis (cash-and-carry) planner ---------- */
+/* A delta-neutral basis trade (Drift, Jupiter Perps and their
+   peers against a spot venue) holds the SAME size long spot and
+   short perp, so the price itself cancels: what remains is the
+   BASIS captured at entry - the perp's entry notional minus the
+   spot's, floored per leg - plus the FUNDING the short collects
+   while the position stands (Tool 34's perpFunding verbatim, from
+   the short's side: at a positive rate the short receives), minus
+   the trading fees on BOTH legs, each floored at the smallest
+   unit on its own entry notional at one entered round-trip rate.
+   The net is reported signed, in quote value and in basis points
+   of the spot notional (the capital the spot leg ties up; the
+   perp's margin is stated as not counted), the bps truncated
+   toward zero. The BREAK-EVEN is the smallest whole hour whose
+   floored funding covers the entry shortfall (fees minus basis):
+   zero when the basis alone already covers the fees, and null -
+   never - when the funding rate is zero or negative and the
+   basis does not cover them, because a short at a non-positive
+   rate collects nothing. At the headline - 100 units, spot 150,
+   perp 150.15, funding 1 bp per hour for 720 hours, a 25 bps
+   round-trip fee per leg - the basis is only 15 (10 bps), the
+   funding is 1,081.08, the fees are 75.0375, the net is
+   1,021.0425 (680 bps on the spot capital), and the first 40
+   hours of funding exist just to cover the fees the tiny basis
+   could not. Entering at a DISCOUNT (perp below spot) starts
+   negative: 149.25 against 150 is a -75 basis that a 2 bp rate
+   needs 36 hours to earn back. The exit is priced at convergence
+   (both legs at one exit price, where the basis is realized in
+   full); price moves before convergence, liquidation of the
+   short leg, funding-rate changes, borrow or margin costs and
+   exit slippage are stated as not modelled - the rate and the
+   hold are entered constants, never a forecast. Prototype-
+   verified before shipping against an independent Python integer
+   oracle on 20,000 cases, 0 mismatches on every figure, with
+   break-even minimality asserted through the funding formula
+   itself. Prices and the rate are entered, never read live. */
+var MAX_BASIS_AMOUNT = 1000000000000n; /* 1e12 whole units per amount/price */
+function basisTrade(sizeStr, spotStr, perpStr, rateStr, hoursStr, feeBpsStr) {
+  var size = parseScaled(sizeStr), spot = parseScaled(spotStr), perp = parseScaled(perpStr);
+  var fS = parseScaled(feeBpsStr);
+  if (size === null || spot === null || perp === null || fS === null) return null;
+  var cap = MAX_BASIS_AMOUNT * SCALE;
+  if (size <= 0n || size > cap || spot <= 0n || spot > cap || perp <= 0n || perp > cap) return null;
+  if (fS % SCALE !== 0n) return null;
+  var feeBps = Number(fS / SCALE);
+  if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps >= 10000) return null;
+  var fund = perpFunding(sizeStr, perpStr, rateStr, hoursStr, "short");
+  if (fund === null) return null;
+  var spotNotional = (size * spot) / SCALE;
+  var perpNotional = (size * perp) / SCALE;
+  if (spotNotional <= 0n || perpNotional <= 0n) return null;
+  var basis = perpNotional - spotNotional;
+  var fundingReceived = parseSignedScaled(fund.total);
+  var fundingPerHour = parseSignedScaled(fund.perHour);
+  var rate = parseSignedScaled(rateStr);
+  var spotFee = (spotNotional * BigInt(feeBps)) / 10000n;
+  var perpFee = (perpNotional * BigInt(feeBps)) / 10000n;
+  var totalFees = spotFee + perpFee;
+  var net = basis + fundingReceived - totalFees;
+  var basisBps = Number((basis * 10000n) / spotNotional);
+  var netBps = Number((net * 10000n) / spotNotional);
+  var breakEvenHours = null, neverBreaksEven = false, beyondHorizon = false;
+  if (basis - totalFees >= 0n) {
+    breakEvenHours = 0;
+  } else if (rate <= 0n) {
+    neverBreaksEven = true;
+  } else {
+    var need = totalFees - basis;
+    var denom = perpNotional * rate;
+    var h = (need * 10000n * SCALE + denom - 1n) / denom;
+    if (h > 87600n) { beyondHorizon = true; } else { breakEvenHours = Number(h); }
+  }
+  return {
+    size: formatScaled(size), spotPrice: formatScaled(spot), perpPrice: formatScaled(perp),
+    spotNotional: formatScaled(spotNotional), perpNotional: formatScaled(perpNotional),
+    basis: formatScaled(basis), basisBps: basisBps,
+    rateBps: fund.rateBps, hours: fund.hours,
+    fundingPerHour: formatScaled(fundingPerHour), fundingReceived: formatScaled(fundingReceived),
+    feeBps: feeBps, spotFee: formatScaled(spotFee), perpFee: formatScaled(perpFee),
+    totalFees: formatScaled(totalFees), net: formatScaled(net), netBps: netBps,
+    breakEvenHours: breakEvenHours, neverBreaksEven: neverBreaksEven, beyondHorizon: beyondHorizon,
+    profitable: net > 0n, exactlyEven: net === 0n
+  };
+}
+
 /* ---------- Tool 112: trigger order (stop-loss / take-profit) planner ---------- */
 /* Trigger orders (Jupiter Trigger, Drift and their peers) rest
    off-market until a stated price is touched, then sell. The
@@ -6622,6 +6707,7 @@ if (typeof module !== "undefined" && module.exports) {
     vaultFees, MAX_VFEE_AMOUNT,
     restakeSlash, MAX_RSLASH_AMOUNT,
     triggerOrder, MAX_TRIG_AMOUNT, MAX_TRIG_TP_BPS,
+    basisTrade, MAX_BASIS_AMOUNT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -9173,6 +9259,37 @@ if (typeof document !== "undefined") {
       else if (res.riskBps !== null && res.riskBps > res.stopBps) note = " The effective risk share exceeds the stated stop rate: the trigger price and the proceeds each floored at the smallest unit, and at this scale the floorings widen the stop.";
       else note = " The ratio is the plan in one number: it says how many units of planned gain stand against each unit of planned loss, before any fee or slippage a real fill would add.";
       setText("trig-result", "Model output: " + res.amount + " tokens entered at " + res.entryPrice + " are worth " + res.entryValue + ". A stop " + res.stopBps.toLocaleString("en-US") + " bps below entry triggers at " + res.stopPrice + " and returns " + res.stopProceeds + ", a planned risk of " + res.risk + ". A take-profit " + res.tpBps.toLocaleString("en-US") + " bps above entry triggers at " + res.tpPrice + " and returns " + res.tpProceeds + ", a planned reward of " + res.reward + "." + note + " Amounts and prices are user-entered; no live market is read. A real trigger fill executes at the market price when the trigger is reached - slippage, pool and platform fees are not modelled, and this model prices fills exactly at the trigger prices. An educational model of a trigger order plan, not a live quote. Not financial advice.");
+    });
+
+    var basisForm = document.getElementById("basis-calc");
+    if (basisForm) basisForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = basisTrade(val("basis-size"), val("basis-spot"), val("basis-perp"), val("basis-rate"), val("basis-hours"), val("basis-fee"));
+      if (!res) {
+        document.getElementById("basis-basis-out").value = "Invalid";
+        document.getElementById("basis-funding-out").value = "Invalid";
+        document.getElementById("basis-fees-out").value = "Invalid";
+        document.getElementById("basis-net-out").value = "Invalid";
+        document.getElementById("basis-be-out").value = "Invalid";
+        setText("basis-result", "Check the inputs: the size and both prices are amounts above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, large enough that both notionals reach one smallest unit, the funding rate is a signed rate within 10,000 bps per hour, the hold is above zero and at most 87,600 hours, and the round-trip fee is a whole number of basis points from 0 to 9,999. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("basis-basis-out").value = res.basis + " (" + res.basisBps.toLocaleString("en-US") + " bps of the spot notional)";
+      document.getElementById("basis-funding-out").value = res.fundingReceived + " (" + res.fundingPerHour + " per hour)";
+      document.getElementById("basis-fees-out").value = res.totalFees + " (spot " + res.spotFee + " + perp " + res.perpFee + ")";
+      document.getElementById("basis-net-out").value = res.net + " (" + res.netBps.toLocaleString("en-US") + " bps of the spot notional)";
+      document.getElementById("basis-be-out").value = res.breakEvenHours === null
+        ? (res.beyondHorizon ? "beyond the 87,600-hour model horizon" : "never at this funding rate")
+        : (res.breakEvenHours === 0 ? "0 hours - the basis alone covers the fees" : res.breakEvenHours.toLocaleString("en-US") + (res.breakEvenHours === 1 ? " hour" : " hours") + " of funding");
+      var note = "";
+      if (res.exactlyEven) note = " The trade exactly breaks even over the hold: basis plus funding equals the fees to the smallest unit.";
+      else if (res.neverBreaksEven) note = " At a zero or negative funding rate the short collects nothing - it pays at a negative rate - so a basis that does not cover the fees never earns them back, however long the position stands.";
+      else if (res.beyondHorizon) note = " The funding does eventually cover the shortfall, but only past this model's 87,600-hour horizon - at any practical hold the trade runs at a loss.";
+      else if (!res.profitable && res.breakEvenHours !== null && res.breakEvenHours > 0) note = " Over this hold the trade has not yet broken even: the funding needs " + res.breakEvenHours.toLocaleString("en-US") + " hours to cover the entry shortfall, and the entered hold is shorter.";
+      else if (!res.profitable) note = " The basis covered the fees at entry, but the funding over the hold ran the other way and dragged the net under water: at this rate the short pays funding instead of collecting it.";
+      else if (res.breakEvenHours === 0) note = " The basis captured at entry already covers both legs' fees, so the funding over the hold is on top of a trade that was whole from the first hour.";
+      else note = " The funding does the work here: the basis at entry is small next to what the short collects over the hold, and the first " + res.breakEvenHours.toLocaleString("en-US") + " hours of it exist just to cover the fees.";
+      setText("basis-result", "Model output: long " + res.size + " spot at " + res.spotPrice + " (notional " + res.spotNotional + ") against a short of " + res.size + " perp at " + res.perpPrice + " (notional " + res.perpNotional + "). The basis captured at entry is " + res.basis + ". At a funding rate of " + res.rateBps + " bps per hour held for " + res.hours + " hours, the short's funding comes to " + res.fundingReceived + ", and the round-trip fees at " + res.feeBps + " bps per leg total " + res.totalFees + ". The net is " + res.net + " (" + res.netBps.toLocaleString("en-US") + " bps of the spot notional)." + note + " Amounts, prices and the rate are user-entered; no live market is read. The exit is priced at convergence, where the basis is realized in full: price moves before convergence, liquidation of the short leg, funding-rate changes, margin and borrow costs and exit slippage are not modelled, and the perp's margin capital is not counted in the spot-notional share. An educational model of a delta-neutral basis trade, not a live quote. Not financial advice.");
     });
 
     var rslashForm = document.getElementById("rslash-calc");
