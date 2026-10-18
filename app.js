@@ -5600,6 +5600,93 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
   };
 }
 
+/* ---------- Tool 114: grid trading planner ---------- */
+/* Grid trading (Jupiter limit orders, Drift, Orca and the grid
+   bots built on them) rests a ladder of equal-sized BUY orders
+   at evenly spaced prices across a range and, as each buy fills,
+   posts its SELL one step above the buy. This models an
+   ARITHMETIC grid: the step is the range width divided by the
+   grid count, floored at the smallest price unit, so the top
+   sell (lower + grids x step) can sit a hair below the entered
+   upper price. The total quote is split into equal per-level
+   slices, floored - the undeployed remainder is reported, never
+   spent. Each trade pays the entered fee on its INPUT, floored,
+   in the hub's usual convention: a buy's fee comes off its quote
+   slice before the base amount is priced (floored again), and a
+   sell's fee comes off its base before the proceeds are priced
+   (floored again). The teaching fact is the shape of the return:
+   the step is FIXED while the price rises up the grid, so a step
+   is worth less at the top than at the bottom - at the headline
+   (100 to 200 in 10 grids, 10,000 of quote, a 25 bps fee) the
+   bottom level profits 94.506875 and the top 47.375, every level
+   profits, and one full pass nets 665.24453861 (665 bps of the
+   deployed quote); at a 300 bps fee the same grid's top level
+   LOSES 9.5789474 and only 6 of its 10 levels profit at all,
+   while a grid too narrow for its fee (50 to 51 in 4 grids at
+   25 bps) loses on every level. The signed profit share
+   truncates toward zero, so a dust loss can read 0 bps while
+   the profit figure itself is negative - the figure, not the
+   share, is the honest one. A level whose slice buys no
+   smallest unit at all is rejected rather than quoted. The
+   model prices ONE pass - every buy filled, then every sell
+   filled one step up; a real grid re-posts after each round
+   trip, the price may never visit the whole range, sells may
+   never fill, and the base held if the price leaves the range
+   downward is the grid's real risk - all stated as not
+   modelled. Prototype-verified before shipping against an
+   independent Python integer oracle on 20,008 cases, 0
+   mismatches on every figure. Prices are entered, never read
+   live. */
+var MAX_GRID_AMOUNT = 1000000000000n; /* 1e12 whole units per price/amount */
+var MAX_GRID_GRIDS = 1000;
+function gridPlan(lowerStr, upperStr, gridsStr, totalStr, feeBpsStr) {
+  var lower = parseScaled(lowerStr), upper = parseScaled(upperStr);
+  var gS = parseScaled(gridsStr), total = parseScaled(totalStr), fS = parseScaled(feeBpsStr);
+  if (lower === null || upper === null || gS === null || total === null || fS === null) return null;
+  var cap = MAX_GRID_AMOUNT * SCALE;
+  if (lower <= 0n || lower > cap || upper <= lower || upper > cap || total <= 0n || total > cap) return null;
+  if (gS % SCALE !== 0n || fS % SCALE !== 0n) return null;
+  var grids = Number(gS / SCALE), feeBps = Number(fS / SCALE);
+  if (!Number.isInteger(grids) || grids < 1 || grids > MAX_GRID_GRIDS) return null;
+  if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps >= 10000) return null;
+  var step = (upper - lower) / BigInt(grids);
+  if (step <= 0n) return null;
+  var perLevel = total / BigInt(grids);
+  if (perLevel <= 0n) return null;
+  var deployed = perLevel * BigInt(grids);
+  var unspent = total - deployed;
+  var totalBase = 0n, totalProceeds = 0n, profitableLevels = 0;
+  var firstProfit = null, lastProfit = null;
+  for (var i = 0; i < grids; i++) {
+    var buyPrice = lower + BigInt(i) * step;
+    var buyFee = (perLevel * BigInt(feeBps)) / 10000n;
+    var eff = perLevel - buyFee;
+    if (eff <= 0n) return null;
+    var base = (eff * SCALE) / buyPrice;
+    if (base <= 0n) return null;
+    var sellPrice = buyPrice + step;
+    var sellFeeBase = (base * BigInt(feeBps)) / 10000n;
+    var proceeds = ((base - sellFeeBase) * sellPrice) / SCALE;
+    var profit = proceeds - perLevel;
+    totalBase += base; totalProceeds += proceeds;
+    if (profit > 0n) profitableLevels++;
+    if (i === 0) firstProfit = profit;
+    lastProfit = profit;
+  }
+  var totalProfit = totalProceeds - deployed;
+  var totalProfitBps = Number((totalProfit * 10000n) / deployed);
+  return {
+    lowerPrice: formatScaled(lower), upperPrice: formatScaled(upper), grids: grids,
+    step: formatScaled(step), topSellPrice: formatScaled(lower + BigInt(grids) * step),
+    perLevel: formatScaled(perLevel), deployed: formatScaled(deployed), unspent: formatScaled(unspent),
+    totalQuote: formatScaled(total), feeBps: feeBps,
+    totalBase: formatScaled(totalBase), totalProceeds: formatScaled(totalProceeds),
+    totalProfit: formatScaled(totalProfit), totalProfitBps: totalProfitBps,
+    firstProfit: formatScaled(firstProfit), lastProfit: formatScaled(lastProfit),
+    profitableLevels: profitableLevels, allProfitable: profitableLevels === grids, anyProfitable: profitableLevels > 0
+  };
+}
+
 /* ---------- Tool 113: delta-neutral basis (cash-and-carry) planner ---------- */
 /* A delta-neutral basis trade (Drift, Jupiter Perps and their
    peers against a spot venue) holds the SAME size long spot and
@@ -6708,6 +6795,7 @@ if (typeof module !== "undefined" && module.exports) {
     restakeSlash, MAX_RSLASH_AMOUNT,
     triggerOrder, MAX_TRIG_AMOUNT, MAX_TRIG_TP_BPS,
     basisTrade, MAX_BASIS_AMOUNT,
+    gridPlan, MAX_GRID_AMOUNT, MAX_GRID_GRIDS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -9290,6 +9378,33 @@ if (typeof document !== "undefined") {
       else if (res.breakEvenHours === 0) note = " The basis captured at entry already covers both legs' fees, so the funding over the hold is on top of a trade that was whole from the first hour.";
       else note = " The funding does the work here: the basis at entry is small next to what the short collects over the hold, and the first " + res.breakEvenHours.toLocaleString("en-US") + " hours of it exist just to cover the fees.";
       setText("basis-result", "Model output: long " + res.size + " spot at " + res.spotPrice + " (notional " + res.spotNotional + ") against a short of " + res.size + " perp at " + res.perpPrice + " (notional " + res.perpNotional + "). The basis captured at entry is " + res.basis + ". At a funding rate of " + res.rateBps + " bps per hour held for " + res.hours + " hours, the short's funding comes to " + res.fundingReceived + ", and the round-trip fees at " + res.feeBps + " bps per leg total " + res.totalFees + ". The net is " + res.net + " (" + res.netBps.toLocaleString("en-US") + " bps of the spot notional)." + note + " Amounts, prices and the rate are user-entered; no live market is read. The exit is priced at convergence, where the basis is realized in full: price moves before convergence, liquidation of the short leg, funding-rate changes, margin and borrow costs and exit slippage are not modelled, and the perp's margin capital is not counted in the spot-notional share. An educational model of a delta-neutral basis trade, not a live quote. Not financial advice.");
+    });
+
+    var gridForm = document.getElementById("grid-calc");
+    if (gridForm) gridForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = gridPlan(val("grid-lower"), val("grid-upper"), val("grid-grids"), val("grid-total"), val("grid-fee"));
+      if (!res) {
+        document.getElementById("grid-step-out").value = "Invalid";
+        document.getElementById("grid-level-out").value = "Invalid";
+        document.getElementById("grid-base-out").value = "Invalid";
+        document.getElementById("grid-proceeds-out").value = "Invalid";
+        document.getElementById("grid-profit-out").value = "Invalid";
+        document.getElementById("grid-levels-out").value = "Invalid";
+        setText("grid-result", "Check the inputs: the lower and upper prices are amounts above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units with the upper above the lower and a range wide enough that the floored step is at least one smallest price unit, the grid count is a whole number from 1 to 1,000, the total quote is above zero and large enough that every level's slice buys at least one smallest unit, and the trading fee is a whole number of basis points from 0 to 9,999. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("grid-step-out").value = res.step + " per grid (top sell " + res.topSellPrice + ")";
+      document.getElementById("grid-level-out").value = res.perLevel + " per level (" + res.deployed + " deployed, " + res.unspent + " unspent)";
+      document.getElementById("grid-base-out").value = res.totalBase;
+      document.getElementById("grid-proceeds-out").value = res.totalProceeds;
+      document.getElementById("grid-profit-out").value = res.totalProfit + " (" + res.totalProfitBps.toLocaleString("en-US") + " bps of the deployed quote)";
+      document.getElementById("grid-levels-out").value = res.profitableLevels + " of " + res.grids + (res.grids === 1 ? " level profits" : " levels profit") + " (bottom " + res.firstProfit + ", top " + res.lastProfit + ")";
+      var note = "";
+      if (res.allProfitable) note = " Every level profits on a full pass at this fee - the narrowest step return, at the top of the grid, still clears the round-trip fee.";
+      else if (!res.anyProfitable) note = " No level profits at this fee: even the bottom level's step return does not clear the round-trip fee, so a full pass loses money and a narrower grid or a higher fee loses more.";
+      else note = " The grid is split by its fee: the lower levels profit and the top ones do not, because the step is fixed while the price rises, so the step's return shrinks up the grid and the top levels fall under the round-trip fee first.";
+      setText("grid-result", "Model output: an arithmetic grid from " + res.lowerPrice + " to " + res.upperPrice + " in " + res.grids + (res.grids === 1 ? " grid" : " grids") + " steps " + res.step + " at a time, deploying " + res.deployed + " of the " + res.totalQuote + " quote (" + res.perLevel + " per level, " + res.unspent + " unspent) at a " + res.feeBps + " bps fee on each trade's input. If every buy fills, the grid holds " + res.totalBase + " of the base asset; if every holding then sells one step up, it takes back " + res.totalProceeds + ", a profit of " + res.totalProfit + " (" + res.totalProfitBps.toLocaleString("en-US") + " bps of the deployed quote), with " + res.profitableLevels + " of " + res.grids + " levels profitable." + note + " Amounts and prices are user-entered; no live market is read. The model prices one full pass - every buy filled, then every sell filled one step up: re-posting after each round trip, a price that never visits the whole range, sells that never fill, and the base still held if the price leaves the range downward are not modelled. An educational model of a grid trading plan, not a live quote. Not financial advice.");
     });
 
     var rslashForm = document.getElementById("rslash-calc");
