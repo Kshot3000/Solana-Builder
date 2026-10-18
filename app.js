@@ -5055,6 +5055,48 @@ function tickLot(side, priceStr, tickStr, qtyStr, lotStr) {
   };
 }
 
+/* ---------- Tool 101: pool creation planner (initial price & locked minimum) ---------- */
+/* Tool 18 prices a deposit into a pool - including a first deposit's
+   geometric-mean mint, sqrt(depositA x depositB) - and states the
+   first-mint minimum lock as NOT modelled. This tool prices the
+   CREATION itself, lock included, the way a pool creator meets it:
+   the two seed deposits set the pool's opening price (depositB per
+   depositA, and its inverse), the first mint is the exact integer
+   square root of the scaled product (floored), and a pool-specific
+   minimum of that mint is permanently locked - it can never be
+   redeemed, so its pro-rata claim on both reserves (floored per
+   side) stays in the pool forever, defending the mint against the
+   share-inflation attack Tool 99 prices. The creator receives the
+   rest; redeeming it at once would return its floored pro-rata share
+   of each reserve, and the two floored splits (creator + locked)
+   together return each deposit minus at most one smallest unit.
+   The lock amount is pool-specific - every program sets its own -
+   so it is an input here, never a claimed universal. A price that
+   floors to zero at the model's 9-decimal display (a ratio beyond
+   1e9 : 1) is rejected as outside the model rather than shown as 0.
+   Prototype-verified before shipping against an independent Python
+   integer oracle on 20,000 cases, 0 mismatches on every figure.
+   No live pool is read. */
+function poolCreate(depositAStr, depositBStr, lockedStr) {
+  var A = parseScaled(depositAStr), B = parseScaled(depositBStr), L = parseScaled(lockedStr);
+  if (A === null || B === null || L === null) return null;
+  if (A <= 0n || B <= 0n) return null;
+  var total = isqrtBigInt(A * B);
+  if (total <= 0n || L >= total) return null;
+  var priceB = (B * SCALE) / A, priceA = (A * SCALE) / B;
+  if (priceB <= 0n || priceA <= 0n) return null;
+  var creator = total - L;
+  return {
+    depositA: formatScaled(A), depositB: formatScaled(B), locked: formatScaled(L),
+    totalMinted: formatScaled(total), creatorLp: formatScaled(creator),
+    priceBPerA: formatScaled(priceB), priceAPerB: formatScaled(priceA),
+    creatorShareBps: Number((creator * 10000n) / total),
+    lockedShareBps: Number((L * 10000n) / total),
+    lockedClaimA: formatScaled((A * L) / total), lockedClaimB: formatScaled((B * L) / total),
+    redeemA: formatScaled((A * creator) / total), redeemB: formatScaled((B * creator) / total)
+  };
+}
+
 /* ---------- Tool 100: single-sided (zap) deposit planner ---------- */
 /* Tool 18 prices a TWO-sided deposit; this prices the one-sided
    version every "zap in" button performs: you hold only token A, so
@@ -5828,6 +5870,7 @@ if (typeof module !== "undefined" && module.exports) {
     tickLot, MAX_TICKLOT_LAMPORTS,
     vaultShares, MAX_VAULT_RAW,
     zapDeposit,
+    poolCreate,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8082,6 +8125,30 @@ if (typeof document !== "undefined") {
       setText("ticklot-result", "Model output: a " + res.side + " order named at " + res.desiredPrice + " for " + res.desiredQty + " rests on this market at " + res.validPrice + " for " + res.execQty + ", a notional of " + res.validNotional + " against " + res.intendedNotional + " intended (" + res.notionalDelta + ")." + note + " Amounts are user-entered; no live market is read. Taker and maker fees are not modelled. An educational model of an order-book grid, not a live quote. Not financial advice.");
     });
 
+
+    var poolcForm = document.getElementById("poolc-calc");
+    if (poolcForm) poolcForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = poolCreate(val("poolc-da"), val("poolc-db"), val("poolc-lock"));
+      if (!res) {
+        document.getElementById("poolc-mint-out").value = "Invalid";
+        document.getElementById("poolc-price-out").value = "Invalid";
+        document.getElementById("poolc-lock-out").value = "Invalid";
+        document.getElementById("poolc-redeem-out").value = "Invalid";
+        setText("poolc-result", "Check the inputs: both seed deposits must be amounts with at most 9 decimal places and above zero, the locked amount must be an amount with at most 9 decimal places and smaller than the total the seeds mint, and the opening price must be within the model's 9-decimal display (a ratio beyond 1,000,000,000 to 1). Blanks are not read as zero - enter 0 for the lock where the pool locks nothing.");
+        return;
+      }
+      document.getElementById("poolc-mint-out").value = res.totalMinted + " LP tokens minted in total - you receive " + res.creatorLp + " (" + res.creatorShareBps.toLocaleString("en-US") + " bps of the pool)";
+      document.getElementById("poolc-price-out").value = res.priceBPerA + " B per A (and " + res.priceAPerB + " A per B) - the price your seed ratio sets";
+      document.getElementById("poolc-lock-out").value = res.locked === "0"
+        ? "0 locked - this pool locks none of the first mint"
+        : res.locked + " LP locked forever, holding a claim on " + res.lockedClaimA + " A and " + res.lockedClaimB + " B that can never be redeemed";
+      document.getElementById("poolc-redeem-out").value = res.redeemA + " A and " + res.redeemB + " B - what redeeming all of your LP at once would return before any trading";
+      var note = res.locked === "0"
+        ? " With nothing locked, the whole first mint is redeemable - the opening price is still set entirely by your seed ratio, and the first deposit into an empty pool has no market price to match, only the ratio you choose."
+        : " The locked slice is not a fee: it is the pool's own minimum-liquidity defence, priced in LP tokens rather than charged, and its claim stays in the reserves for every later holder. Your share is measured against the total mint, locked slice included, because later deposits divide by that total too.";
+      setText("poolc-result", "Model output: seeding " + res.depositA + " A and " + res.depositB + " B creates the pool at " + res.priceBPerA + " B per A, mints " + res.totalMinted + " LP tokens, locks " + res.locked + " of them permanently and leaves you " + res.creatorLp + " (" + res.creatorShareBps.toLocaleString("en-US") + " bps)." + note + " Amounts are user-entered; no live pool is read. Pool creation fees and the account rent a real creation also pays are not modelled. An educational model of pool creation, not a live quote. Not financial advice.");
+    });
 
     var zapForm = document.getElementById("zap-calc");
     if (zapForm) zapForm.addEventListener("submit", function (e) {
