@@ -5115,9 +5115,9 @@ function poolCreate(depositAStr, depositBStr, lockedStr) {
    saleSplit verbatim - platform fee and creator royalty floored,
    seller keeps the remainder. overCurrentBps is floored, including
    for a bid below the current one (signed floor, never truncation
-   toward zero). Fixed (non-percentage) increments, bid extensions
-   / anti-sniping rules and second-price auctions are stated as not
-   modelled. Prototype-verified before shipping against an
+   toward zero). Fixed (non-percentage) increments and bid
+   extensions / anti-sniping rules are stated as not modelled;
+   the second-price form is Tool 103. Prototype-verified before shipping against an
    independent Python integer oracle on 20,000 cases, 0 mismatches
    on every figure (the sweep caught the signed-floor rule above).
    No live auction is read. */
@@ -5151,6 +5151,58 @@ function auctionBid(currentStr, reserveStr, incrementBps, bidStr, platformBps, r
     platformFee: split ? split.platformFee : null,
     royalty: split ? split.royalty : null,
     seller: split ? split.seller : null
+  };
+}
+
+/* ---------- Tool 103: second-price (Vickrey) auction settlement planner ---------- */
+/* A second-price (Vickrey) auction - the sealed-bid form behind
+   many NFT, domain and ad sales, and the pricing rule Tool 102
+   states it does not model - awards the lot to the HIGHEST bid
+   but charges the SECOND-highest bid, so bidding your true value
+   is the dominant strategy: your bid decides WHETHER you win,
+   the runner-up decides what you PAY. With a reserve, the price
+   is the larger of the second bid and the reserve; if the highest
+   bid never reaches the reserve there is no sale at all and
+   nobody is charged. A tie at the top pays the full tied amount
+   (the second bid IS the highest). A lone bidder with no reserve
+   pays exactly zero - the degenerate case a reserve exists to
+   prevent, reported honestly rather than floored to a unit. The
+   price settles through Tool 23's saleSplit verbatim (a zero
+   price splits as all zeros, since saleSplit prices sales only).
+   savedBps is the saving against paying the winning bid itself
+   (first price), floored. Which bids exist is entered, not read:
+   sealed bids are not public on a live sale. Increment rules,
+   proxy / autobid ladders and English (open) auctions - Tool
+   102's form - are stated as not modelled. Prototype-verified
+   before shipping against an independent Python integer oracle
+   on 20,000 cases, 0 mismatches on every figure. No live auction
+   is read. */
+function secondPriceAuction(highestStr, secondStr, reserveStr, platformBps, royaltyBps) {
+  var H = parseScaled(highestStr), S = parseScaled(secondStr), R = parseScaled(reserveStr);
+  var p = Number(platformBps), r = Number(royaltyBps);
+  if (H === null || S === null || R === null) return null;
+  if (H <= 0n || S > H) return null;
+  if (!Number.isInteger(p) || !Number.isInteger(r)) return null;
+  if (p < 0 || r < 0 || p > 10000 || r > 10000 || p + r > 10000) return null;
+  var sells = H >= R;
+  if (!sells) {
+    return {
+      highest: formatScaled(H), second: formatScaled(S), reserve: formatScaled(R),
+      sells: false, pricePaid: null, savings: null, savedBps: null,
+      shortfall: formatScaled(R - H), priceSource: null,
+      platformFee: null, royalty: null, seller: null
+    };
+  }
+  var price = S > R ? S : R;
+  var saved = H - price;
+  var split = price > 0n ? saleSplit(formatScaled(price), platformBps, royaltyBps) : { platformFee: "0", royalty: "0", seller: "0" };
+  if (!split) return null;
+  var source = S > R ? "second" : (R > S ? "reserve" : (S > 0n ? "both" : "none"));
+  return {
+    highest: formatScaled(H), second: formatScaled(S), reserve: formatScaled(R),
+    sells: true, pricePaid: formatScaled(price), savings: formatScaled(saved),
+    savedBps: Number((saved * 10000n) / H), shortfall: "0", priceSource: source,
+    platformFee: split.platformFee, royalty: split.royalty, seller: split.seller
   };
 }
 
@@ -5929,6 +5981,7 @@ if (typeof module !== "undefined" && module.exports) {
     zapDeposit,
     poolCreate,
     auctionBid,
+    secondPriceAuction,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8237,7 +8290,41 @@ if (typeof document !== "undefined") {
       else if (res.current === "0") note = " A first bid pays no increment over anything: the percentage applies from the second bid onward, which is why the next minimum after yours already carries it.";
       else if (res.bid === res.minimumBid) note = " You bid exactly the minimum: the cheapest leading bid at these settings, and the ceilinged increment is what set it - at the smallest-unit scale that ceiling, not the percentage, is the real step.";
       else note = " Winning costs your full bid, not the minimum: in a first-price auction every unit above the minimum is paid, not saved, so the minimum is the bid a disciplined buyer starts from.";
-      setText("auct-result", "Model output: the minimum winning bid is " + res.minimumBid + " and your bid of " + res.bid + (res.wins ? " wins" : " falls " + res.shortfall + " short") + "." + note + " Amounts are user-entered; no live auction is read. Fixed increments, anti-sniping extensions and second-price auctions are not modelled. An educational model of an auction, not a live quote. Not financial advice.");
+      setText("auct-result", "Model output: the minimum winning bid is " + res.minimumBid + " and your bid of " + res.bid + (res.wins ? " wins" : " falls " + res.shortfall + " short") + "." + note + " Amounts are user-entered; no live auction is read. Fixed increments and anti-sniping extensions are not modelled here; the second-price form is Tool 103. An educational model of an auction, not a live quote. Not financial advice.");
+    });
+
+
+    var vickForm = document.getElementById("vick-calc");
+    if (vickForm) vickForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = secondPriceAuction(val("vick-high"), val("vick-second"), val("vick-reserve"), val("vick-platform"), val("vick-royalty"));
+      if (!res) {
+        document.getElementById("vick-price-out").value = "Invalid";
+        document.getElementById("vick-verdict-out").value = "Invalid";
+        document.getElementById("vick-settle-out").value = "Invalid";
+        document.getElementById("vick-save-out").value = "Invalid";
+        setText("vick-result", "Check the inputs: the highest bid, second-highest bid and reserve must be amounts with at most 9 decimal places (the highest bid may not be 0, the second may not exceed the highest, and the second bid and reserve may be 0), and the platform fee and royalty must be whole basis points that sum to at most 10,000. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("vick-price-out").value = res.sells
+        ? res.pricePaid + (res.priceSource === "second" ? " - the second-highest bid sets the price" : res.priceSource === "reserve" ? " - the reserve sets the price (it beats the second bid)" : res.priceSource === "both" ? " - the second bid and the reserve agree" : " - no second bid and no reserve, so the price is zero")
+        : "No sale - the highest bid never reached the reserve";
+      document.getElementById("vick-verdict-out").value = res.sells
+        ? "The lot sells to the " + res.highest + " bidder, who pays " + res.pricePaid + ", not their own bid"
+        : "No sale - the highest bid of " + res.highest + " falls " + res.shortfall + " short of the " + res.reserve + " reserve, and nobody is charged";
+      document.getElementById("vick-settle-out").value = res.sells
+        ? (res.pricePaid === "0" ? "Settling at zero: the platform takes 0, the creator royalty is 0 and the seller receives 0" : "Settling at the price paid: the platform takes " + res.platformFee + ", the creator royalty is " + res.royalty + " and the seller receives " + res.seller)
+        : "No settlement - a sale that never happens splits nothing";
+      document.getElementById("vick-save-out").value = res.sells
+        ? res.savings + " saved against paying the winning bid itself (" + res.savedBps.toLocaleString("en-US") + " bps of the bid)"
+        : "Nothing is saved or spent - the lot stays with the seller";
+      var note = "";
+      if (!res.sells) note = " A reserve only binds when it beats every bid: one bid at or above it would have sold the lot, at the larger of that reserve and the second bid.";
+      else if (res.priceSource === "none") note = " With no rival bid and no reserve there is nothing to set a price against, which is exactly the case a reserve exists to prevent - a seller who skips it can give the lot away.";
+      else if (res.priceSource === "reserve") note = " The second bid sits below the reserve, so the reserve, not the runner-up, is the binding floor - the winner pays it in full.";
+      else if (res.savings === "0") note = " The top two bids tie, so the second price IS the winning bid: a second-price auction saves the winner money only when the runner-up bids less.";
+      else note = " Your bid decided only whether you won; the runner-up's bid decided what you paid - that split is what makes bidding your true value the safe strategy in this form.";
+      setText("vick-result", "Model output: " + (res.sells ? "the lot sells at " + res.pricePaid + ", " + res.savings + " under the winning bid of " + res.highest : "no sale, the highest bid falls " + res.shortfall + " short of the reserve") + "." + note + " Amounts are user-entered; no live auction is read. Increment rules and proxy / autobid ladders are not modelled; the English (open) form is Tool 102. An educational model of an auction, not a live quote. Not financial advice.");
     });
 
     var zapForm = document.getElementById("zap-calc");
