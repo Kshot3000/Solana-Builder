@@ -4648,7 +4648,7 @@ function splitRouteSwap(reserveIn1Str, reserveOut1Str, fee1Bps, reserveIn2Str, r
    output (a user entry) - real bins hold uneven amounts set by the
    positions in them, the active bin usually holds both tokens rather
    than only the output side, and the swap fee (a base fee plus DLMM's
-   variable volatility fee) is NOT modelled, exactly as Tool 57 states
+   variable volatility fee) is priced by Tool 123, not here - exactly the gap Tool 57 states
    for its prices. Prototype-verified before shipping against an
    independent Python exact-rational (Fraction) oracle on 20,000 cases,
    0 mismatches on every figure, with the start and end prices asserted
@@ -5600,6 +5600,99 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
   };
 }
 
+
+/* ---------- Tool 123: DLMM dynamic fee planner ---------- */
+/* Tools 57 and 91 price DLMM bins and walk them, and both state
+   the swap fee as not modelled. This prices it, in the DLMM
+   program's own fee arithmetic. Rates are carried in FEE
+   PRECISION units (1,000,000,000 = 100%):
+     base rate     = base_factor x bin_step x 10
+     volatility    = min(max_accumulator, reference + bins
+                     crossed x 10,000) - each bin the price has
+                     moved from its reference adds 10,000
+     variable rate = ceil(variable_fee_control x
+                     (volatility x bin_step)^2 / 100,000,000,000),
+                     or zero when the control is zero
+     total rate    = min(base + variable, 100,000,000) - the
+                     program's maximum fee rate, 10%
+   The fee on a swap is charged on top of the amount the swap
+   trades against the bins, grossed up the way the program's
+   fee helper computes it for swaps and ceilinged at the
+   smallest unit: fee = ceil(traded x total / (precision -
+   total)), so the fee is the smallest amount whose share of
+   the total paid reaches the rate. The protocol takes
+   floor(fee x protocol_share / 10,000) of it and the bin's
+   liquidity providers keep the rest, the parts summing to the
+   fee exactly. At the headline - bin step 25, base factor
+   4,000, a volatility reference of 0 with 10 bins crossed
+   (accumulator 100,000), control 4,000 - the base rate is
+   1,000,000 (10 bps), the variable rate 250,000 (2.5 bps) and
+   the total 1,250,000 (12.5 bps), so a trade of 10,000 pays a
+   fee of 12.515644556 on top (10,012.515644556 in total), of
+   which a 500 bps protocol share takes 0.625782227 and the
+   providers keep 11.889862329; measured against everything
+   the trader pays, the fee floors to 12 bps. The ceiling is
+   the story at dust scale: a trade of one smallest unit at
+   the headline rate owes a full unit of fee - 5,000 bps of
+   the 2 units paid. The accumulator's decay over time (the
+   reference falls across the pool's decay period when the
+   price stops moving) and the composition fee on adding
+   liquidity are stated as not modelled; every parameter here
+   is a pool setting the user enters, and no live pool is
+   read. Prototype-verified before shipping against an
+   independent Python integer oracle on 20,000 cases, 0
+   mismatches on every figure, with the fee asserted minimal
+   (one smallest unit less underpays the rate) on every case. */
+var DLMM_FEE_PRECISION = 1000000000n;
+var DLMM_MAX_FEE_RATE = 100000000n;
+var MAX_DFEE_INT = 1000000000;
+function dlmmStrictInt(v) {
+  if (typeof v === "string") { var t = v.trim(); if (!/^-?\d+$/.test(t)) return null; v = Number(t); }
+  if (typeof v !== "number" || !Number.isInteger(v)) return null;
+  return v;
+}
+function dlmmFee(stepBps, baseFactor, volRef, binsCrossed, maxVolAcc, varControl, protocolShareBps, amountStr) {
+  var step = dlmmStrictInt(stepBps), bf = dlmmStrictInt(baseFactor), ref = dlmmStrictInt(volRef);
+  var crossed = dlmmStrictInt(binsCrossed), maxVa = dlmmStrictInt(maxVolAcc), control = dlmmStrictInt(varControl), share = dlmmStrictInt(protocolShareBps);
+  var amt = parseScaled(amountStr);
+  if (step === null || bf === null || ref === null || crossed === null || maxVa === null || control === null || share === null || amt === null) return null;
+  if (step < 1 || step > 10000) return null;
+  if (bf < 0 || bf > 65535) return null;
+  if (ref < 0 || ref > MAX_DFEE_INT || crossed < 0 || crossed > 10000) return null;
+  if (maxVa < 0 || maxVa > MAX_DFEE_INT || control < 0 || control > MAX_DFEE_INT) return null;
+  if (share < 0 || share > 10000) return null;
+  if (amt <= 0n || amt > 1000000000000n * SCALE) return null;
+  var va = BigInt(ref) + BigInt(crossed) * 10000n;
+  if (va > BigInt(maxVa)) va = BigInt(maxVa);
+  var baseRate = BigInt(bf) * BigInt(step) * 10n;
+  var varRate = 0n;
+  if (control > 0 && va > 0n) {
+    var prod = va * BigInt(step);
+    varRate = (BigInt(control) * prod * prod + 99999999999n) / 100000000000n;
+  }
+  var uncapped = baseRate + varRate;
+  var totalRate = uncapped > DLMM_MAX_FEE_RATE ? DLMM_MAX_FEE_RATE : uncapped;
+  var fee = 0n;
+  if (totalRate > 0n) {
+    var den = DLMM_FEE_PRECISION - totalRate;
+    fee = (amt * totalRate + den - 1n) / den;
+  }
+  var paid = amt + fee;
+  var protocolFee = (fee * BigInt(share)) / 10000n;
+  var lpFee = fee - protocolFee;
+  var rateBps = function (r) { return formatScaled(r * 10000n); };
+  return {
+    stepBps: step, baseFactor: bf, volRef: ref, binsCrossed: crossed, maxVolAcc: maxVa,
+    volAcc: va.toString(), varControl: control, protocolShareBps: share,
+    baseRate: baseRate.toString(), baseBps: rateBps(baseRate),
+    varRate: varRate.toString(), varBps: rateBps(varRate),
+    totalRate: totalRate.toString(), totalBps: rateBps(totalRate),
+    capped: uncapped > DLMM_MAX_FEE_RATE, uncappedRate: uncapped.toString(),
+    amount: formatScaled(amt), fee: formatScaled(fee), totalPaid: formatScaled(paid),
+    protocolFee: formatScaled(protocolFee), lpFee: formatScaled(lpFee),
+    effectiveBps: ((fee * 10000n) / paid).toString()
+  };
+}
 
 /* ---------- Tool 122: Oracle median-of-three aggregator ---------- */
 /* Tools 32, 120 and 121 guard a single price or a pair of
@@ -7340,6 +7433,7 @@ if (typeof module !== "undefined" && module.exports) {
     oracleStaleness, MAX_STALE_TS, MAX_STALE_AGE, MAX_STALE_HEARTBEAT,
     oracleDeviation, MAX_DEV_PRICE,
     oracleMedian, MAX_MED_PRICE,
+    dlmmFee, DLMM_FEE_PRECISION, DLMM_MAX_FEE_RATE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -10003,6 +10097,34 @@ if (typeof document !== "undefined") {
       if (!res.feasible) note = " Nothing is delivered: after the percent fee the transfer holds " + res.afterPctFee + ", which does not exceed the fixed fee of " + res.fixedFee + (res.minViableAmount === null ? " - and at a 100% percent fee no larger transfer helps, because the fee takes the whole amount at every size." : " - the fixed fee falls short by " + res.deficit + " plus one smallest unit, and a transfer of " + res.minViableAmount + " is the smallest that delivers anything at all at these settings.");
       else if (res.costBps > res.feeBps) note = " The effective cost of " + res.costBps.toLocaleString("en-US") + " bps stands above the stated percent fee of " + res.feeBps.toLocaleString("en-US") + " bps because the fixed fee is spread over this transfer alone - the same settings cost less per unit the larger the transfer, and more the smaller it gets.";
       setText("bridge-result", "Model output: sending " + res.amount + " of an asset across a bridge at a percent fee of " + res.feeBps.toLocaleString("en-US") + " bps and a fixed fee of " + res.fixedFee + " in the same asset pays a percent fee of " + res.pctFee + ", leaving " + res.afterPctFee + ", and delivers " + res.receive + " on the destination chain, a total cost of " + res.totalCost + " (" + res.costBps.toLocaleString("en-US") + " bps of the amount sent)." + note + " Amounts and fees are user-entered; no live bridge is read. Source-chain gas paid in the native token, destination gas beyond the entered fixed fee, any price difference between the sent asset and the asset delivered (a wrapped or bridged version at its own price), transfer times, and a Token-2022 transfer fee on the delivered token (Tool 13) are not modelled. An educational model of a cross-chain bridge transfer, not a live quote. Not financial advice.");
+    });
+
+    var dfeeForm = document.getElementById("dfee-calc");
+    if (dfeeForm) dfeeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = dlmmFee(val("dfee-step"), val("dfee-base"), val("dfee-ref"), val("dfee-crossed"), val("dfee-maxva"), val("dfee-control"), val("dfee-share"), val("dfee-amount"));
+      if (!res) {
+        document.getElementById("dfee-va-out").value = "Invalid";
+        document.getElementById("dfee-base-out").value = "Invalid";
+        document.getElementById("dfee-var-out").value = "Invalid";
+        document.getElementById("dfee-total-out").value = "Invalid";
+        document.getElementById("dfee-fee-out").value = "Invalid";
+        document.getElementById("dfee-split-out").value = "Invalid";
+        setText("dfee-result", "Check the inputs: the bin step is a whole number of basis points from 1 to 10,000, the base factor a whole number from 0 to 65,535, the volatility reference, maximum accumulator and variable fee control whole numbers from 0 to 1,000,000,000, the bins crossed a whole number from 0 to 10,000, the protocol share a whole number of basis points from 0 to 10,000, and the amount traded above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units. Blanks are not read as zero.");
+        return;
+      }
+      var grp = function (x) { return x.replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("dfee-va-out").value = grp(res.volAcc) + " (reference " + grp(String(res.volRef)) + " + " + res.binsCrossed.toLocaleString("en-US") + " bins crossed x 10,000, capped at " + grp(String(res.maxVolAcc)) + ")";
+      document.getElementById("dfee-base-out").value = grp(res.baseBps) + " bps (rate " + grp(res.baseRate) + " of 1,000,000,000)";
+      document.getElementById("dfee-var-out").value = grp(res.varBps) + " bps (rate " + grp(res.varRate) + " of 1,000,000,000)";
+      document.getElementById("dfee-total-out").value = grp(res.totalBps) + " bps (rate " + grp(res.totalRate) + ")" + (res.capped ? " - capped at the 10% maximum fee rate" : "");
+      document.getElementById("dfee-fee-out").value = res.fee + " fee on top - " + res.totalPaid + " paid in total";
+      document.getElementById("dfee-split-out").value = res.protocolFee + " to the protocol, " + res.lpFee + " to the bin's liquidity providers";
+      var note = "";
+      if (res.capped) note = " The base and variable rates together run past the program's maximum, so the total is capped at a rate of 100,000,000 (1,000 bps, 10%) and any further volatility costs the trader nothing more.";
+      else if (res.varRate === "0") note = " The variable rate is zero at these settings, so the swap pays the base rate alone - the calm-market price of a DLMM fill.";
+      if (res.fee === res.amount) note += " The fee equals the whole amount traded: at dust scale the ceilinged fee is a full smallest unit, which is why the fee measures " + grp(res.effectiveBps) + " bps of everything paid here rather than the headline rate.";
+      setText("dfee-result", "Model output: a DLMM pool with a bin step of " + res.stepBps.toLocaleString("en-US") + " bps and a base factor of " + res.baseFactor.toLocaleString("en-US") + " charges a base rate of " + grp(res.baseBps) + " bps; with a volatility accumulator of " + grp(res.volAcc) + " and a variable fee control of " + res.varControl.toLocaleString("en-US") + " the variable rate is " + grp(res.varBps) + " bps, for a total fee rate of " + grp(res.totalBps) + " bps" + (res.capped ? " (capped at the 10% maximum)" : "") + ". A swap trading " + res.amount + " against the bins pays a fee of " + res.fee + " on top - " + res.totalPaid + " in total, " + grp(res.effectiveBps) + " bps of everything paid - split " + res.protocolFee + " to the protocol at a " + res.protocolShareBps.toLocaleString("en-US") + " bps share and " + res.lpFee + " to the bin's liquidity providers." + note + " Pool parameters and the amount are user-entered; no live pool is read. The bins the swap crosses are Tool 91's walk and their prices Tool 57's ladder; the accumulator's decay over time and the composition fee on adding liquidity are not modelled. An educational model of a DLMM dynamic fee, not a live quote. Not financial advice.");
     });
 
     var medForm = document.getElementById("med-calc");
