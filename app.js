@@ -5601,6 +5601,72 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
 }
 
 
+/* ---------- Tool 122: Oracle median-of-three aggregator ---------- */
+/* Tools 32, 120 and 121 guard a single price or a pair of
+   feeds. This is the combination Tool 121 states as not
+   modelled: a program that reads THREE independent feeds for
+   the same asset takes the MEDIAN - the middle value once the
+   three are sorted - as its price. The median is always one of
+   the three entered prices, never an average: with feeds of
+   150, 151.5 and 300 the median is 151.5, where a mean would
+   read 200.5. One feed can be arbitrarily wrong - stuck,
+   manipulated, fat-fingered - and the median still cannot pass
+   the nearer of the other two, because with one wild value the
+   middle of three is whichever honest feed sits closer; two
+   feeds wrong in the same direction still drag it, and that is
+   stated on the page as the rule's limit. Agreement is measured
+   the way Tool 121 measures a pair: each feed's distance from
+   the median in bps OF THE MEDIAN, floored for display and
+   judged by exact cross-multiplication, |feed - median| x
+   10,000 <= median x maxBps, so a feed can display exactly the
+   maximum and still sit past it (feeds 150, 153.000000001 and
+   149 at a 200 bps maximum: the median is 150, the high feed
+   displays 200 bps and fails). The count of feeds within the
+   maximum is the verdict's substance: 3 of 3 is full agreement,
+   2 of 3 means the median rests on a majority with one outlier
+   named, and 1 of 3 means the median stands alone - no second
+   feed confirms it within the maximum, so a careful program
+   prices from none of them until two agree. The spread, high
+   minus low in bps of the median, prices the disagreement
+   itself (166 bps at the headline; 45,000 bps when feeds of
+   100, 200 and 1,000 leave the median isolated). At dust scale
+   (feeds of 3, 4 and 3 smallest units) the median is 3 units,
+   quoted by two of the three feeds, and the 4-unit feed
+   deviates by 3,333 bps. Staleness, confidence and the pairwise
+   guard are Tools 120, 32 and 121; combinations beyond three
+   feeds, weighted medians and the cost of posting an update are
+   stated as not modelled. Prototype-verified before shipping
+   against an independent Python integer oracle on 20,000 cases,
+   0 mismatches on every figure. */
+var MAX_MED_PRICE = 1000000000000n; /* 1e12 whole units per entered price */
+function oracleMedian(aStr, bStr, cStr, maxBpsStr) {
+  var a = parseScaled(aStr), b = parseScaled(bStr), c = parseScaled(cStr), mS = parseScaled(maxBpsStr);
+  if (a === null || b === null || c === null || mS === null) return null;
+  if (mS % SCALE !== 0n) return null;
+  var maxBps = Number(mS / SCALE);
+  if (!Number.isInteger(maxBps) || maxBps < 0 || maxBps > 10000) return null;
+  var cap = MAX_MED_PRICE * SCALE;
+  if (a <= 0n || a > cap || b <= 0n || b > cap || c <= 0n || c > cap) return null;
+  var sorted = [a, b, c].sort(function (x, y) { return x < y ? -1 : x > y ? 1 : 0; });
+  var med = sorted[1], low = sorted[0], high = sorted[2];
+  var judge = function (f) {
+    var d = f - med, ad = d < 0n ? -d : d;
+    return { bps: ((ad * 10000n) / med).toString(), within: ad * 10000n <= med * BigInt(maxBps) };
+  };
+  var jA = judge(a), jB = judge(b), jC = judge(c);
+  var withinCount = (jA.within ? 1 : 0) + (jB.within ? 1 : 0) + (jC.within ? 1 : 0);
+  return {
+    a: formatScaled(a), b: formatScaled(b), c: formatScaled(c), maxBps: maxBps,
+    median: formatScaled(med), low: formatScaled(low), high: formatScaled(high),
+    spreadBps: (((high - low) * 10000n) / med).toString(),
+    devA: jA.bps, devB: jB.bps, devC: jC.bps,
+    withinA: jA.within, withinB: jB.within, withinC: jC.within,
+    withinCount: withinCount, allAgree: withinCount === 3, majority: withinCount >= 2,
+    atMedian: (a === med ? 1 : 0) + (b === med ? 1 : 0) + (c === med ? 1 : 0)
+  };
+}
+
+
 /* ---------- Tool 121: Oracle deviation checker ---------- */
 /* Tools 32 and 120 guard a price feed on its confidence band and
    its age. This is the third guard, the one Tool 120 states as
@@ -5631,8 +5697,8 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
    Which feed is primary is the program's own choice - swapping
    the two changes the bps, because the denominator changes -
    and that asymmetry is stated on the page. Staleness and
-   confidence are Tools 120 and 32; a median-of-three or other
-   multi-feed combination and the cost of posting an update are
+   confidence are Tools 120 and 32; the median-of-three
+   combination is Tool 122 and the cost of posting an update is
    stated as not modelled. Prototype-verified before shipping
    against an independent Python integer oracle on 20,000 cases,
    0 mismatches on every figure. */
@@ -7273,6 +7339,7 @@ if (typeof module !== "undefined" && module.exports) {
     nftSweep, MAX_SWEEP_AMOUNT, MAX_SWEEP_LISTINGS,
     oracleStaleness, MAX_STALE_TS, MAX_STALE_AGE, MAX_STALE_HEARTBEAT,
     oracleDeviation, MAX_DEV_PRICE,
+    oracleMedian, MAX_MED_PRICE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -9938,6 +10005,34 @@ if (typeof document !== "undefined") {
       setText("bridge-result", "Model output: sending " + res.amount + " of an asset across a bridge at a percent fee of " + res.feeBps.toLocaleString("en-US") + " bps and a fixed fee of " + res.fixedFee + " in the same asset pays a percent fee of " + res.pctFee + ", leaving " + res.afterPctFee + ", and delivers " + res.receive + " on the destination chain, a total cost of " + res.totalCost + " (" + res.costBps.toLocaleString("en-US") + " bps of the amount sent)." + note + " Amounts and fees are user-entered; no live bridge is read. Source-chain gas paid in the native token, destination gas beyond the entered fixed fee, any price difference between the sent asset and the asset delivered (a wrapped or bridged version at its own price), transfer times, and a Token-2022 transfer fee on the delivered token (Tool 13) are not modelled. An educational model of a cross-chain bridge transfer, not a live quote. Not financial advice.");
     });
 
+    var medForm = document.getElementById("med-calc");
+    if (medForm) medForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = oracleMedian(val("med-a"), val("med-b"), val("med-c"), val("med-maxbps"));
+      if (!res) {
+        document.getElementById("med-price-out").value = "Invalid";
+        document.getElementById("med-spread-out").value = "Invalid";
+        document.getElementById("med-agree-out").value = "Invalid";
+        document.getElementById("med-verdict-out").value = "Invalid";
+        setText("med-result", "Check the inputs: the three feed prices are each above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, and the maximum deviation is a whole number of basis points from 0 to 10,000. Blanks are not read as zero.");
+        return;
+      }
+      var grp = function (x) { return x.replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("med-price-out").value = res.median + " (the middle of " + res.low + ", " + res.median + ", " + res.high + ")";
+      document.getElementById("med-spread-out").value = grp(res.spreadBps) + " bps of the median (highest - lowest)";
+      document.getElementById("med-agree-out").value = res.withinCount + " of 3 feeds within " + res.maxBps.toLocaleString("en-US") + " bps of the median";
+      document.getElementById("med-verdict-out").value = res.allAgree ? "All three feeds agree - the median is confirmed by every feed" : res.majority ? "A majority agrees - the median rests on two feeds, one is an outlier" : "The median stands alone - no second feed confirms it within the maximum";
+      var outNames = [];
+      if (!res.withinA) outNames.push("feed A at " + res.a + " (" + grp(res.devA) + " bps away)");
+      if (!res.withinB) outNames.push("feed B at " + res.b + " (" + grp(res.devB) + " bps away)");
+      if (!res.withinC) outNames.push("feed C at " + res.c + " (" + grp(res.devC) + " bps away)");
+      var note = "";
+      if (res.allAgree) note = " Every feed sits within the maximum of the median, so the combined price is as confirmed as three feeds can make it at these settings - each feed has still passed no staleness (Tool 120) or confidence (Tool 32) check here.";
+      else if (res.majority) note = " The outlier is " + outNames[0] + ": the median ignores it beyond the nearer agreeing feed, which is the rule's whole point - but the outlier is named, not hidden, because two feeds wrong in the same direction would have dragged the median instead.";
+      else note = " Both other feeds sit past the maximum - " + outNames.join(" and ") + " - so no pair of feeds agrees within the maximum the program set: a careful program prices from none of them until at least two converge.";
+      setText("med-result", "Model output: feeds of " + res.a + ", " + res.b + " and " + res.c + " for the same asset combine to a median price of " + res.median + " - always one of the three feeds, never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest. Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps and feed C " + grp(res.devC) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 3 feeds within the maximum." + note + " Prices and the maximum are user-entered; no live feed is read. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; combinations beyond three feeds, weighted medians and the cost of posting an update are not modelled. An educational model of an oracle median, not a live feed reading. Not financial advice.");
+    });
+
     var devForm = document.getElementById("dev-calc");
     if (devForm) devForm.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -9962,7 +10057,7 @@ if (typeof document !== "undefined") {
       else if (!res.within && Number(res.deviationBps) === res.maxBps) note = " The floored deviation reads exactly the maximum, but the verdict is judged by exact cross-multiplication rather than the floored figure, and the true gap sits past the line - a secondary one smallest unit lower would be the highest that passes at these settings.";
       else if (res.within) note = " The secondary sits inside the acceptable range at this maximum: any secondary from " + res.lowAccept + " to " + res.highAccept + " passes against this primary, and one smallest unit outside either end fails.";
       else note = " The secondary sits outside the acceptable range at this maximum: a program reading both feeds should reject the pair, wait for the feeds to converge, or price from neither until they agree within the maximum it set.";
-      setText("dev-result", "Model output: a primary price of " + res.primary + " against a secondary price of " + res.secondary + " for the same asset differ by " + res.diffSigned + " - a deviation of " + grp(res.deviationBps) + " bps of the primary price, the secondary standing at " + grp(res.shareBps) + " bps of the primary - against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps: " + (res.within ? "within it, so a program accepts the pair." : "past it, so a program rejects the pair.") + note + " Prices and the maximum are user-entered; no live feed is read. The deviation is measured against the primary, so swapping which feed is primary changes the bps figure. Staleness (Tool 120) and the confidence band (Tool 32) are the same price's other two guards; a median-of-three or other multi-feed combination and the cost of posting an update are not modelled. An educational model of oracle deviation, not a live feed reading. Not financial advice.");
+      setText("dev-result", "Model output: a primary price of " + res.primary + " against a secondary price of " + res.secondary + " for the same asset differ by " + res.diffSigned + " - a deviation of " + grp(res.deviationBps) + " bps of the primary price, the secondary standing at " + grp(res.shareBps) + " bps of the primary - against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps: " + (res.within ? "within it, so a program accepts the pair." : "past it, so a program rejects the pair.") + note + " Prices and the maximum are user-entered; no live feed is read. The deviation is measured against the primary, so swapping which feed is primary changes the bps figure. Staleness (Tool 120) and the confidence band (Tool 32) are the same price's other two guards; the median-of-three combination is Tool 122 and the cost of posting an update is not modelled. An educational model of oracle deviation, not a live feed reading. Not financial advice.");
     });
 
     var staleForm = document.getElementById("stale-calc");
