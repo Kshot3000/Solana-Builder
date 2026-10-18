@@ -5399,9 +5399,10 @@ function quadraticFunding(projectsStr, poolStr) {
    haircut, and a winner with 10,000 of profit gives back 1,500 and
    receives 8,500. Venues differ past this shape: some deleverage
    (ADL) the largest winners in rank order instead of haircutting
-   everyone equally, some cap the socialized share, and funds are
-   replenished from fees over time - that ranking, those caps and
-   the replenishment are stated as not modelled. Amounts are entered,
+   everyone equally - that ranked form is Tool 108's model - some
+   cap the socialized share, and funds are replenished from fees
+   over time; those caps and the replenishment are stated as not
+   modelled. Amounts are entered,
    never read from a live venue. Prototype-verified before shipping
    against an independent Python integer oracle on 20,000 cases,
    0 mismatches on every figure, with the waterfall invariants
@@ -5431,6 +5432,97 @@ function perpInsuranceFund(shortfallStr, fundStr, winnersStr, yourStr) {
     haircutBps: haircutBps, yourHaircut: formatScaled(yourHaircut),
     youReceive: formatScaled(Y - yourHaircut), badDebt: formatScaled(badDebt),
     coveredByFund: uncovered === 0n, fullyCovered: badDebt === 0n
+  };
+}
+
+/* ---------- Tool 108: perp auto-deleveraging (ADL) queue planner ---------- */
+/* Tool 107's waterfall ends in a pro-rata haircut: every winner
+   gives back the same fraction. The other standard answer is
+   AUTO-DELEVERAGING (ADL): the venue force-closes WINNING
+   positions in RANK ORDER until the uncovered shortfall is
+   covered. This model ranks by profit alone, largest first -
+   real venues rank by a score that also weighs leverage, and
+   that score, the close price and the return of a closed
+   position's margin are venue rules, stated as not modelled;
+   the model works in profit amounts only. Positions tied on
+   profit rank ahead of yours (the conservative reading for the
+   reader's own position), and other tied positions keep their
+   entered order. The walk is exact: each position gives the
+   smaller of its profit and the shortfall still remaining, so
+   positions close in full one by one, AT MOST ONE closes
+   partially - the one the queue stops inside - and everyone
+   behind it is untouched. A position's closed share in basis
+   points is floor(give x 10000 / profit): 10,000 for a full
+   close, 0 for an untouched one. If every profit combined
+   cannot cover the shortfall, all positions close in full and
+   the rest is BAD DEBT, exactly as in Tool 107's waterfall -
+   the queue cannot invent money either. At the headline - a
+   30,000 shortfall, other winners of 12,000 / 9,000 / 6,000 /
+   3,000 / 1,000 and your own 6,000 - the queue closes the
+   12,000, the 9,000 and the other 6,000 in full (27,000), then
+   stops halfway through yours: you rank fourth because the
+   tied 6,000 is ranked ahead of you, you give 3,000 and keep
+   3,000 (5,000 bps closed), and the 3,000 and 1,000 behind you
+   are never touched. At a 27,000 shortfall the queue stops
+   exactly at the position ahead of you and you give nothing;
+   at 40,000 against 37,000 of total profits it closes all six
+   and leaves 3,000 of bad debt. The other positions' profits
+   are entered as a list (at most 50, each above zero); your
+   profit may be zero, which simply leaves you out of the
+   queue. Amounts are entered, never read from a live venue.
+   Prototype-verified before shipping against an independent
+   Python integer oracle on 20,000 cases, 0 mismatches on
+   every figure, with the queue invariants (counts sum to the
+   candidate count, at most one partial close, nothing closes
+   behind an untouched position, clawed + bad debt = shortfall)
+   asserted in the oracle. */
+var MAX_ADL_AMOUNT = 1000000000000n; /* 1e12 whole units per amount */
+var MAX_ADL_POSITIONS = 50;
+function adlQueue(shortfallStr, othersStr, yourStr) {
+  var S = parseScaled(shortfallStr), Y = parseScaled(yourStr);
+  if (S === null || Y === null) return null;
+  if (typeof othersStr !== "string") return null;
+  var cap = MAX_ADL_AMOUNT * SCALE;
+  if (S < 0n || S > cap || Y < 0n || Y > cap) return null;
+  var toks = othersStr.split(/[\s,]+/).filter(function (x) { return x.length > 0; });
+  if (toks.length > MAX_ADL_POSITIONS) return null;
+  var entries = [];
+  for (var i = 0; i < toks.length; i++) {
+    var p = parseScaled(toks[i]);
+    if (p === null || p <= 0n || p > cap) return null;
+    entries.push({ profit: p, you: false, idx: i });
+  }
+  if (Y > 0n) entries.push({ profit: Y, you: true, idx: toks.length });
+  var queue = entries.slice().sort(function (a, b) {
+    if (a.profit !== b.profit) return a.profit > b.profit ? -1 : 1;
+    if (a.you !== b.you) return a.you ? 1 : -1; /* others ahead of you on a tie */
+    return a.idx - b.idx;
+  });
+  var total = queue.reduce(function (a, e) { return a + e.profit; }, 0n);
+  var remaining = S, full = 0, partial = 0, untouched = 0;
+  var yourRank = null, yourStatus = "none", yourGive = 0n, youKeep = Y, yourBps = null;
+  var outQueue = queue.map(function (e, pos) {
+    var give = e.profit < remaining ? e.profit : remaining;
+    remaining -= give;
+    var status = give === 0n ? "untouched" : (give === e.profit ? "full" : "partial");
+    if (status === "full") full++; else if (status === "partial") partial++; else untouched++;
+    var bps = Number((give * 10000n) / e.profit);
+    if (e.you) { yourRank = pos + 1; yourStatus = status; yourGive = give; youKeep = e.profit - give; yourBps = bps; }
+    return {
+      profit: formatScaled(e.profit), you: e.you,
+      give: formatScaled(give), keep: formatScaled(e.profit - give),
+      closedBps: bps, status: status
+    };
+  });
+  var clawed = S - remaining;
+  return {
+    shortfall: formatScaled(S), yourProfit: formatScaled(Y),
+    totalProfits: formatScaled(total), candidateCount: queue.length,
+    queue: outQueue, clawed: formatScaled(clawed), badDebt: formatScaled(S - clawed),
+    fullyClosed: full, partialClosed: partial, untouched: untouched,
+    yourRank: yourRank, yourStatus: yourStatus,
+    yourGive: formatScaled(yourGive), youKeep: formatScaled(youKeep),
+    yourClosedBps: yourBps, covered: S - clawed === 0n
   };
 }
 
@@ -6266,6 +6358,7 @@ if (typeof module !== "undefined" && module.exports) {
     flashLoan,
     quadraticFunding,
     perpInsuranceFund, MAX_PINS_AMOUNT,
+    adlQueue, MAX_ADL_AMOUNT, MAX_ADL_POSITIONS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8698,7 +8791,44 @@ if (typeof document !== "undefined") {
       else if (!res.fullyCovered) note = " Even wiping every winner's profit to zero does not cover the shortfall: what remains is bad debt the venue still owes, and no step of the waterfall invents the money for it.";
       else note = " The fund ran dry, so the rest came out of the winning side pro-rata - every winner gives back the same fraction of their profit, which is what socialized loss means in practice.";
       if (res.yourHaircut === "0" && res.haircut !== "0" && res.yourProfit !== "0") note += " Your own share floors to exactly zero at this size - the smallest-unit flooring lets a small winner escape a haircut the aggregate still pays.";
-      setText("pins-result", "Model output: a liquidation shortfall of " + res.shortfall + " meets an insurance fund of " + res.fund + ": the fund pays " + res.fundPays + " and is left with " + res.fundLeft + ", leaving " + res.uncovered + " uncovered. Winners holding " + res.winners + " of profits are haircut " + res.haircut + (res.haircutBps === null ? "" : " (" + res.haircutBps.toLocaleString("en-US") + " bps)") + " in total; your profit of " + res.yourProfit + " gives back " + res.yourHaircut + " and you receive " + res.youReceive + ", and " + res.badDebt + " remains as bad debt." + note + " Amounts are user-entered; no live venue or fund is read. Ranked auto-deleveraging (ADL), per-venue haircut caps and the fund's replenishment from fees are not modelled. An educational model of a perp insurance fund and socialized loss, not a live quote. Not financial advice.");
+      setText("pins-result", "Model output: a liquidation shortfall of " + res.shortfall + " meets an insurance fund of " + res.fund + ": the fund pays " + res.fundPays + " and is left with " + res.fundLeft + ", leaving " + res.uncovered + " uncovered. Winners holding " + res.winners + " of profits are haircut " + res.haircut + (res.haircutBps === null ? "" : " (" + res.haircutBps.toLocaleString("en-US") + " bps)") + " in total; your profit of " + res.yourProfit + " gives back " + res.yourHaircut + " and you receive " + res.youReceive + ", and " + res.badDebt + " remains as bad debt." + note + " Amounts are user-entered; no live venue or fund is read. Ranked auto-deleveraging (ADL) is Tool 108; per-venue haircut caps and the fund's replenishment from fees are not modelled. An educational model of a perp insurance fund and socialized loss, not a live quote. Not financial advice.");
+    });
+
+    var adlForm = document.getElementById("adl-calc");
+    if (adlForm) adlForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = adlQueue(val("adl-shortfall"), val("adl-others"), val("adl-your"));
+      if (!res) {
+        document.getElementById("adl-clawed-out").value = "Invalid";
+        document.getElementById("adl-baddebt-out").value = "Invalid";
+        document.getElementById("adl-full-out").value = "Invalid";
+        document.getElementById("adl-partial-out").value = "Invalid";
+        document.getElementById("adl-untouched-out").value = "Invalid";
+        document.getElementById("adl-rank-out").value = "Invalid";
+        document.getElementById("adl-yourgive-out").value = "Invalid";
+        document.getElementById("adl-youkeep-out").value = "Invalid";
+        setText("adl-result", "Check the inputs: the shortfall and your profit are amounts of zero or above with at most 9 decimal places, and the other winners' profits are a list of at most 50 amounts, each above zero. Blanks are not read as zero, except that the other-winners list may be left empty when you are the only winner.");
+        return;
+      }
+      document.getElementById("adl-clawed-out").value = res.clawed;
+      document.getElementById("adl-baddebt-out").value = res.badDebt;
+      document.getElementById("adl-full-out").value = String(res.fullyClosed);
+      document.getElementById("adl-partial-out").value = String(res.partialClosed);
+      document.getElementById("adl-untouched-out").value = String(res.untouched);
+      document.getElementById("adl-rank-out").value = res.yourRank === null ? "No winning position of yours in the queue" : (res.yourRank + " of " + res.candidateCount);
+      document.getElementById("adl-yourgive-out").value = res.yourGive;
+      document.getElementById("adl-youkeep-out").value = res.youKeep + (res.yourClosedBps === null ? "" : " (" + res.yourClosedBps.toLocaleString("en-US") + " bps of your position was closed)");
+      var walk = res.queue.map(function (q, i) {
+        return "#" + (i + 1) + " " + (q.you ? "you, " : "") + "profit " + q.profit + ": " + (q.status === "untouched" ? "untouched" : (q.status === "full" ? "closed in full, gives " + q.give : "partly closed, gives " + q.give + " and keeps " + q.keep));
+      }).join("; ");
+      var note = "";
+      if (res.shortfall === "0") note = " With no shortfall the queue never moves: every position is untouched.";
+      else if (!res.covered) note = " Every position in the queue closed in full and the shortfall is still not covered: the rest is bad debt the venue still owes, and no step of the queue invents the money for it.";
+      else if (res.yourStatus === "partial") note = " The queue stopped inside your position: everyone ahead of you closed in full, you closed only as far as the remaining shortfall reached, and everyone behind you is untouched.";
+      else if (res.yourStatus === "full") note = " The queue ran through your position and kept going: you closed in full, and the positions behind you absorbed the rest.";
+      else if (res.yourStatus === "untouched") note = " The shortfall was covered before the queue reached you, so your position is untouched - rank, not size alone, decides who pays.";
+      else note = " You hold no winning position in this queue, so the shortfall falls entirely on the other winners listed.";
+      setText("adl-result", "Model output: an uncovered shortfall of " + res.shortfall + " is worked against a queue of " + res.candidateCount + " winning position(s) holding " + res.totalProfits + " of profits, largest first. Queue: " + (walk || "no positions") + ". In total " + res.clawed + " is clawed back (" + res.fullyClosed + " closed in full, " + res.partialClosed + " partly closed, " + res.untouched + " untouched) and " + res.badDebt + " remains as bad debt." + note + " Amounts are user-entered; no live venue is read. Real venues rank by a score that also weighs leverage, close at a stated price and return a closed position's margin - the score, the price and the margin are not modelled, and positions tied with yours are ranked ahead of you. An educational model of a perp auto-deleveraging queue, not a live quote. Not financial advice.");
     });
 
     var floanForm = document.getElementById("floan-calc");
