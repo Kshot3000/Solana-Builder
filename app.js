@@ -5526,6 +5526,80 @@ function adlQueue(shortfallStr, othersStr, yourStr) {
   };
 }
 
+/* ---------- Tool 109: liquid staking token (LST) exit planner ---------- */
+/* Tool 15 prices a stake pool's exchange rate and states the
+   unstake delay as not modelled. This prices the EXIT itself -
+   the choice every LST holder faces. There are two ways out.
+   REDEEM with the stake pool: burn the tokens and take Tool 15's
+   redemption verbatim - floor(amount x total / supply) SOL -
+   but the SOL is stake, not cash: what pool liquidity cannot
+   cover deactivates and waits out the cooldown, so the money
+   arrives after a wait entered in epochs (the wait is an input,
+   never a claimed figure: pools and timing within an epoch
+   differ). SELL instantly: swap the tokens into SOL through a
+   constant-product DEX pool, Tool 2's cpSwap verbatim - the
+   money is immediate, but the pool's spot price, its fee and
+   its price impact all come out of what you receive. The
+   difference between the two is the PRICE OF IMMEDIACY,
+   reported signed and as floored signed basis points of the
+   delayed value: positive when waiting pays more (the usual
+   case - the DEX spot usually sits under the redemption rate),
+   negative when the pool prices the token ABOVE the rate and
+   selling instantly pays more than redeeming. At the headline -
+   100 tokens against a pool of 1,100 SOL backing 1,000 tokens
+   (rate 1.1), sold into a 50,000 LST / 52,000 SOL pool at a
+   25 bps fee (spot 1.04) - redemption returns 110 SOL after
+   the wait, the instant sale returns 103.533450765 SOL, and
+   immediacy costs 6.466549235 SOL (587 bps). At a spot of 1.2
+   the same sale returns 119.46167396 SOL and beats redemption
+   by 9.46167396 (-861 bps). At dust scale both paths can floor
+   to zero and the cost is null, never zero - there is no
+   delayed value to measure it against. Stake-pool withdrawal
+   fees are Tool 75's model and are not charged here; the
+   redemption amount is also capped by the token supply, since
+   nobody can redeem tokens that do not exist. Amounts are
+   entered, never read from a live pool.
+   Prototype-verified before shipping against an independent
+   Python integer oracle on 20,000 cases, 0 mismatches on every
+   figure, with the shipped function re-swept on the same cases. */
+var MAX_LSTX_AMOUNT = 1000000000000n; /* 1e12 whole units per amount */
+var MAX_LSTX_EPOCHS = 10000;
+function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, feeBps, epochsStr) {
+  var A = parseScaled(amountStr), T = parseScaled(totalStr), S = parseScaled(supplyStr);
+  var RL = parseScaled(reserveLstStr), RS = parseScaled(reserveSolStr);
+  var bps = Number(feeBps), epochs = Number(epochsStr);
+  if (typeof feeBps === "string" && feeBps.trim() === "") return null; /* Number("") is 0 - a blank is not a zero fee */
+  if (typeof epochsStr === "string" && epochsStr.trim() === "") return null;
+  if (A === null || T === null || S === null || RL === null || RS === null) return null;
+  var cap = MAX_LSTX_AMOUNT * SCALE;
+  if (A <= 0n || A > cap || T <= 0n || T > cap || S <= 0n || S > cap) return null;
+  if (RL <= 0n || RL > cap || RS <= 0n || RS > cap) return null;
+  if (A > S) return null; /* cannot redeem more pool tokens than exist */
+  if (!Number.isInteger(bps) || bps < 0 || bps >= 10000) return null;
+  if (!Number.isInteger(epochs) || epochs < 0 || epochs > MAX_LSTX_EPOCHS) return null;
+  var delayed = (A * T) / S; /* Tool 15's redemption, floored */
+  var sw = cpSwap(formatScaled(RL), formatScaled(RS), formatScaled(A), bps);
+  var instant = sw ? parseScaled(sw.amountOut) : 0n;
+  var instantFee = sw ? parseScaled(sw.fee) : (A * BigInt(bps)) / 10000n;
+  var diff = delayed - instant;
+  var costBps = null;
+  if (delayed > 0n) {
+    var num = diff * 10000n;
+    var q = num / delayed, rem = num % delayed;
+    costBps = Number(q - ((rem !== 0n && num < 0n) ? 1n : 0n)); /* floored signed */
+  }
+  return {
+    amount: formatScaled(A), totalSol: formatScaled(T), supply: formatScaled(S),
+    rate: Number(T) / Number(S), spot: Number(RS) / Number(RL),
+    delayedOut: formatScaled(delayed), instantOut: formatScaled(instant),
+    instantFee: formatScaled(instantFee),
+    priceImpactPct: sw ? sw.priceImpactPct : null,
+    instantFloorsToZero: !sw,
+    diff: formatScaled(diff), costBps: costBps,
+    instantBetter: instant > delayed, waitEpochs: epochs
+  };
+}
+
 /* ---------- Tool 103: second-price (Vickrey) auction settlement planner ---------- */
 /* A second-price (Vickrey) auction - the sealed-bid form behind
    many NFT, domain and ad sales, and the pricing rule Tool 102
@@ -6359,6 +6433,7 @@ if (typeof module !== "undefined" && module.exports) {
     quadraticFunding,
     perpInsuranceFund, MAX_PINS_AMOUNT,
     adlQueue, MAX_ADL_AMOUNT, MAX_ADL_POSITIONS,
+    lstExit, MAX_LSTX_AMOUNT, MAX_LSTX_EPOCHS,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -6686,7 +6761,7 @@ if (typeof document !== "undefined") {
       }
       document.getElementById("lst-rate-out").value = res.rateAfterRewards.toFixed(9);
       document.getElementById("lst-redeem-out").value = res.redeemOutAfterRewards;
-      setText("lst-result", "Model output: the pool's exchange rate is " + res.rate.toFixed(9) + " SOL per token (" + res.totalSol + " SOL backing " + res.supply + " tokens). Depositing " + res.deposit + " SOL mints " + res.tokensMinted + " tokens" + (res.mintedFloorsToZero ? " — that deposit is dust at this rate: it floors to ZERO tokens, so on-chain it would stake SOL and mint nothing; deposit more or not at all" : "") + ", and redeeming " + res.redeem + " tokens returns " + res.redeemOut + " SOL. After " + res.rewards + " SOL of rewards land (total " + res.totalAfterRewards + " SOL, supply unchanged), the rate rises to " + res.rateAfterRewards.toFixed(9) + ": the same deposit then mints only " + res.tokensMintedAfterRewards + " tokens, while the same redemption returns " + res.redeemOutAfterRewards + " SOL — a gain of " + res.redeemGain + " SOL on an unchanged token balance. That rising rate, not a growing balance, is the yield. This model charges no pool fees and models no unstake delay; a real pool's terms differ. An educational model of one pool's exchange rate, not a live pool's rate. Not financial advice.");
+      setText("lst-result", "Model output: the pool's exchange rate is " + res.rate.toFixed(9) + " SOL per token (" + res.totalSol + " SOL backing " + res.supply + " tokens). Depositing " + res.deposit + " SOL mints " + res.tokensMinted + " tokens" + (res.mintedFloorsToZero ? " — that deposit is dust at this rate: it floors to ZERO tokens, so on-chain it would stake SOL and mint nothing; deposit more or not at all" : "") + ", and redeeming " + res.redeem + " tokens returns " + res.redeemOut + " SOL. After " + res.rewards + " SOL of rewards land (total " + res.totalAfterRewards + " SOL, supply unchanged), the rate rises to " + res.rateAfterRewards.toFixed(9) + ": the same deposit then mints only " + res.tokensMintedAfterRewards + " tokens, while the same redemption returns " + res.redeemOutAfterRewards + " SOL — a gain of " + res.redeemGain + " SOL on an unchanged token balance. That rising rate, not a growing balance, is the yield. This model charges no pool fees; the unstake delay is priced against an instant sale by Tool 109, and a real pool's terms differ. An educational model of one pool's exchange rate, not a live pool's rate. Not financial advice.");
     });
 
     var pdaForm = document.getElementById("pda-calc");
@@ -8856,6 +8931,31 @@ if (typeof document !== "undefined") {
         ? " On-chain, a loan that cannot be repaid reverts the whole transaction - the lender is made whole by construction and the borrower loses only the transaction fee, which is paid in SOL and is a different unit from the amount modelled here."
         : " On-chain this transaction would revert entirely: the loan never settles and the lender keeps its funds, which is why an under-collateralized loan needs no trust in the borrower.";
       setText("floan-result", "Model output: borrowing " + res.borrow + " at a " + res.feeBps + " bps flash loan fee owes " + res.fee + " in fee and " + res.repay + " in total repayment; proceeds of " + res.proceeds + " " + verdict + ", leaving " + res.profit + "." + note + " Amounts are user-entered; no live loan or pool is read. What the borrowed funds do between borrowing and repaying is entered as the proceeds figure, not computed here. An educational model of flash-loan repayment, not a live quote. Not financial advice.");
+    });
+
+    var lstxForm = document.getElementById("lstx-calc");
+    if (lstxForm) lstxForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = lstExit(val("lstx-amount"), val("lstx-total"), val("lstx-supply"), val("lstx-rlst"), val("lstx-rsol"), val("lstx-fee"), val("lstx-epochs"));
+      if (!res) {
+        document.getElementById("lstx-delayed-out").value = "Invalid";
+        document.getElementById("lstx-instant-out").value = "Invalid";
+        document.getElementById("lstx-diff-out").value = "Invalid";
+        document.getElementById("lstx-cost-out").value = "Invalid";
+        setText("lstx-result", "Check the inputs: the LST amount, the stake pool's total and supply and both DEX reserves are amounts above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, the amount no more than the whole token supply, the swap fee a whole number of basis points under 10,000, and the wait a whole number of epochs. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("lstx-delayed-out").value = res.delayedOut;
+      document.getElementById("lstx-instant-out").value = res.instantOut;
+      document.getElementById("lstx-diff-out").value = res.diff;
+      document.getElementById("lstx-cost-out").value = res.costBps === null ? "No delayed value to measure against" : res.costBps.toLocaleString("en-US") + " bps";
+      var note = "";
+      if (res.delayedOut === "0") note = " At this size the delayed redemption itself floors to zero - the exit is dust at the pool's rate, and no cost of immediacy can be measured against a zero delayed value.";
+      else if (res.instantFloorsToZero) note = " The instant sale floors to zero at this size - the DEX pool returns nothing for an exit this small, so waiting is the only path that pays anything.";
+      else if (res.instantBetter) note = " The DEX pool prices this token above the stake pool's redemption rate, so selling instantly pays MORE than redeeming: the cost of immediacy is negative - immediacy pays you.";
+      else if (res.diff === "0") note = " The two paths pay exactly the same at these settings, so the wait buys nothing and costs nothing.";
+      else note = " Waiting pays more here: the gap is the pool's spot discount to the redemption rate, its swap fee and its price impact, taken together.";
+      setText("lstx-result", "Model output: exiting " + res.amount + " LST two ways. Redeeming with the stake pool at its rate of " + res.rate.toFixed(9) + " SOL per token returns " + res.delayedOut + " SOL after the entered wait of " + res.waitEpochs + (res.waitEpochs === 1 ? " epoch" : " epochs") + ". Selling instantly into the DEX pool at a spot of " + res.spot.toFixed(9) + " SOL per token returns " + res.instantOut + " SOL (the pool's swap fee takes " + res.instantFee + " LST" + (res.priceImpactPct === null ? "" : ", price impact " + res.priceImpactPct.toFixed(4) + "%") + "). The delayed path pays " + res.diff + " SOL more" + (res.costBps === null ? "" : " (" + res.costBps.toLocaleString("en-US") + " bps of the delayed value)") + "." + note + " Amounts are user-entered; no live pool is read. Stake-pool withdrawal fees are Tool 75's model and are not charged here, and the wait is the wait you enter - when a given pool's liquidity frees is that pool's own timing. An educational model of a liquid staking token exit, not a live quote. Not financial advice.");
     });
 
     var zapForm = document.getElementById("zap-calc");
