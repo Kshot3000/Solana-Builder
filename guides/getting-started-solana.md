@@ -23,7 +23,7 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the one hundred nine mechanics that decide your costs
+## 3. Learn the one hundred ten mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
@@ -244,6 +244,8 @@ Only deploy once tests pass, and label everything you show users for what it is:
 
 
 109. **A performance fee is charged only above the high-water mark — recovery is free.** A managed vault charges two fees on two different bases. The management fee is a rate on assets (in the hub's model, the period's starting value) and is taken win or lose. The performance fee is a rate on profit only, and only on the part of the end value above the HIGH-WATER MARK — the highest value the account has previously reached — so its base is `end − max(start, mark)` when positive and zero otherwise. At a start of 100,000, an end of 120,000 and a 100,000 mark, 200 bps of management takes 2,000 and 2,000 bps (20%) of performance takes 4,000 on the 20,000 base, leaving 114,000 — and the mark resets to that POST-FEE figure, so the fees themselves never raise the bar. The consequence readers miss: a gain from 80,000 to 95,000 against a 100,000 mark is a 15,000 gain that charges no performance fee at all, because it only recovers a loss investors already paid performance fees on the first time; the vault must clear 100,000 before performance fees resume, while the management fee runs throughout. Deposits and withdrawals inside a period move a real mark per-share and are a separate accounting this mechanic states, not hides. The hub's planner (Tool 110) runs both fees in exact floored integer math on entered values; no live vault is read.
+
+110. **Restaking pledges the same stake twice — and slashing takes it from everyone at the rate.** Restaking (Jito Restaking, Solayer, Fragmetric and peers) takes assets that already secure Solana — SOL and liquid staking tokens — and pledges them again to secure additional services, issuing a receipt token priced exactly like a stake-pool token: backing ÷ supply. The extra yield is payment for a new risk. If a restaked operator misbehaves, a stated share of the BACKING is slashed — destroyed, not paid to anyone — and the receipt's rate falls for every holder pro-rata: 1,100,000 of backing against 1,000,000 receipts (rate 1.1) at a 500 bps slash loses 55,000, falls to 1,045,000 and a rate of 1.045, and a 10,000-receipt holder's redemption falls 11,000 → 10,450, a loss of 550 at exactly 500 bps — slashing is socialized through the rate. Two floorings compound at dust scale: the slash floors at the backing's smallest unit and the redemption floors again, so a holder whose whole redemption is one smallest unit loses that unit — 10,000 bps of their value — to a 5,000 bps slash; and a 10,000 bps slash is the total wipeout, backing and rate at zero. Which services are secured, what triggers a slash, any insurance fund and the unbonding queue are each protocol's own rules. The hub's planner (Tool 111) runs the slash in exact floored integer math on entered values; no live protocol is read.
 
 ## Where next
 

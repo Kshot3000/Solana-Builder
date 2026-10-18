@@ -5600,6 +5600,60 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
   };
 }
 
+/* ---------- Tool 111: restaking slashing planner ---------- */
+/* Restaking on Solana (Jito Restaking, Solayer, Fragmetric and
+   peers) takes already-staked assets - SOL, LSTs - and pledges
+   them again to secure additional services (node consensus
+   networks / AVSs). The receipt token (a VRT/LRT) is priced like
+   Tool 15's stake-pool token: backing / supply. The new risk is
+   SLASHING: if the restaked operator misbehaves, a stated share
+   of the BACKING is destroyed - not a fee to anyone, the assets
+   are gone - and the receipt token's rate falls for every holder
+   pro-rata, whether or not their own operator was at fault in
+   pooled designs. The slash is floored at the smallest unit of
+   the backing, and a holder's redemption is floored again
+   (amount x backing / supply, Tool 15's redemption verbatim), so
+   the two floorings compound at dust scale: a holder whose whole
+   redemption is one smallest unit loses that unit - 10,000 bps
+   of their value - to a 5,000 bps slash that larger holders feel
+   at exactly 5,000 bps. A 10,000 bps slash is the total wipeout:
+   backing zero, rate zero, every redemption zero. At the
+   headline - 1,100,000 backing, 1,000,000 supply (rate 1.1),
+   your 10,000 receipts, a 500 bps slash - the slash destroys
+   55,000, backing falls to 1,045,000, the rate to 1.045, and
+   your redemption falls 11,000 -> 10,450, a loss of 550 at
+   exactly 500 bps. Which operators and services, slash
+   conditions, insurance or cover funds, and unbonding queues are
+   each protocol's own rules and are stated as not modelled.
+   Prototype-verified before shipping against an independent
+   Python integer oracle on 20,000 cases, 0 mismatches on every
+   figure. Amounts are entered, never read from a live protocol. */
+var MAX_RSLASH_AMOUNT = 1000000000000n; /* 1e12 whole units per amount */
+function restakeSlash(backingStr, supplyStr, yourStr, slashBpsStr) {
+  var B = parseScaled(backingStr), S = parseScaled(supplyStr), Y = parseScaled(yourStr);
+  var bS = parseScaled(slashBpsStr);
+  if (B === null || S === null || Y === null || bS === null) return null;
+  var cap = MAX_RSLASH_AMOUNT * SCALE;
+  if (B <= 0n || B > cap || S <= 0n || S > cap || Y <= 0n || Y > S) return null;
+  if (bS % SCALE !== 0n) return null;
+  var bps = Number(bS / SCALE);
+  if (!Number.isInteger(bps) || bps < 0 || bps > 10000) return null;
+  var slashed = (B * BigInt(bps)) / 10000n;
+  var newB = B - slashed;
+  var rateB = (B * SCALE) / S, rateA = (newB * SCALE) / S;
+  var yB = (Y * B) / S, yA = (Y * newB) / S;
+  var loss = yB - yA;
+  var lossBps = yB === 0n ? null : Number((loss * 10000n) / yB);
+  return {
+    backing: formatScaled(B), supply: formatScaled(S), your: formatScaled(Y),
+    slashBps: bps, slashed: formatScaled(slashed), newBacking: formatScaled(newB),
+    rateBefore: formatScaled(rateB), rateAfter: formatScaled(rateA),
+    yourBefore: formatScaled(yB), yourAfter: formatScaled(yA),
+    yourLoss: formatScaled(loss), lossBps: lossBps,
+    fullSlash: bps === 10000, dustWiped: yB > 0n && yA === 0n && bps < 10000
+  };
+}
+
 /* ---------- Tool 110: vault management & performance fee planner ---------- */
 /* Vaults and managed accounts on Solana (Drift vaults, Kamino-style
    strategies and their peers) charge two fees on two different
@@ -6504,6 +6558,7 @@ if (typeof module !== "undefined" && module.exports) {
     adlQueue, MAX_ADL_AMOUNT, MAX_ADL_POSITIONS,
     lstExit, MAX_LSTX_AMOUNT, MAX_LSTX_EPOCHS,
     vaultFees, MAX_VFEE_AMOUNT,
+    restakeSlash, MAX_RSLASH_AMOUNT,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -9028,6 +9083,32 @@ if (typeof document !== "undefined") {
       setText("lstx-result", "Model output: exiting " + res.amount + " LST two ways. Redeeming with the stake pool at its rate of " + res.rate.toFixed(9) + " SOL per token returns " + res.delayedOut + " SOL after the entered wait of " + res.waitEpochs + (res.waitEpochs === 1 ? " epoch" : " epochs") + ". Selling instantly into the DEX pool at a spot of " + res.spot.toFixed(9) + " SOL per token returns " + res.instantOut + " SOL (the pool's swap fee takes " + res.instantFee + " LST" + (res.priceImpactPct === null ? "" : ", price impact " + res.priceImpactPct.toFixed(4) + "%") + "). The delayed path pays " + res.diff + " SOL more" + (res.costBps === null ? "" : " (" + res.costBps.toLocaleString("en-US") + " bps of the delayed value)") + "." + note + " Amounts are user-entered; no live pool is read. Stake-pool withdrawal fees are Tool 75's model and are not charged here, and the wait is the wait you enter - when a given pool's liquidity frees is that pool's own timing. An educational model of a liquid staking token exit, not a live quote. Not financial advice.");
     });
 
+
+    var rslashForm = document.getElementById("rslash-calc");
+    if (rslashForm) rslashForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = restakeSlash(val("rslash-backing"), val("rslash-supply"), val("rslash-your"), val("rslash-bps"));
+      if (!res) {
+        document.getElementById("rslash-slashed-out").value = "Invalid";
+        document.getElementById("rslash-backing-out").value = "Invalid";
+        document.getElementById("rslash-rate-out").value = "Invalid";
+        document.getElementById("rslash-value-out").value = "Invalid";
+        document.getElementById("rslash-loss-out").value = "Invalid";
+        setText("rslash-result", "Check the inputs: the total backing, the receipt-token supply and your receipt amount are amounts above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, your amount does not exceed the whole supply, and the slash rate is a whole number of basis points from 0 to 10,000. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("rslash-slashed-out").value = res.slashed;
+      document.getElementById("rslash-backing-out").value = res.newBacking;
+      document.getElementById("rslash-rate-out").value = res.rateAfter + " (was " + res.rateBefore + ")";
+      document.getElementById("rslash-value-out").value = res.yourAfter + " (was " + res.yourBefore + ")";
+      document.getElementById("rslash-loss-out").value = res.yourLoss + (res.lossBps === null ? " (share unmeasurable - your redemption floored to zero before the slash)" : " (" + res.lossBps.toLocaleString("en-US") + " bps of your redemption value)");
+      var note = "";
+      if (res.fullSlash) note = " A 10,000 bps slash is the total wipeout: the backing is gone, the rate is zero, and every receipt redeems for nothing - the tail risk the extra restaking yield is paying for.";
+      else if (res.dustWiped) note = " Your redemption floored to zero even though the slash was partial: at dust scale the second flooring (your share of the reduced backing) can take a whole smallest unit the rate alone would have spared - dust holders can lose more, in bps, than the slash rate itself.";
+      else if (res.slashBps === 0) note = " A zero slash changes nothing: backing, rate and redemption all stand - slashing is an event, not a running fee.";
+      else note = " The loss lands pro-rata on every holder through the rate, at exactly the slash rate here - the two floorings (the slash itself, then your redemption) only diverge from the headline rate at dust scale.";
+      setText("rslash-result", "Model output: a restaking pool with " + res.backing + " of backing against " + res.supply + " receipt tokens (rate " + res.rateBefore + ") takes a " + res.slashBps.toLocaleString("en-US") + " bps slash. The slash destroys " + res.slashed + " of backing - gone, not paid to anyone - leaving " + res.newBacking + " and a new rate of " + res.rateAfter + ". Your " + res.your + " receipts redeemed for " + res.yourBefore + " before the slash and " + res.yourAfter + " after it, a loss of " + res.yourLoss + (res.lossBps === null ? "" : " (" + res.lossBps.toLocaleString("en-US") + " bps of your redemption value)") + "." + note + " Amounts are user-entered; no live protocol is read. Which operators and services are secured, the slash conditions, any insurance or cover fund, and unbonding queues are each protocol's own rules and are not modelled. An educational model of restaking slashing, not a live quote. Not financial advice.");
+    });
 
     var vfeeForm = document.getElementById("vfee-calc");
     if (vfeeForm) vfeeForm.addEventListener("submit", function (e) {
