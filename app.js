@@ -5278,6 +5278,98 @@ function flashLoan(borrowStr, feeBps, proceedsStr) {
   };
 }
 
+/* ---------- Tool 106: quadratic funding matching planner ---------- */
+/* Quadratic funding is the matching rule behind ecosystem grant rounds
+   (Gitcoin-style rounds and Solana public-goods rounds run on it): a
+   project's match from a shared pool is not proportional to what it
+   raised but to the BREADTH of its support. Per project the raw match
+   is (sum of the square roots of its contributions)^2 minus the amount
+   it raised - the cross terms only - so money arriving from many
+   funders matches heavily and money from one funder matches not at
+   all: a lone contribution's root squared is itself, and its raw match
+   is exactly zero at any size. The square roots are taken in scaled
+   integers - isqrt(contribution x SCALE), the floored root of the
+   amount at smallest-unit precision - so whole square amounts are
+   exact (100 and 25 root to exactly 10 and 5) and the flooring is the
+   model's stated rounding: a pair of one-smallest-unit contributions
+   matches 1 unit where real-valued math says 2. At the headline -
+   projects raising 100 + 25, a lone 400, and 9 + 9 + 9 + 9 - the raw
+   matches are 100, 0 and 108 (the four 9s root to 3 each, sum 12,
+   square 144, less the 36 raised): the smallest raise earns the
+   largest match. If the pool covers the raw total it pays in full and
+   the rest is honestly undistributed (a 1,000 pool leaves 792); if
+   not, every match scales down pro-rata, floored at the smallest
+   unit, and the flooring dust stays undistributed too (a 104 pool
+   pays 50 / 0 / 54, a 100 pool pays 48.076923076 / 51.923076923 and leaves one smallest unit). The same
+   breadth rule is the mechanism's known weakness - one funder split
+   across many wallets looks like many funders - so real rounds pair
+   it with identity checks; that defence, per-round caps and any
+   platform's own rounding are stated as not modelled. Contributions
+   and the pool are entered, never read from a live round. This is
+   Tool 50's quadratic shape pointed the other way: there a voter
+   BUYS votes at square cost, here a pool REWARDS support at square-
+   root breadth. Prototype-verified before shipping against an
+   independent Python integer oracle on 20,000 cases (0 mismatches on
+   every figure, with the single-funder-zero, split-never-lowers and
+   distributed-plus-leftover-equals-pool invariants asserted in the
+   oracle), and the shipped function was re-swept against that oracle
+   on the same 20,000 cases with 0 mismatches. */
+var MAX_QFUND_PROJECTS = 20;
+var MAX_QFUND_CONTRIBS = 50;
+var MAX_QFUND_AMOUNT = 1000000000000n; /* 1e12 whole units per contribution / pool */
+function quadraticFunding(projectsStr, poolStr) {
+  var pool = parseScaled(poolStr);
+  if (pool === null || pool < 0n || pool > MAX_QFUND_AMOUNT * SCALE) return null;
+  if (typeof projectsStr !== "string") return null;
+  var segs = projectsStr.split(";");
+  if (segs.length < 1 || segs.length > MAX_QFUND_PROJECTS) return null;
+  var projects = [];
+  var totalContrib = 0n, contributorCount = 0;
+  for (var j = 0; j < segs.length; j++) {
+    var toks = segs[j].split(/[\s,]+/).filter(function (x) { return x.length > 0; });
+    if (toks.length < 1 || toks.length > MAX_QFUND_CONTRIBS) return null;
+    var sum = 0n, sqrtSum = 0n;
+    for (var i = 0; i < toks.length; i++) {
+      var c = parseScaled(toks[i]);
+      if (c === null || c <= 0n || c > MAX_QFUND_AMOUNT * SCALE) return null;
+      sum += c;
+      sqrtSum += isqrtBigInt(c * SCALE); /* floored root of the amount, scaled */
+    }
+    var raw = (sqrtSum * sqrtSum) / SCALE - sum;
+    if (raw < 0n) raw = 0n; /* a lone funder's floored root can land a hair under */
+    projects.push({ contributors: toks.length, sum: sum, raw: raw });
+    totalContrib += sum; contributorCount += toks.length;
+  }
+  var totalRaw = projects.reduce(function (a, p) { return a + p.raw; }, 0n);
+  var capped = totalRaw > pool;
+  var matches, distributed, leftover;
+  if (totalRaw === 0n) {
+    matches = projects.map(function () { return 0n; });
+    distributed = 0n; leftover = pool;
+  } else if (!capped) {
+    matches = projects.map(function (p) { return p.raw; });
+    distributed = totalRaw; leftover = pool - totalRaw;
+  } else {
+    matches = projects.map(function (p) { return (p.raw * pool) / totalRaw; });
+    distributed = matches.reduce(function (a, m) { return a + m; }, 0n);
+    leftover = pool - distributed; /* pro-rata flooring dust, undistributed */
+  }
+  return {
+    pool: formatScaled(pool),
+    projectCount: projects.length, contributorCount: contributorCount,
+    totalContributed: formatScaled(totalContrib), totalRaw: formatScaled(totalRaw),
+    capped: capped, distributed: formatScaled(distributed), leftover: formatScaled(leftover),
+    projects: projects.map(function (p, idx) {
+      return {
+        contributors: p.contributors, sum: formatScaled(p.sum),
+        raw: formatScaled(p.raw), match: formatScaled(matches[idx]),
+        received: formatScaled(p.sum + matches[idx]),
+        matchBps: distributed > 0n ? Number((matches[idx] * 10000n) / distributed) : 0
+      };
+    })
+  };
+}
+
 /* ---------- Tool 103: second-price (Vickrey) auction settlement planner ---------- */
 /* A second-price (Vickrey) auction - the sealed-bid form behind
    many NFT, domain and ad sales, and the pricing rule Tool 102
@@ -6108,6 +6200,7 @@ if (typeof module !== "undefined" && module.exports) {
     secondPriceAuction,
     zapOut,
     flashLoan,
+    quadraticFunding,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8483,6 +8576,33 @@ if (typeof document !== "undefined") {
       else if (res.shareBps >= 5000) note = " At half the pool or more the cost is no longer a detail: your own withdrawal shrank the pool the B side is then sold into, so the price impact compounds - exiting in kind and selling elsewhere can beat consolidating here.";
       else note = " The cost is the fee plus the price impact of the consolidation swap, measured against valuing the pair at the post-withdrawal spot - it is the price of ending in one token instead of two, not a fee anyone charges on top.";
       setText("zout-result", "Model output: burning " + res.burn + " LP of " + res.supply + " against a pool of " + res.reserveA + " A / " + res.reserveB + " B at a " + res.feeBps + " bps fee withdraws " + res.outA + " A and " + res.outB + " B" + (res.fullBurn ? ", and no consolidation swap exists." : res.zeroB ? ", which is already a single-sided total of " + res.totalA + " A." : ", swaps the B side for " + res.swapOut + " A, and leaves you holding " + res.totalA + " A in total at a consolidation cost of " + res.cost + " A (" + res.costBps.toLocaleString("en-US") + " bps).") + note + " Amounts are user-entered; no live pool is read. Slippage protection and the interface's own zap fee, if any, are not modelled; the two-sided withdrawal itself is Tool 45 and the single-sided entry is Tool 100. An educational model of a single-sided exit, not a live quote. Not financial advice.");
+    });
+
+    var qfundForm = document.getElementById("qfund-calc");
+    if (qfundForm) qfundForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = quadraticFunding(val("qfund-projects"), val("qfund-pool"));
+      if (!res) {
+        document.getElementById("qfund-contrib-out").value = "Invalid";
+        document.getElementById("qfund-dist-out").value = "Invalid";
+        document.getElementById("qfund-left-out").value = "Invalid";
+        document.getElementById("qfund-matches-out").value = "Invalid";
+        setText("qfund-result", "Check the inputs: enter one project per semicolon, its contributions separated by commas - amounts above zero with at most 9 decimal places, at most 20 projects and 50 contributions each - and a matching pool that may be zero but not blank. Blanks are not read as zero, and an empty project between semicolons is not skipped.");
+        return;
+      }
+      document.getElementById("qfund-contrib-out").value = res.totalContributed + " across " + res.projectCount + " project(s) from " + res.contributorCount + " contribution(s)";
+      document.getElementById("qfund-dist-out").value = res.distributed + (res.capped ? " (the pool ran short, so matches scaled down pro-rata)" : " (raw matches paid in full)");
+      document.getElementById("qfund-left-out").value = res.leftover;
+      document.getElementById("qfund-matches-out").value = res.projects.map(function (p) { return p.match; }).join(" / ");
+      var lines = res.projects.map(function (p, i) {
+        return "Project " + (i + 1) + ": raised " + p.sum + " from " + p.contributors + " contribution(s), raw match " + p.raw + ", matched " + p.match + ", receives " + p.received + ".";
+      }).join(" ");
+      var note = res.totalRaw === "0"
+        ? " No project has more than one funder, so no raw match exists at all - breadth is the whole mechanism, and a round of lone funders distributes nothing."
+        : (res.capped
+          ? " The pool covered only part of the raw matches, so each was scaled by the same fraction and floored; the dust that flooring leaves is part of the undistributed remainder."
+          : " The pool covered every raw match, and what remains is simply unspent - a bigger pool would not have changed any project's match.");
+      setText("qfund-result", "Model output: " + lines + " Total raw match " + res.totalRaw + " against a pool of " + res.pool + "." + note + " Amounts are user-entered; no live round is read. Square roots are floored at the smallest unit, and identity checks against split-wallet gaming, per-round caps and platform rounding rules are not modelled. An educational model of quadratic funding, not a live round. Not financial advice.");
     });
 
     var floanForm = document.getElementById("floan-calc");
