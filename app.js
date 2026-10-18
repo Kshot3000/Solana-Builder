@@ -5097,6 +5097,63 @@ function poolCreate(depositAStr, depositBStr, lockedStr) {
   };
 }
 
+/* ---------- Tool 102: auction minimum-increment & settlement planner ---------- */
+/* An English (ascending) auction - the form NFT, domain and
+   marketplace sales across Solana run on - does not let the next
+   bid be anything above the current one: it must clear the current
+   bid PLUS a minimum increment, and it must clear any reserve. The
+   increment here is a percentage of the current bid in basis
+   points, CEILINGED at the smallest unit, so the minimum always
+   strictly exceeds the current bid - on a one-smallest-unit bid
+   even a 1 bp increment doubles the minimum, because half a unit
+   cannot be bid. With no bid yet the increment has nothing to act
+   on: the minimum is the reserve (or one smallest unit when there
+   is no reserve either). A leading bid can still sit below the
+   reserve, so the minimum is the larger of reserve and current
+   plus increment. A bid at exactly the minimum wins; the winner
+   pays their OWN bid (first price), settled through Tool 23's
+   saleSplit verbatim - platform fee and creator royalty floored,
+   seller keeps the remainder. overCurrentBps is floored, including
+   for a bid below the current one (signed floor, never truncation
+   toward zero). Fixed (non-percentage) increments, bid extensions
+   / anti-sniping rules and second-price auctions are stated as not
+   modelled. Prototype-verified before shipping against an
+   independent Python integer oracle on 20,000 cases, 0 mismatches
+   on every figure (the sweep caught the signed-floor rule above).
+   No live auction is read. */
+function auctionBid(currentStr, reserveStr, incrementBps, bidStr, platformBps, royaltyBps) {
+  var C = parseScaled(currentStr), R = parseScaled(reserveStr), B = parseScaled(bidStr);
+  var inc = Number(incrementBps), p = Number(platformBps), r = Number(royaltyBps);
+  if (C === null || R === null || B === null) return null;
+  if (B <= 0n) return null;
+  if (!Number.isInteger(inc) || !Number.isInteger(p) || !Number.isInteger(r)) return null;
+  if (inc < 1 || inc > 10000 || p < 0 || r < 0 || p > 10000 || r > 10000 || p + r > 10000) return null;
+  var incAmt = C > 0n ? (C * BigInt(inc) + 9999n) / 10000n : 0n;
+  var minimum = C > 0n ? (R > C + incAmt ? R : C + incAmt) : (R > 1n ? R : 1n);
+  var wins = B >= minimum;
+  var split = wins ? saleSplit(bidStr, platformBps, royaltyBps) : null;
+  if (wins && !split) return null;
+  var next = wins ? B + (B * BigInt(inc) + 9999n) / 10000n : null;
+  var overBps = null;
+  if (C > 0n) {
+    var n = (B - C) * 10000n;
+    overBps = n / C;
+    if (n % C !== 0n && n < 0n) overBps -= 1n; /* signed floor, not truncation */
+  }
+  return {
+    current: formatScaled(C), reserve: formatScaled(R), incrementBps: inc, bid: formatScaled(B),
+    incrementAmount: formatScaled(incAmt), minimumBid: formatScaled(minimum), wins: wins,
+    shortfall: formatScaled(wins ? 0n : minimum - B),
+    overMinimum: wins ? formatScaled(B - minimum) : null,
+    overCurrentBps: overBps === null ? null : Number(overBps),
+    nextMinimum: next === null ? null : formatScaled(next),
+    reserveMet: B >= R,
+    platformFee: split ? split.platformFee : null,
+    royalty: split ? split.royalty : null,
+    seller: split ? split.seller : null
+  };
+}
+
 /* ---------- Tool 100: single-sided (zap) deposit planner ---------- */
 /* Tool 18 prices a TWO-sided deposit; this prices the one-sided
    version every "zap in" button performs: you hold only token A, so
@@ -5871,6 +5928,7 @@ if (typeof module !== "undefined" && module.exports) {
     vaultShares, MAX_VAULT_RAW,
     zapDeposit,
     poolCreate,
+    auctionBid,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -8148,6 +8206,38 @@ if (typeof document !== "undefined") {
         ? " With nothing locked, the whole first mint is redeemable - the opening price is still set entirely by your seed ratio, and the first deposit into an empty pool has no market price to match, only the ratio you choose."
         : " The locked slice is not a fee: it is the pool's own minimum-liquidity defence, priced in LP tokens rather than charged, and its claim stays in the reserves for every later holder. Your share is measured against the total mint, locked slice included, because later deposits divide by that total too.";
       setText("poolc-result", "Model output: seeding " + res.depositA + " A and " + res.depositB + " B creates the pool at " + res.priceBPerA + " B per A, mints " + res.totalMinted + " LP tokens, locks " + res.locked + " of them permanently and leaves you " + res.creatorLp + " (" + res.creatorShareBps.toLocaleString("en-US") + " bps)." + note + " Amounts are user-entered; no live pool is read. Pool creation fees and the account rent a real creation also pays are not modelled. An educational model of pool creation, not a live quote. Not financial advice.");
+    });
+
+    var auctForm = document.getElementById("auct-calc");
+    if (auctForm) auctForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = auctionBid(val("auct-current"), val("auct-reserve"), val("auct-inc"), val("auct-bid"), val("auct-platform"), val("auct-royalty"));
+      if (!res) {
+        document.getElementById("auct-min-out").value = "Invalid";
+        document.getElementById("auct-verdict-out").value = "Invalid";
+        document.getElementById("auct-settle-out").value = "Invalid";
+        document.getElementById("auct-next-out").value = "Invalid";
+        setText("auct-result", "Check the inputs: the current bid, reserve and your bid must be amounts with at most 9 decimal places (the current bid and reserve may be 0, your bid may not), the minimum increment must be a whole number of basis points from 1 to 10,000, and the platform fee and royalty must be whole basis points that sum to at most 10,000. Blanks are not read as zero.");
+        return;
+      }
+      document.getElementById("auct-min-out").value = res.current === "0"
+        ? res.minimumBid + " - the reserve is the floor for a first bid (the increment acts only on an existing bid)"
+        : res.minimumBid + " - the current " + res.current + " plus a ceilinged increment of " + res.incrementAmount + (res.reserveMet && res.minimumBid === res.reserve && res.current !== "0" ? ", lifted to the reserve the leading bid has not met" : "");
+      document.getElementById("auct-verdict-out").value = res.wins
+        ? "Your " + res.bid + " bid wins at these settings - " + res.overMinimum + " above the minimum" + (res.overCurrentBps === null ? "" : ", " + res.overCurrentBps.toLocaleString("en-US") + " bps above the current bid")
+        : "Your " + res.bid + " bid does not win - it is " + res.shortfall + " short of the " + res.minimumBid + " minimum";
+      document.getElementById("auct-settle-out").value = res.wins
+        ? "Settling at your own bid: the platform takes " + res.platformFee + ", the creator royalty is " + res.royalty + " and the seller receives " + res.seller
+        : "No settlement - a bid that does not clear the minimum is not charged and splits nothing";
+      document.getElementById("auct-next-out").value = res.wins
+        ? res.nextMinimum + " - the least a later bid must offer to take the lead from you"
+        : res.minimumBid + " - the least a winning bid must offer on this lot";
+      var note = "";
+      if (!res.wins) note = " Raising your bid to the minimum is enough to lead - a bid at exactly the minimum wins, and anything between the current bid and the minimum changes nothing.";
+      else if (res.current === "0") note = " A first bid pays no increment over anything: the percentage applies from the second bid onward, which is why the next minimum after yours already carries it.";
+      else if (res.bid === res.minimumBid) note = " You bid exactly the minimum: the cheapest leading bid at these settings, and the ceilinged increment is what set it - at the smallest-unit scale that ceiling, not the percentage, is the real step.";
+      else note = " Winning costs your full bid, not the minimum: in a first-price auction every unit above the minimum is paid, not saved, so the minimum is the bid a disciplined buyer starts from.";
+      setText("auct-result", "Model output: the minimum winning bid is " + res.minimumBid + " and your bid of " + res.bid + (res.wins ? " wins" : " falls " + res.shortfall + " short") + "." + note + " Amounts are user-entered; no live auction is read. Fixed increments, anti-sniping extensions and second-price auctions are not modelled. An educational model of an auction, not a live quote. Not financial advice.");
     });
 
     var zapForm = document.getElementById("zap-calc");

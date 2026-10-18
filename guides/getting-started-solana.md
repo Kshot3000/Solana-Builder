@@ -23,7 +23,7 @@ solana balance
 
 Devnet SOL is free and worthless, on purpose: learn there, never on mainnet.
 
-## 3. Learn the one hundred mechanics that decide your costs
+## 3. Learn the one hundred one mechanics that decide your costs
 
 1. **Lamports.** 1 SOL = 1,000,000,000 lamports; balances are whole lamports. The hub's converter (Tool 1) shows the exact integer math.
 2. **Rent exemption.** An account is rent-exempt holding two years of rent: `(128 + dataLen) × 3,480 × 2` lamports. A token account (165 bytes) therefore locks up 2,039,280 lamports — every account your program creates has a SOL cost you can compute before writing code (Tool 3).
@@ -227,6 +227,8 @@ anchor deploy --provider.cluster devnet
 ```
 
 Only deploy once tests pass, and label everything you show users for what it is: devnet, testnet, model or live. This hub's rule — no modelled data presented as live, no tool presented as a quote — is a good rule for your app too.
+
+101. **An auction's minimum is the current bid plus a ceilinged step - and winning pays your own bid.** An English (ascending) auction - the form NFT, domain and marketplace sales run on - never accepts a bid merely above the current one: the next bid must clear the current bid plus a minimum increment, and it must clear any reserve. Priced as a percentage of the current bid, the increment is ceilinged at the smallest unit, so the minimum always strictly exceeds the current bid: at a current bid of 100 with a 500 bps (5%) increment the minimum is 105, while on a bid of 0.000000001 even a 1 bp increment makes the minimum 0.000000002, because half a smallest unit cannot be bid. The minimum is the larger of the reserve and current-plus-increment, since a leading bid can still sit below its reserve; with no bid yet the increment has nothing to act on and the minimum is the reserve itself. A bid at exactly the minimum wins, and winning is first-price - you pay your own bid, not the minimum - so a bid of 120 at those settings settles as a sale: at a 200 bps platform fee and a 500 bps creator royalty the platform takes 2.4, the creator 6 and the seller receives 111.6, and the next bidder must offer at least 126 to take the lead. A bid of 104 falls 1 short and is charged nothing. The hub's planner (Tool 102) runs the current bid, reserve, increment and your bid in exact scaled integers, with the settlement composed from the sale-split tool; fixed (non-percentage) increments, anti-sniping bid extensions and second-price auctions are stated as not modelled, and no live auction is read.
 
 ## Where next
 
