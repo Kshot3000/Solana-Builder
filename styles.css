@@ -53,6 +53,11 @@ button {
 }
 button:hover { filter: brightness(1.15); }
 .result { color: var(--text); min-height: 1.2em; }
+.tool-finder { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 16px 0; }
+.tool-finder label { color: var(--text); font-size: 1rem; margin-bottom: 8px; }
+.finder-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.finder-row input { flex: 1 1 260px; }
+.finder-status { color: var(--muted); margin: 8px 0 0; min-height: 1.2em; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .filters button { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
 .filters button.active { color: var(--green); border-color: var(--green); }

@@ -7762,10 +7762,29 @@ function catalogueMatch(cat, filter) {
   return cat.split(" ").indexOf(filter) !== -1;
 }
 
+/* ---------- Tool finder: does a tool's text match a search query? ---------- */
+/* Every whitespace-separated term in the query must appear in the tool's
+   text (case-insensitive), so "oracle median" finds the median tools and
+   term order does not matter. An empty query matches everything (show all).
+   The query is capped at 80 characters before splitting, so a pasted page
+   of text is never scanned term-by-term against every tool. */
+var TOOL_SEARCH_MAX_QUERY = 80;
+function toolMatches(text, query) {
+  if (typeof text !== "string" || typeof query !== "string") return false;
+  var q = query.trim().toLowerCase().slice(0, TOOL_SEARCH_MAX_QUERY).trim();
+  if (!q) return true;
+  var hay = text.toLowerCase();
+  var terms = q.split(/\s+/);
+  for (var i = 0; i < terms.length; i++) {
+    if (hay.indexOf(terms[i]) === -1) return false;
+  }
+  return true;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     parseScaled, formatScaled, solToLamports, lamportsToSol, cpSwap,
-    rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch,
+    rentExempt, impermanentLoss, txFee, tokenToRaw, rawToToken, catalogueMatch, toolMatches, TOOL_SEARCH_MAX_QUERY,
     base58Decode, base58Encode, checkAddress, stakingRewards,
     buildSolanaPayUrl, parseSolanaPayUrl, validPayAmount, KNOWN_MINT_DECIMALS,
     tickToPrice, priceToTick, clmmRange, MIN_TICK, MAX_TICK, TICK_BASE,
@@ -10997,6 +11016,43 @@ if (typeof document !== "undefined") {
         });
       });
     });
+
+    /* tool finder — filters every numbered tool article on the page
+       (the newest tools sit in the hero section, the rest in #tools).
+       Matching uses textContent only and results are written back with
+       textContent, so a search term can never inject markup. */
+    var toolSearch = document.getElementById("tool-search");
+    var toolSearchClear = document.getElementById("tool-search-clear");
+    if (toolSearch) {
+      var toolCards = [];
+      document.querySelectorAll("article").forEach(function (art) {
+        var h = art.querySelector("h3");
+        if (h && /^\d+\./.test(h.textContent.trim())) {
+          toolCards.push({ el: art, text: art.textContent });
+        }
+      });
+      var applyToolSearch = function () {
+        var q = toolSearch.value;
+        var shown = 0;
+        toolCards.forEach(function (card) {
+          var hit = toolMatches(card.text, q);
+          card.el.style.display = hit ? "" : "none";
+          if (hit) shown++;
+        });
+        var status = document.getElementById("tool-search-status");
+        if (status) {
+          if (!q.trim()) status.textContent = "Showing all " + toolCards.length + " tools.";
+          else if (shown === 0) status.textContent = "No tool matches \u201C" + q.trim().slice(0, TOOL_SEARCH_MAX_QUERY) + "\u201D — try a shorter or different word, or Show all.";
+          else status.textContent = "Showing " + shown + " of " + toolCards.length + " tools matching \u201C" + q.trim().slice(0, TOOL_SEARCH_MAX_QUERY) + "\u201D.";
+        }
+      };
+      toolSearch.addEventListener("input", applyToolSearch);
+      if (toolSearchClear) toolSearchClear.addEventListener("click", function () {
+        toolSearch.value = "";
+        applyToolSearch();
+        toolSearch.focus();
+      });
+    }
 
     /* copy donation address */
     var copyBtn = document.getElementById("copy-address");

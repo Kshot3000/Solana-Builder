@@ -8,6 +8,8 @@ I build, fix and improve across Solana: Raydium, Jupiter, Orca, Anchor, Solana P
 
 ## Tools (all educational models, browser-local)
 
+The hub page carries a **tool finder** at the top: type a name or mechanic (one or more words — every word must match) and the page narrows to the matching tools among all 128, with a live count and a Show-all reset. It runs entirely in the browser over the tools' own text; no query leaves the page.
+
 1. **SOL ⇄ lamports converter** — exact BigInt conversion; 1 SOL = 1,000,000,000 lamports, no rounding.
 2. **Constant-product swap model** — x·y=k with the fee on the input and price impact, exact scaled-BigInt math.
 3. **Rent-exempt minimum calculator** — (128 + dataLen) × 3,480 × 2 lamports, the network's rent parameters.
