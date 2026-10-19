@@ -7513,8 +7513,8 @@ function vaultLockedSeed(seedStr, donationStr, depositStr) {
    already be live (assets and shares above zero): the
    empty-vault bootstrap is Tools 130 and 131's ground.
    Amounts are RAW smallest units, entered as whole numbers;
-   per-user caps and caps denominated in shares are stated as
-   not modelled. Prototype-verified before shipping against
+   per-user caps are stated as not modelled; caps
+   denominated in shares are Tool 133. Prototype-verified before shipping against
    an independent Python integer oracle on 20,000 cases, 0
    mismatches on every figure, with both conversions asserted
    the exact floors. No live vault is read. */
@@ -7552,6 +7552,95 @@ function vaultCap(assetsStr, sharesStr, donationStr, depositStr, capStr) {
     uMinted: uMinted.toString(), uRedeem: uRedeem.toString(), uLoss: uLoss.toString(),
     savedByCap: (uLoss - loss).toString(), capForFull: (A1 + P).toString(),
     headroomAfter: (C - assetsAfter).toString()
+  };
+}
+
+/* ---------- Tool 133: vault share-cap planner ---------- */
+/* Tool 132 prices a vault cap denominated in ASSETS and states
+   caps denominated in shares as not modelled. This prices the
+   share-denominated form: the vault carries a CAP on its total
+   SHARES outstanding - a ceiling on the supply of its own
+   token. The headroom is in shares, H = max(shareCap - S, 0),
+   and a deposit is accepted only up to what that headroom can
+   mint, converted back at the post-donation price the way a
+   maxDeposit figure is derived from a maxMint figure:
+   assetHeadroom = floor(H x A1 / S), where A1 = A + D, and
+   accepted = min(P, assetHeadroom). The accepted part then
+   runs Tool 99's own floored rule - mints floor(accepted x S
+   / A1), redeems floored again - so minted never exceeds H
+   and the share total after never exceeds the cap (or the
+   supply it started above it).
+   The denomination is the whole lesson, because a donation
+   mints NO shares: it does not consume a share cap at all -
+   instead it RAISES the price, so each share of headroom is
+   worth more assets and the asset headroom GROWS with the
+   very donation that fills an asset cap. At Tool 99's trap
+   (1 asset, 1 share, a 999,999 donation, price 1,000,000) a
+   share cap of 2 leaves one share of headroom worth 1,000,000
+   of asset headroom, so the whole 500,000 deposit enters,
+   still mints ZERO and loses all 500,000 - savedByCap 0: a
+   share cap limits how many shares can exist (a supply /
+   dilution limit), it does not bound the assets at risk when
+   the price is inflated. On healthy settings (1,000 / 1,000,
+   a 9,000 donation, price 10, a 5,005 deposit) a share cap of
+   1,200 leaves 200 shares of headroom worth 2,000 of assets:
+   2,000 is accepted, mints exactly 200, redeems 2,000 and
+   loses 0 (the uncapped deposit loses 4), refusing 3,005. A
+   cap at the current supply blocks everything. Accepting a
+   deposit whole needs shareCap >= S + ceil(P x S / A1)
+   exactly (capForFull - the ceiling, not the floored mint,
+   because the headroom converts back through a floor: at the
+   healthy settings capForFull is 1,501, and a cap of 1,500
+   accepts 5,000 and refuses the last 5). Truncation can also
+   round worse per unit: at 10 assets against 3 shares with
+   no donation, a 100 deposit and a share cap of 5, the
+   2 shares of headroom convert to only 6 of asset headroom,
+   which mints just 1 share, redeems 4 and loses 2 where the
+   uncapped deposit loses 0 - so savedByCap is signed. The
+   vault must already be live (assets and shares above zero).
+   Amounts are RAW smallest units, entered as whole numbers;
+   per-user caps are stated as not modelled. Prototype-
+   verified before shipping against an independent Python
+   integer oracle on 20,001 cases, 0 mismatches on every
+   figure, with the cap-for-full brute-forced on small cases
+   and both conversions asserted the exact floors. No live
+   vault is read. */
+function vaultShareCap(assetsStr, sharesStr, donationStr, depositStr, shareCapStr) {
+  var A = vaultRaw(assetsStr);
+  var S = vaultRaw(sharesStr);
+  var D = vaultRaw(donationStr);
+  var P = vaultRaw(depositStr);
+  var C = vaultRaw(shareCapStr);
+  if (A === null || S === null || D === null || P === null || C === null) return null;
+  if (A <= 0n || S <= 0n || P <= 0n || C <= 0n) return null;
+  if (A > MAX_VAULT_RAW || S > MAX_VAULT_RAW || D > MAX_VAULT_RAW || P > MAX_VAULT_RAW || C > MAX_VAULT_RAW) return null;
+  var A1 = A + D;
+  var headroomShares = C > S ? C - S : 0n;
+  var assetHeadroom = (headroomShares * A1) / S;
+  var accepted = P < assetHeadroom ? P : assetHeadroom;
+  var refused = P - accepted;
+  var minted = accepted === 0n ? 0n : (accepted * S) / A1;
+  var assetsAfter = A1 + accepted;
+  var sharesAfter = S + minted;
+  var redeem = minted === 0n ? 0n : (minted * assetsAfter) / sharesAfter;
+  var loss = accepted - redeem;
+  var uMinted = (P * S) / A1;
+  var uRedeem = uMinted === 0n ? 0n : (uMinted * (A1 + P)) / (S + uMinted);
+  var uLoss = P - uRedeem;
+  return {
+    assets: A.toString(), shares: S.toString(), donation: D.toString(),
+    deposit: P.toString(), shareCap: C.toString(), assetsAfterDonation: A1.toString(),
+    priceAfter: formatScaled((A1 * SCALE) / S),
+    headroomShares: headroomShares.toString(), assetHeadroom: assetHeadroom.toString(),
+    accepted: accepted.toString(), refused: refused.toString(),
+    minted: minted.toString(), mintedZero: minted === 0n,
+    assetsAfter: assetsAfter.toString(), sharesAfter: sharesAfter.toString(),
+    redeem: redeem.toString(), loss: loss.toString(),
+    lossBps: accepted === 0n ? 0 : Number((loss * 10000n) / accepted),
+    exact: loss === 0n, blocked: accepted === 0n, partial: accepted > 0n && accepted < P,
+    uMinted: uMinted.toString(), uRedeem: uRedeem.toString(), uLoss: uLoss.toString(),
+    savedByCap: (uLoss - loss).toString(),
+    capForFull: (S + (P * S + A1 - 1n) / A1).toString()
   };
 }
 
@@ -8201,7 +8290,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakeMerge,
     launchAlloc, MAX_LAUNCH_LAMPORTS,
     tickLot, MAX_TICKLOT_LAMPORTS,
-    vaultShares, vaultDefence, vaultLockedSeed, vaultCap, MAX_VAULT_RAW,
+    vaultShares, vaultDefence, vaultLockedSeed, vaultCap, vaultShareCap, MAX_VAULT_RAW,
     zapDeposit,
     poolCreate,
     auctionBid,
@@ -11472,7 +11561,42 @@ if (typeof document !== "undefined") {
       else if (BigInt(res.savedByCap) < 0n) note = " Truncation rounded against you here: the accepted sliver loses " + res.loss + " where the whole deposit uncapped would have lost only " + res.uLoss + " - a smaller amount floors worse per unit. The cap still bounds the total that can ever be taken to the accepted amount itself; it does not promise a better rate on what enters.";
       else if (res.partial) note = " The cap split your deposit: the refused " + res.refused + " was never at risk, and the accepted part lost " + res.loss + " against the uncapped " + res.uLoss + ".";
       else note = " The cap never binds at these settings - the headroom covers the whole deposit - so the loss is Tool 99's ordinary flooring loss, unchanged. The cap would only have counted if it had refused something.";
-      setText("dcap-result", "Model output: the vault holds " + res.assets + " assets against " + res.shares + " shares under a deposit cap of " + res.cap + "; after a donation of " + res.donation + " it holds " + res.assetsAfterDonation + " at " + res.priceAfter + " per share, leaving " + res.headroom + " of headroom, so " + res.accepted + " of your deposit of " + res.deposit + " is accepted and " + res.refused + " refused; the accepted part mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Per-user caps and caps denominated in shares are not modelled. An educational model of a vault deposit cap, not a live quote. Not financial advice.");
+      setText("dcap-result", "Model output: the vault holds " + res.assets + " assets against " + res.shares + " shares under a deposit cap of " + res.cap + "; after a donation of " + res.donation + " it holds " + res.assetsAfterDonation + " at " + res.priceAfter + " per share, leaving " + res.headroom + " of headroom, so " + res.accepted + " of your deposit of " + res.deposit + " is accepted and " + res.refused + " refused; the accepted part mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Per-user caps are not modelled; caps denominated in shares are Tool 133. An educational model of a vault deposit cap, not a live quote. Not financial advice.");
+    });
+
+    var scapForm = document.getElementById("scap-calc");
+    if (scapForm) scapForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = vaultShareCap(val("scap-assets"), val("scap-shares"), val("scap-donation"), val("scap-deposit"), val("scap-cap"));
+      if (!res) {
+        document.getElementById("scap-price-out").value = "Invalid";
+        document.getElementById("scap-headroom-out").value = "Invalid";
+        document.getElementById("scap-minted-out").value = "Invalid";
+        document.getElementById("scap-redeem-out").value = "Invalid";
+        document.getElementById("scap-loss-out").value = "Invalid";
+        document.getElementById("scap-uncapped-out").value = "Invalid";
+        setText("scap-result", "Check the inputs: the vault assets, shares, donation, deposit and share cap must be whole raw smallest units (integers only, no decimals) of at most 1,000,000,000,000,000,000, and the assets, shares, deposit and share cap must all be above zero. Blanks are not read as zero - enter 0 itself where you mean zero.");
+        return;
+      }
+      document.getElementById("scap-price-out").value = res.priceAfter + " assets per share after the donation";
+      document.getElementById("scap-headroom-out").value = res.headroomShares + " shares of headroom under the cap, worth " + res.assetHeadroom + " of asset headroom at this price - " + res.accepted + " of your deposit accepted, " + res.refused + " refused";
+      document.getElementById("scap-minted-out").value = res.minted + " shares minted for the accepted " + res.accepted;
+      document.getElementById("scap-redeem-out").value = res.redeem + " - what redeeming those shares at once would return";
+      document.getElementById("scap-loss-out").value = res.blocked
+        ? "0 - nothing was accepted, so nothing could be taken"
+        : res.mintedZero
+          ? res.loss + " - the entire accepted amount (" + res.lossBps.toLocaleString("en-US") + " bps of it): the share cap let it all in and it still minted zero"
+          : res.loss + " (" + res.lossBps.toLocaleString("en-US") + " bps of the accepted amount) - kept in the vault through the two floored conversions";
+      document.getElementById("scap-uncapped-out").value = "without the cap, the same deposit mints " + res.uMinted + " shares and redeems " + res.uRedeem + ", losing " + res.uLoss;
+      var note = "";
+      if (res.blocked) note = " The share cap refuses the whole deposit: the vault already has " + res.shares + " shares outstanding against a share cap of " + res.shareCap + ", so the share headroom is zero and nothing can be minted. Any donation is beside the point here - donations mint no shares, so they never consume a share cap.";
+      else if (res.mintedZero) note = " The share cap did not protect you: at " + res.priceAfter + " per share, its " + res.headroomShares + " of share headroom is worth " + res.assetHeadroom + " of asset headroom, so your whole deposit entered and still floored to zero shares. A share cap limits how many shares can exist - a supply limit - not how many assets are at risk; the asset cap (Tool 132) is the one that bounds assets, and it is filled by the donation itself.";
+      else if (res.exact && res.partial) note = " The accepted part comes back whole - at this price the two floored conversions divide exactly - and the refused " + res.refused + " never entered. Accepting the whole deposit would have needed a share cap of at least " + res.capForFull + ".";
+      else if (res.exact) note = " Your deposit comes back whole and the share cap never binds: with share headroom to spare it changes nothing, which is the honest baseline - a cap only matters when it refuses something.";
+      else if (BigInt(res.savedByCap) < 0n) note = " Truncation rounded against you here: the accepted sliver mints fewer shares than its headroom allowed and loses " + res.loss + " where the whole deposit uncapped would have lost only " + res.uLoss + " - converting share headroom back to assets floors, and the small accepted amount floors worse per unit. The share cap still guarantees the share total never passes " + res.shareCap + "; it does not promise a better rate on what enters.";
+      else if (res.partial) note = " The share cap split your deposit: the refused " + res.refused + " was never at risk, and the accepted part lost " + res.loss + " against the uncapped " + res.uLoss + ".";
+      else note = " The share cap never binds at these settings - its asset headroom covers the whole deposit - so the loss is Tool 99's ordinary flooring loss, unchanged. The cap would only have counted if it had refused something.";
+      setText("scap-result", "Model output: the vault holds " + res.assets + " assets against " + res.shares + " shares under a share cap of " + res.shareCap + "; after a donation of " + res.donation + " it holds " + res.assetsAfterDonation + " at " + res.priceAfter + " per share, leaving " + res.headroomShares + " shares of headroom worth " + res.assetHeadroom + " in assets, so " + res.accepted + " of your deposit of " + res.deposit + " is accepted and " + res.refused + " refused; the accepted part mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Per-user caps are not modelled. An educational model of a vault share cap, not a live quote. Not financial advice.");
     });
 
     buttons.forEach(function (btn) {

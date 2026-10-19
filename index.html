@@ -26,16 +26,71 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <div class="tool-finder">
-      <label for="tool-search">Find a tool — search all 132 educational models by name or mechanic</label>
+      <label for="tool-search">Find a tool — search all 133 educational models by name or mechanic</label>
       <div class="finder-row">
         <input id="tool-search" type="search" maxlength="80" placeholder="Try rent, oracle, staking, bridge…" autocomplete="off">
         <button id="tool-search-clear" type="button">Show all</button>
       </div>
-      <p id="tool-search-status" class="finder-status" aria-live="polite">Showing all 132 tools.</p>
+      <p id="tool-search-status" class="finder-status" aria-live="polite">Showing all 133 tools.</p>
     </div>
     <article class="card">
+      <h3>133. Vault share-cap planner - a ceiling on shares, whose asset worth grows with the price</h3>
+      <p>Tool 132 prices a vault cap denominated in <strong>assets</strong> and states caps denominated in shares as not modelled. This prices the <strong>share-denominated</strong> form: the vault carries a <strong>cap on its total shares outstanding</strong> - a ceiling on the supply of its own token. The headroom is in shares - <strong>max(share cap &#8722; shares, 0)</strong> - and a deposit is accepted only up to what that headroom can mint, converted back at the post-donation price the way a maxDeposit figure is derived from a maxMint figure: <strong>asset headroom = floor(headroom &#215; (assets + donation) &#247; shares)</strong>, the accepted part runs Tool 99's own floored rule, and the share total after <strong>never passes the cap</strong>. The denomination is the whole lesson, because a donation mints <strong>no shares</strong>: it does not consume a share cap at all - instead it <strong>raises the price</strong>, so each share of headroom is worth <strong>more assets</strong> and the asset headroom <strong>grows</strong> with the very donation that fills an asset cap. The headline is the healthy case: at <strong>1,000 assets against 1,000 shares</strong>, a <strong>9,000 donation</strong> (price <strong>10</strong>) and a <strong>5,005 deposit</strong>, a share cap of <strong>1,200</strong> leaves a headroom of <strong>200</strong> shares worth <strong>2,000</strong> in assets, so 2,000 is accepted, mints <strong>200</strong>, redeems <strong>2,000</strong> and loses <strong>0</strong> - the uncapped deposit loses 4 - refusing 3,005. A cap at the current supply of 1,000 blocks everything. Accepting the deposit whole needs a share cap of at least <strong>1,501</strong> - the shares plus the <strong>ceiling</strong> of the deposit's mint, not its floor, because the headroom converts back through a floor: a cap of 1,500 accepts 5,000 and refuses the last 5. At Tool 99's trap the defence <strong>fails openly</strong>: <strong>1 asset, 1 share, a 999,999 donation</strong> and a price of <strong>1,000,000</strong> - a share cap of <strong>2</strong> leaves one share of headroom worth <strong>1,000,000</strong> of asset headroom, so the whole <strong>500,000</strong> deposit enters, still mints <strong>zero</strong> and loses <strong>all 500,000</strong>. A share cap limits how many shares can exist - a supply and dilution limit - it does <strong>not</strong> bound the assets at risk when the price is inflated; the asset cap of Tool 132 is the one donations fill. Truncation can even round worse per unit: at <strong>10 assets against 3 shares</strong> with no donation, a <strong>100</strong> deposit and a share cap of <strong>5</strong>, the 2 shares of headroom convert to only <strong>6</strong> of asset headroom, which mints just <strong>1</strong> share, redeems <strong>4</strong> and loses <strong>2</strong> where the uncapped deposit loses 0. The model fills to the converted headroom - the amount a maxDeposit derived from the share cap would still take. Per-user caps are not modelled; the vault totals, donation, deposit and share cap are entered directly. Amounts are user-entered; no live vault is read. An educational model of a vault share cap, not a live quote. Not financial advice.</p>
+      <form id="scap-calc">
+        <div class="grid">
+          <div>
+            <label for="scap-assets">Vault assets before the donation (raw smallest units)</label>
+            <input id="scap-assets" name="scap-assets" inputmode="numeric" value="1000">
+          </div>
+          <div>
+            <label for="scap-shares">Vault shares outstanding (raw smallest units)</label>
+            <input id="scap-shares" name="scap-shares" inputmode="numeric" value="1000">
+          </div>
+          <div>
+            <label for="scap-donation">Donation transferred in - assets in, no shares minted, does not consume a share cap (raw units)</label>
+            <input id="scap-donation" name="scap-donation" inputmode="numeric" value="9000">
+          </div>
+          <div>
+            <label for="scap-deposit">Your deposit after the donation (raw smallest units)</label>
+            <input id="scap-deposit" name="scap-deposit" inputmode="numeric" value="5005">
+          </div>
+          <div>
+            <label for="scap-cap">Share cap - the ceiling on the vault's total shares outstanding (raw smallest units)</label>
+            <input id="scap-cap" name="scap-cap" inputmode="numeric" value="1200">
+          </div>
+          <div>
+            <label for="scap-price-out">Price per share after the donation</label>
+            <input id="scap-price-out" name="scap-price-out" readonly>
+          </div>
+          <div>
+            <label for="scap-headroom-out">Share headroom, and the asset headroom it converts to</label>
+            <input id="scap-headroom-out" name="scap-headroom-out" readonly>
+          </div>
+          <div>
+            <label for="scap-minted-out">Shares the accepted part mints</label>
+            <input id="scap-minted-out" name="scap-minted-out" readonly>
+          </div>
+          <div>
+            <label for="scap-redeem-out">What redeeming those shares at once returns</label>
+            <input id="scap-redeem-out" name="scap-redeem-out" readonly>
+          </div>
+          <div>
+            <label for="scap-loss-out">Your loss on the accepted part</label>
+            <input id="scap-loss-out" name="scap-loss-out" readonly>
+          </div>
+          <div>
+            <label for="scap-uncapped-out">The same deposit with no cap (Tool 99's rule)</label>
+            <input id="scap-uncapped-out" name="scap-uncapped-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the share-capped deposit</button>
+        <p id="scap-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+
+    <article class="card">
       <h3>132. Vault deposit-cap planner - a ceiling on total assets bounds what a trap can take</h3>
-      <p>Tool 99 names <strong>deposit caps</strong> among a share vault's defences, and Tools 130 and 131 price the other two and state caps as not modelled. This prices the cap, in the ERC-4626 pattern's own form: the vault carries a <strong>cap on its total assets</strong> - the ceiling its maxDeposit logic enforces - and because the total is balance-based, a <strong>donation counts toward the cap</strong> exactly like a deposit. After a donation the <strong>headroom</strong> left is <strong>max(cap &#8722; (assets + donation), 0)</strong>; a deposit is <strong>accepted only up to the headroom</strong>, the refused part <strong>never enters the vault</strong> and can never be taken, and the accepted part runs Tool 99's own floored rule - mints <strong>floor(accepted &#215; shares &#247; (assets + donation))</strong> and redeems floored again. The cap changes <strong>how much is exposed, never the price</strong> it is exposed at, and the headline shows both halves: at Tool 99's trap - <strong>1 asset, 1 share, a 999,999 donation and a 500,000 deposit</strong> - a cap of <strong>1,250,000</strong> leaves a headroom of <strong>250,000</strong>, so 250,000 enters, still mints <strong>zero</strong> at a price of <strong>1,000,000</strong> per share, and loses <strong>250,000</strong> instead of 500,000: halved, not fixed, with the refused 250,000 never at risk. A cap at or below the post-donation total of <strong>1,000,000</strong> refuses everything and the loss is <strong>0</strong> - but the same donation has then <strong>frozen every legitimate deposit</strong> until the cap is raised or assets leave: a cap converts theft into a possible deposit freeze, and the attacker pays the donation (which stays with the holders) to cause it. On healthy settings - <strong>1,000 assets, 1,000 shares, a 9,000 donation, a 5,005 deposit</strong> - a cap of <strong>20,000</strong> never binds and the figures are Tool 99's own (<strong>500</strong> minted, <strong>5,001</strong> back, <strong>4</strong> lost), while a cap of <strong>12,003</strong> accepts <strong>2,003</strong>, mints <strong>200</strong>, redeems <strong>2,000</strong> and loses <strong>3</strong> - one less than the uncapped 4 - refusing 3,002. Truncation can even round worse per unit: at 1 asset and 1 share with a <strong>22</strong> donation, a <strong>494,017</strong> deposit and a cap of <strong>931</strong>, the accepted <strong>908</strong> mints 39 and redeems 907 for a loss of <strong>1</strong> where the whole deposit uncapped loses <strong>0</strong> - the cap bounds the <strong>total</strong> that can be taken (a loss can never exceed the accepted amount), not the rate. Accepting a deposit whole needs a cap of at least <strong>assets + donation + deposit</strong> - 1,500,000 at the trap. The model fills to the cap, the amount maxDeposit would still take; a program that reverts an over-cap deposit whole instead refuses all of it, which protects the depositor at least as much. Per-user caps and caps denominated in shares are not modelled; the vault totals, donation, deposit and cap are entered directly. Amounts are user-entered; no live vault is read. An educational model of a vault deposit cap, not a live quote. Not financial advice.</p>
+      <p>Tool 99 names <strong>deposit caps</strong> among a share vault's defences, and Tools 130 and 131 price the other two and state caps as not modelled. This prices the cap, in the ERC-4626 pattern's own form: the vault carries a <strong>cap on its total assets</strong> - the ceiling its maxDeposit logic enforces - and because the total is balance-based, a <strong>donation counts toward the cap</strong> exactly like a deposit. After a donation the <strong>headroom</strong> left is <strong>max(cap &#8722; (assets + donation), 0)</strong>; a deposit is <strong>accepted only up to the headroom</strong>, the refused part <strong>never enters the vault</strong> and can never be taken, and the accepted part runs Tool 99's own floored rule - mints <strong>floor(accepted &#215; shares &#247; (assets + donation))</strong> and redeems floored again. The cap changes <strong>how much is exposed, never the price</strong> it is exposed at, and the headline shows both halves: at Tool 99's trap - <strong>1 asset, 1 share, a 999,999 donation and a 500,000 deposit</strong> - a cap of <strong>1,250,000</strong> leaves a headroom of <strong>250,000</strong>, so 250,000 enters, still mints <strong>zero</strong> at a price of <strong>1,000,000</strong> per share, and loses <strong>250,000</strong> instead of 500,000: halved, not fixed, with the refused 250,000 never at risk. A cap at or below the post-donation total of <strong>1,000,000</strong> refuses everything and the loss is <strong>0</strong> - but the same donation has then <strong>frozen every legitimate deposit</strong> until the cap is raised or assets leave: a cap converts theft into a possible deposit freeze, and the attacker pays the donation (which stays with the holders) to cause it. On healthy settings - <strong>1,000 assets, 1,000 shares, a 9,000 donation, a 5,005 deposit</strong> - a cap of <strong>20,000</strong> never binds and the figures are Tool 99's own (<strong>500</strong> minted, <strong>5,001</strong> back, <strong>4</strong> lost), while a cap of <strong>12,003</strong> accepts <strong>2,003</strong>, mints <strong>200</strong>, redeems <strong>2,000</strong> and loses <strong>3</strong> - one less than the uncapped 4 - refusing 3,002. Truncation can even round worse per unit: at 1 asset and 1 share with a <strong>22</strong> donation, a <strong>494,017</strong> deposit and a cap of <strong>931</strong>, the accepted <strong>908</strong> mints 39 and redeems 907 for a loss of <strong>1</strong> where the whole deposit uncapped loses <strong>0</strong> - the cap bounds the <strong>total</strong> that can be taken (a loss can never exceed the accepted amount), not the rate. Accepting a deposit whole needs a cap of at least <strong>assets + donation + deposit</strong> - 1,500,000 at the trap. The model fills to the cap, the amount maxDeposit would still take; a program that reverts an over-cap deposit whole instead refuses all of it, which protects the depositor at least as much. Per-user caps are not modelled; caps denominated in shares are Tool 133; the vault totals, donation, deposit and cap are entered directly. Amounts are user-entered; no live vault is read. An educational model of a vault deposit cap, not a live quote. Not financial advice.</p>
       <form id="dcap-calc">
         <div class="grid">
           <div>
@@ -5882,6 +5937,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=130"></script>
+<script src="app.js?v=131"></script>
 </body>
 </html>
