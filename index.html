@@ -26,13 +26,68 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <div class="tool-finder">
-      <label for="tool-search">Find a tool — search all 129 educational models by name or mechanic</label>
+      <label for="tool-search">Find a tool — search all 130 educational models by name or mechanic</label>
       <div class="finder-row">
         <input id="tool-search" type="search" maxlength="80" placeholder="Try rent, oracle, staking, bridge…" autocomplete="off">
         <button id="tool-search-clear" type="button">Show all</button>
       </div>
-      <p id="tool-search-status" class="finder-status" aria-live="polite">Showing all 129 tools.</p>
+      <p id="tool-search-status" class="finder-status" aria-live="polite">Showing all 130 tools.</p>
     </div>
+    <article class="card">
+      <h3>130. Vault virtual-offset defence planner - the phantom shares that blunt the first-depositor trap</h3>
+      <p>Tool 99 prices a share vault's undefended rule and states its defences as not modelled. This prices the standard one - the <strong>virtual offset</strong> of the ERC-4626 pattern, in the form OpenZeppelin's implementation runs it: both conversions are computed against <strong>phantom totals</strong>, <strong>virtual shares V = 10<sup>offset</sup></strong> added to the share side and exactly <strong>1 virtual asset</strong> added to the asset side, so a deposit mints <strong>floor(deposit &#215; (shares + V) &#247; (assets + 1))</strong> and a redemption returns <strong>floor(shares &#215; (assets + 1) &#247; (shares outstanding + V))</strong>, each floored at the smallest unit. A donation still lands in the real assets and mints nothing - but it now inflates a price measured against shares + V, so its leverage over the next depositor is <strong>divided by the phantom share count</strong>, and the slice of every donation the phantom shares own can <strong>never be redeemed by anyone</strong>. At Tool 99's trap settings - <strong>1 asset, 1 share, a 999,999 donation and a 500,000 deposit</strong> - an offset of <strong>6</strong> (V = <strong>1,000,000</strong>) holds the effective price per share at exactly <strong>1</strong>: the deposit mints <strong>500,000 shares</strong> and redeeming them returns <strong>500,000</strong>, a loss of <strong>0</strong>, where the undefended rule mints <strong>zero</strong> and keeps everything. The offset is not magic, and this model says so: at an offset of <strong>0</strong> - a single virtual share - the same trap still mints <strong>zero</strong> and loses all 500,000, and on Tool 99's healthy headline (1,000 assets, 1,000 shares, a 9,000 donation, a 5,005 deposit) offset 0 redeems <strong>4,998</strong> for a loss of <strong>7</strong> against the undefended <strong>4</strong> - the phantom totals tax ordinary rounding a little - while offset 6 mints <strong>500,950</strong> shares, redeems <strong>5,004</strong> and loses only <strong>1</strong>. An empty vault prices at <strong>1 &#247; V</strong> per share: a first deposit of <strong>1,000</strong> at offset 6 mints <strong>1,000,000,000</strong> shares and redeems its 1,000 back in full, and a <strong>5,000</strong> donation made into an empty vault is mostly captured by the phantom shares - a following 1,000 deposit redeems <strong>999</strong> of it back, not the whole <strong>6,000</strong> the undefended rule hands the first depositor. At dust scale the defence rescues nothing: a <strong>1-unit</strong> deposit at the trap settings with no donation mints 500,000 shares whose redemption floors to <strong>0</strong>, and the unit is still lost. Locked seed deposits and deposit caps - the other defences Tool 99 names - are not modelled; the offset is entered directly. Amounts are user-entered; no live vault is read. An educational model of a vault virtual-offset defence, not a live quote. Not financial advice.</p>
+      <form id="vdef-calc">
+        <div class="grid">
+          <div>
+            <label for="vdef-assets">Assets the vault holds now (raw smallest units)</label>
+            <input id="vdef-assets" name="vdef-assets" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label for="vdef-shares">Shares outstanding now (raw smallest units)</label>
+            <input id="vdef-shares" name="vdef-shares" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label for="vdef-donation">Donation transferred in first - assets in, no shares minted (raw units)</label>
+            <input id="vdef-donation" name="vdef-donation" inputmode="numeric" value="999999">
+          </div>
+          <div>
+            <label for="vdef-deposit">Your deposit after the donation (raw smallest units)</label>
+            <input id="vdef-deposit" name="vdef-deposit" inputmode="numeric" value="500000">
+          </div>
+          <div>
+            <label for="vdef-offset">Decimals offset - virtual shares are 10 to this power (whole, 0-18)</label>
+            <input id="vdef-offset" name="vdef-offset" inputmode="numeric" value="6">
+          </div>
+          <div>
+            <label for="vdef-virt-out">Virtual shares the offset adds</label>
+            <input id="vdef-virt-out" name="vdef-virt-out" readonly>
+          </div>
+          <div>
+            <label for="vdef-price-out">Effective price per share after the donation</label>
+            <input id="vdef-price-out" name="vdef-price-out" readonly>
+          </div>
+          <div>
+            <label for="vdef-minted-out">Shares your deposit mints (defended)</label>
+            <input id="vdef-minted-out" name="vdef-minted-out" readonly>
+          </div>
+          <div>
+            <label for="vdef-redeem-out">What redeeming those shares at once returns</label>
+            <input id="vdef-redeem-out" name="vdef-redeem-out" readonly>
+          </div>
+          <div>
+            <label for="vdef-loss-out">Your rounding loss to the vault</label>
+            <input id="vdef-loss-out" name="vdef-loss-out" readonly>
+          </div>
+          <div>
+            <label for="vdef-undef-out">The same deposit under the undefended rule (Tool 99)</label>
+            <input id="vdef-undef-out" name="vdef-undef-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Price the defended deposit</button>
+        <p id="vdef-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+
     <article class="card">
       <h3>129. DLMM composition fee planner - the imbalanced part of a deposit pays like a swap, but floored</h3>
       <p>Tool 123 prices a DLMM swap's fee and states the composition fee as not modelled. This prices it, in the program's own <strong>compute_composition_fee</strong>. Adding liquidity into a DLMM pool's <strong>active bin</strong> is meant to match the bin's current token ratio; the part of a deposit that does not fit that ratio - the <strong>imbalanced amount</strong>, or delta - has economically <strong>swapped against the bin's own inventory</strong>, so the program charges it a fee at the pool's <strong>total fee rate</strong> (Tool 123's base plus variable rate, in billionths at a precision of <strong>1,000,000,000</strong>, capped at <strong>100,000,000</strong>): composition fee = <strong>floor(delta &#215; total rate &#215; (1,000,000,000 + total rate) &#247; 1,000,000,000<sup>2</sup>)</strong>. Two choices in that formula are the lesson. The fee is <strong>grossed up by (1 + rate)</strong> rather than divided by (precision &#8722; rate) the way Tool 123's swap fee is, and it is <strong>floored</strong> at the smallest unit where the swap fee is ceilinged - so a composition fee <strong>never exceeds</strong> the equivalent swap fee on the same amount at the same rate, and at dust scale it can <strong>vanish entirely</strong>. At the headline settings - Tool 123's pool (a <strong>25</strong> bps bin step, a base factor of <strong>4,000</strong>, an accumulator of <strong>100,000</strong> and a control of <strong>4,000</strong>, for a total rate of <strong>1,250,000 (12.5 bps)</strong>) - an imbalance of <strong>2,000</strong> pays a composition fee of <strong>2.503125</strong> (<strong>12 bps</strong> of the imbalance, floored), so <strong>1,997.496875</strong> of it lands in the bin, while swapping the same 2,000 on top would pay <strong>2.503128912</strong> - a shortfall of <strong>0.000003912</strong> the floored formula leaves uncharged. At the program's capped <strong>10%</strong> rate the same imbalance pays exactly <strong>220</strong> (<strong>1,100 bps</strong> of it - the rate times one plus the rate) against a swap fee of <strong>222.222222223</strong>. The floor is the story at dust scale: a <strong>one-smallest-unit</strong> imbalance at the headline rate pays <strong>nothing at all</strong>, where the equivalent swap still charges its ceilinged full unit. A <strong>balanced</strong> deposit - an imbalance of zero - pays no composition fee at any rate, and a pool whose total rate is zero charges nothing. The deposit's split into the part that fits the bin's ratio and the imbalance (which follows the bin's live inventory and price), deposits into non-active bins, the fee's split between the protocol and the bin's providers, and the accumulator's decay over time are not modelled; the imbalanced amount is entered directly. Pool parameters and the amount are user-entered; no live pool is read. An educational model of a DLMM composition fee, not a live quote. Not financial advice.</p>
@@ -1532,7 +1587,7 @@
     </article>
     <article class="card">
       <h3>99. Vault share planner - donations, rounding and the first-depositor trap</h3>
-      <p>Every share vault on Solana - the lending and yield vaults in the ERC-4626 pattern - prices its shares off two totals: the <strong>assets</strong> it holds and the <strong>shares</strong> outstanding. A deposit mints <strong>deposit &#215; shares &#247; assets</strong>, floored at the smallest unit, and redeeming returns the same proportion floored again, so the rounding dust always stays with the existing holders. A plain transfer into the vault - a <strong>donation</strong> - raises the assets <strong>without minting a single share</strong>, lifting the price of every existing share. That is the whole first-depositor trap: hold the vault's only share, donate a fortune, and the next depositor's mint can floor to <strong>zero shares</strong> - their deposit stays in the vault, owned by the sole holder. The amounts here are <strong>raw smallest units</strong>, the integers a program actually divides, because the trap lives at that granularity. At the headline settings - a vault holding <strong>1,000 assets against 1,000 shares</strong>, a <strong>donation of 9,000</strong> and your <strong>deposit of 5,005</strong> - the donation lifts the price per share from 1 to <strong>10</strong>, your deposit mints <strong>500 shares</strong>, and redeeming them at once returns <strong>5,001</strong>: a loss of <strong>4 raw units</strong> (7 bps) that the flooring, not the donation, took - a deposit of exactly 5,000 would have lost nothing. Set the vault to 1 asset and 1 share with a 999,999 donation and a 500,000 deposit mints zero shares and loses everything. Real vaults defend themselves with locked seed deposits, virtual share offsets and deposit caps; those defences are not modelled - this tool prices the undefended rule so the trap is visible. An educational model of vault share pricing, not a live quote. Not financial advice.</p>
+      <p>Every share vault on Solana - the lending and yield vaults in the ERC-4626 pattern - prices its shares off two totals: the <strong>assets</strong> it holds and the <strong>shares</strong> outstanding. A deposit mints <strong>deposit &#215; shares &#247; assets</strong>, floored at the smallest unit, and redeeming returns the same proportion floored again, so the rounding dust always stays with the existing holders. A plain transfer into the vault - a <strong>donation</strong> - raises the assets <strong>without minting a single share</strong>, lifting the price of every existing share. That is the whole first-depositor trap: hold the vault's only share, donate a fortune, and the next depositor's mint can floor to <strong>zero shares</strong> - their deposit stays in the vault, owned by the sole holder. The amounts here are <strong>raw smallest units</strong>, the integers a program actually divides, because the trap lives at that granularity. At the headline settings - a vault holding <strong>1,000 assets against 1,000 shares</strong>, a <strong>donation of 9,000</strong> and your <strong>deposit of 5,005</strong> - the donation lifts the price per share from 1 to <strong>10</strong>, your deposit mints <strong>500 shares</strong>, and redeeming them at once returns <strong>5,001</strong>: a loss of <strong>4 raw units</strong> (7 bps) that the flooring, not the donation, took - a deposit of exactly 5,000 would have lost nothing. Set the vault to 1 asset and 1 share with a 999,999 donation and a 500,000 deposit mints zero shares and loses everything. Real vaults defend themselves with locked seed deposits, virtual share offsets and deposit caps; the virtual-offset defence is Tool 130 - this tool prices the undefended rule so the trap is visible, and locked seed deposits and deposit caps remain unmodelled. An educational model of vault share pricing, not a live quote. Not financial advice.</p>
       <form id="vault-calc">
         <div class="grid">
           <div>
@@ -5725,6 +5780,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=127"></script>
+<script src="app.js?v=128"></script>
 </body>
 </html>

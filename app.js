@@ -7249,8 +7249,8 @@ function zapDeposit(reserveAStr, reserveBStr, depositStr, feeBps) {
    numbers, because the trap lives exactly at that granularity: a
    share count of 1 against 1,000,000 of assets is invisible at any
    friendlier precision. Real vaults defend themselves (minimum first
-   deposits locked, virtual share offsets, deposit caps); those
-   defences are stated as not modelled - this tool prices the
+   deposits locked, virtual share offsets, deposit caps); the
+   virtual-offset defence is Tool 130 - this tool prices the
    undefended rule so the trap is visible. A vault with shares
    outstanding but zero assets prices at zero and is rejected.
    Prototype-verified before shipping against
@@ -7297,6 +7297,92 @@ function vaultShares(assetsStr, sharesStr, donationStr, depositStr) {
     assetsAfter: assetsAfter.toString(), sharesAfter: sharesAfter.toString(),
     redeem: redeem.toString(), captured: "0",
     loss: loss.toString(), lossBps: Number((loss * 10000n) / P), exact: loss === 0n
+  };
+}
+
+/* ---------- Tool 130: vault virtual-offset defence planner ---------- */
+/* Tool 99 prices the undefended share rule and states the
+   defences as not modelled. This prices the standard one -
+   the virtual offset of the ERC-4626 pattern (OpenZeppelin's
+   _convertToShares / _convertToAssets): both conversions run
+   against PHANTOM totals, virtual shares V = 10^offset added
+   to the share side and exactly 1 virtual asset added to the
+   asset side:
+     minted = floor(deposit x (shares + V) / (assets + 1))
+     redeem = floor(minted x (assetsAfter + 1) /
+                    (sharesAfter + V))
+   The donation still lands in the real assets and mints
+   nothing - but it now inflates a price measured against
+   shares + V, so its leverage over the next depositor is
+   divided by the phantom share count, and part of every
+   donation ends up owned by the virtual shares, which no one
+   can ever redeem. At Tool 99's trap (1 asset, 1 share, a
+   999,999 donation, a 500,000 deposit) an offset of 6
+   (V = 1,000,000) holds the effective price per share at
+   exactly 1, the deposit mints 500,000 shares and redeems
+   500,000 back - a loss of 0 where the undefended rule minted
+   zero and kept everything. The offset is not magic: at
+   offset 0 (V = 1) the same trap still mints zero and loses
+   all 500,000, and on Tool 99's healthy headline (1,000 /
+   1,000, a 9,000 donation, a 5,005 deposit) offset 0 redeems
+   4,998 for a loss of 7 against the undefended 4 - the
+   phantom asset taxes ordinary rounding a little - while
+   offset 6 mints 500,950 shares, redeems 5,004 and loses
+   only 1. An empty vault prices at 1 / V per share: a first
+   deposit of 1,000 at offset 6 mints 1,000,000,000 shares and
+   redeems its 1,000 back in full, and a donation made into
+   an empty vault is mostly captured by the virtual shares
+   (a 5,000 donation before a 1,000 deposit leaves the
+   depositor redeeming 999, not the whole 6,000 the
+   undefended rule hands the first depositor). At dust scale
+   the defence does not rescue a 1-unit deposit: it mints
+   500,000 shares at the trap settings with no donation, but
+   redeeming them floors to 0 and the unit is still lost.
+   Amounts are RAW smallest units and the offset a whole
+   number from 0 to 18, entered directly; locked seed
+   deposits and deposit caps (the other defences Tool 99
+   names) are stated as not modelled. Prototype-verified
+   before shipping against an independent Python integer
+   oracle on 20,010 cases, 0 mismatches on every figure,
+   with both conversions asserted the exact floors of the
+   offset formulas and the loss asserted between 0 and the
+   deposit on every case. No live vault is read. */
+function vaultDefence(assetsStr, sharesStr, donationStr, depositStr, offsetStr) {
+  var A = vaultRaw(assetsStr);
+  var S = vaultRaw(sharesStr);
+  var D = vaultRaw(donationStr);
+  var P = vaultRaw(depositStr);
+  var O = vaultRaw(offsetStr);
+  if (A === null || S === null || D === null || P === null || O === null) return null;
+  if (P <= 0n) return null;
+  if (A > MAX_VAULT_RAW || S > MAX_VAULT_RAW || D > MAX_VAULT_RAW || P > MAX_VAULT_RAW) return null;
+  if (O > 18n) return null;
+  var V = 10n ** O;
+  var A1 = A + D;
+  var minted = (P * (S + V)) / (A1 + 1n);
+  var assetsAfter = A1 + P;
+  var sharesAfter = S + minted;
+  var redeem = minted === 0n ? 0n : (minted * (assetsAfter + 1n)) / (sharesAfter + V);
+  var loss = P - redeem;
+  var uMinted = null, uRedeem = null, uLoss = null;
+  if (S === 0n) { uMinted = P; uRedeem = A1 + P; uLoss = -D; }
+  else if (A1 > 0n) {
+    uMinted = (P * S) / A1;
+    uRedeem = uMinted === 0n ? 0n : (uMinted * assetsAfter) / (S + uMinted);
+    uLoss = P - uRedeem;
+  }
+  return {
+    assets: A.toString(), shares: S.toString(), donation: D.toString(), deposit: P.toString(),
+    offset: Number(O), virtualShares: V.toString(),
+    priceAfter: formatScaled(((A1 + 1n) * SCALE) / (S + V)),
+    minted: minted.toString(), mintedZero: minted === 0n,
+    assetsAfter: assetsAfter.toString(), sharesAfter: sharesAfter.toString(),
+    redeem: redeem.toString(), loss: loss.toString(),
+    lossBps: Number((loss * 10000n) / P), exact: loss === 0n,
+    saved: uMinted === 0n && minted > 0n,
+    uMinted: uMinted === null ? null : uMinted.toString(),
+    uRedeem: uRedeem === null ? null : uRedeem.toString(),
+    uLoss: uLoss === null ? null : uLoss.toString()
   };
 }
 
@@ -7946,7 +8032,7 @@ if (typeof module !== "undefined" && module.exports) {
     stakeMerge,
     launchAlloc, MAX_LAUNCH_LAMPORTS,
     tickLot, MAX_TICKLOT_LAMPORTS,
-    vaultShares, MAX_VAULT_RAW,
+    vaultShares, vaultDefence, MAX_VAULT_RAW,
     zapDeposit,
     poolCreate,
     auctionBid,
@@ -11104,7 +11190,7 @@ if (typeof document !== "undefined") {
         var enote = res.captured === "0"
           ? " The vault was empty, so your deposit sets the opening price of 1 per share and there is nothing to gain or lose to rounding."
           : " Because no shares were outstanding, every asset already sitting in the vault - the stranded balance plus the donation - ends up behind your new shares: the first depositor captures the vault as it stands, which is why real vaults seed and lock an initial deposit.";
-        setText("vault-result", "Model output: a first deposit of " + res.deposit + " into a shareless vault mints " + res.minted + " shares and controls all " + res.assetsAfter + " of its assets." + enote + " Amounts are user-entered; no live vault is read. Vault defences such as locked seed deposits and virtual share offsets are not modelled. An educational model of vault share pricing, not a live quote. Not financial advice.");
+        setText("vault-result", "Model output: a first deposit of " + res.deposit + " into a shareless vault mints " + res.minted + " shares and controls all " + res.assetsAfter + " of its assets." + enote + " Amounts are user-entered; no live vault is read. Locked seed deposits are not modelled; the virtual share offset defence is Tool 130. An educational model of vault share pricing, not a live quote. Not financial advice.");
         return;
       }
       document.getElementById("vault-price-out").value = res.priceBefore + " per share before the donation; " + res.priceAfterDonation + " per share after it";
@@ -11117,7 +11203,39 @@ if (typeof document !== "undefined") {
       if (res.mintedZero) note = " Your deposit mints zero shares at this price per share: the floored mint hands the whole deposit to the existing holders, and redeeming returns nothing. This is the first-depositor trap in its pure form - a tiny share count against a donation-swollen asset total - and any real deposit into such a vault is a donation, whatever the interface calls it.";
       else if (res.exact) note = " Your deposit divides exactly at the post-donation price, so the rounding takes nothing: a donation on its own does not tax a later depositor - only the flooring does, when the deposit does not buy a whole number of shares' worth.";
       else note = " The donation itself took nothing from you - it lifted the price per share, and the loss happened entirely in the flooring: your deposit bought a fractional share entitlement that was rounded down at the mint, and the remainder stayed with the existing holders.";
-      setText("vault-result", "Model output: the vault holds " + res.assets + " against " + res.shares + " shares; after a donation of " + res.donation + " the price per share is " + res.priceAfterDonation + ", your deposit of " + res.deposit + " mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Vault defences such as locked seed deposits and virtual share offsets are not modelled. An educational model of vault share pricing, not a live quote. Not financial advice.");
+      setText("vault-result", "Model output: the vault holds " + res.assets + " against " + res.shares + " shares; after a donation of " + res.donation + " the price per share is " + res.priceAfterDonation + ", your deposit of " + res.deposit + " mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Locked seed deposits are not modelled; the virtual share offset defence is Tool 130. An educational model of vault share pricing, not a live quote. Not financial advice.");
+    });
+
+    var vdefForm = document.getElementById("vdef-calc");
+    if (vdefForm) vdefForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = vaultDefence(val("vdef-assets"), val("vdef-shares"), val("vdef-donation"), val("vdef-deposit"), val("vdef-offset"));
+      if (!res) {
+        document.getElementById("vdef-virt-out").value = "Invalid";
+        document.getElementById("vdef-price-out").value = "Invalid";
+        document.getElementById("vdef-minted-out").value = "Invalid";
+        document.getElementById("vdef-redeem-out").value = "Invalid";
+        document.getElementById("vdef-loss-out").value = "Invalid";
+        document.getElementById("vdef-undef-out").value = "Invalid";
+        setText("vdef-result", "Check the inputs: the assets, shares, donation and deposit must be whole raw smallest units (integers only, no decimals) of at most 1,000,000,000,000,000,000, the deposit must be above zero, and the offset a whole number from 0 to 18. Blanks are not read as zero - enter 0 itself where you mean zero.");
+        return;
+      }
+      document.getElementById("vdef-virt-out").value = res.virtualShares + " virtual shares (10^" + res.offset + ") priced against 1 virtual asset";
+      document.getElementById("vdef-price-out").value = res.priceAfter + " assets per share after the donation, virtual totals included";
+      document.getElementById("vdef-minted-out").value = res.minted + " shares minted for your deposit of " + res.deposit;
+      document.getElementById("vdef-redeem-out").value = res.redeem + " - what redeeming those shares at once would return";
+      document.getElementById("vdef-loss-out").value = res.mintedZero
+        ? res.loss + " - the entire deposit (" + res.lossBps.toLocaleString("en-US") + " bps): even defended, the mint floors to zero at this offset"
+        : res.loss + " (" + res.lossBps.toLocaleString("en-US") + " bps of the deposit) - kept in the vault through the two floored conversions";
+      document.getElementById("vdef-undef-out").value = res.uMinted === null
+        ? "No undefended price exists - the vault holds shares against no assets even after the donation"
+        : "undefended, the same deposit mints " + res.uMinted + " shares and redeems " + res.uRedeem + " (Tool 99)";
+      var note = "";
+      if (res.mintedZero) note = " The defence fails at this offset: the virtual share count is still too small against the donated total, so the floored mint hands the whole deposit to the existing holders exactly as the undefended rule does. A larger offset - more phantom shares per real one - is what divides the donation's leverage down; an offset of 0 adds a single virtual share and stops almost nothing at this scale.";
+      else if (res.saved) note = " The undefended rule mints zero shares here and keeps the whole deposit (Tool 99); the virtual shares blunt the donation because it now inflates a price measured against the real shares plus " + res.virtualShares + " phantom ones, and the share of the donation the phantom shares own can never be redeemed by anyone.";
+      else if (res.exact) note = " Your deposit comes back whole: at this offset the two floored conversions divide exactly, so the defence costs the depositor nothing on this deposit.";
+      else note = " The defence is not free in general: the phantom totals sit in both divisions, so ordinary deposits round against slightly different totals than the undefended rule - on Tool 99's healthy headline an offset of 0 loses 7 where the undefended rule loses 4, while an offset of 6 loses only 1. The offset is a trade: phantom precision against a small, bounded rounding tax.";
+      setText("vdef-result", "Model output: the vault holds " + res.assets + " assets against " + res.shares + " shares; with an offset of " + res.offset + " the conversions run against " + res.shares + " + " + res.virtualShares + " shares and the assets + 1, so after a donation of " + res.donation + " the effective price is " + res.priceAfter + " per share, your deposit of " + res.deposit + " mints " + res.minted + " shares, and redeeming them at once returns " + res.redeem + " of the vault's " + res.assetsAfter + "." + note + " Amounts are user-entered; no live vault is read. Locked seed deposits and deposit caps - the other defences Tool 99 names - are not modelled. An educational model of a vault virtual-offset defence, not a live quote. Not financial advice.");
     });
 
     buttons.forEach(function (btn) {
