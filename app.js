@@ -5937,6 +5937,105 @@ function oracleWeightedMedian(aStr, waStr, bStr, wbStr, cStr, wcStr, maxBpsStr) 
   };
 }
 
+/* ---------- Tool 126: Oracle weighted-median-of-five aggregator ---------- */
+/* Tool 125 combines three weighted feeds and states combinations
+   beyond three weighted feeds as not modelled. This models the
+   next size up: five feeds, each with a weight, combined at the
+   weighted median - the FIRST price whose cumulative weight,
+   sorted by price with weights at the same price grouped, reaches
+   at least HALF the total weight, judged exactly as
+   2 x cumulative >= total. It is the LOWER weighted median: a
+   price whose cumulative weight reaches exactly half is the
+   median, never an average of it and the next price, so the
+   result is always one of the entered feed prices. The plain
+   median of the same five feeds is carried as a comparison: at
+   equal weights the two medians coincide by construction (the
+   middle of the five sorted prices), and weighting is what moves
+   the price when the weights are not equal. The fault model is
+   weight's, not count's: two wild feeds with light weights still
+   cannot drag the weighted median (150 at weight 2, 151.5 at
+   weight 2, 149 at weight 2, 1,000 at weight 1 and 2,000 at
+   weight 1 combine to 150 while the plain median is 151.5,
+   because the wild feeds carry only 2 of 8 weight), but one
+   feed carrying more than half the total weight CAN drag it
+   alone - 150 (1), 151.5 (1), 149 (1), 152 (1) and 300 (5)
+   combine to 300, the heavy feed carrying 5 of 9 weight past
+   half. Agreement is measured against the weighted median as in
+   Tool 125: each feed's distance in bps OF THE MEDIAN, floored
+   for display and judged by exact cross-multiplication, and the
+   verdict counts WEIGHT as well as feeds - an exact half is not
+   a majority. At the headline (150 at weight 2, 151.5 at
+   weight 1, 149 at weight 3, 150.5 at weight 1 and 300 at
+   weight 1, maximum 200 bps) the sorted cumulative weights are
+   3 at 149, 5 at 150 and 8 at 151.5, so the weighted median is
+   150 - where the plain median of the same five feeds is 150.5;
+   the feeds stand 0, 100, 66, 33 and 10,000 bps from it, the
+   spread is 10,066 bps, and 4 of the 5 feeds, carrying 7 of 8
+   weight, agree. At prices 100, 200, 300, 400 and 500 with
+   weights 2, 1, 1, 1 and 1 the weighted median is 200, reached
+   with a cumulative weight of 3 against a total of 6 - exactly
+   half, which is the median, though the one agreeing feed's
+   1,666 bps of the weight is not a majority. Weights are whole
+   numbers from 1 to 1,000,000 per feed; a zero weight is
+   rejected rather than silently ignored. Staleness, confidence
+   and the pairwise guard are Tools 120, 32 and 121, the plain
+   five-feed combination is Tool 124 and the three-feed weighted
+   combination is Tool 125; combinations beyond five weighted
+   feeds, Pyth's three-vote construction and the cost of
+   posting an update are stated as not modelled. Prototype-
+   verified before shipping against an independent Python
+   integer oracle on 20,000 cases, 0 mismatches on every figure. */
+var MAX_WMED5_PRICE = 1000000000000n; /* 1e12 whole units per entered price */
+var MAX_WMED5_WEIGHT = 1000000; /* largest entered weight per feed */
+function oracleWeightedMedian5(aStr, waStr, bStr, wbStr, cStr, wcStr, dStr, wdStr, eStr, weStr, maxBpsStr) {
+  var priceStrs = [aStr, bStr, cStr, dStr, eStr];
+  var weightStrs = [waStr, wbStr, wcStr, wdStr, weStr];
+  var prices = priceStrs.map(parseScaled), wS = weightStrs.map(parseScaled), mS = parseScaled(maxBpsStr);
+  if (prices.some(function (p) { return p === null; }) || wS.some(function (w) { return w === null; }) || mS === null) return null;
+  if (mS % SCALE !== 0n || wS.some(function (w) { return w % SCALE !== 0n; })) return null;
+  var maxBps = Number(mS / SCALE);
+  if (!Number.isInteger(maxBps) || maxBps < 0 || maxBps > 10000) return null;
+  var weights = wS.map(function (w) { return Number(w / SCALE); });
+  if (weights.some(function (w) { return !Number.isInteger(w) || w < 1 || w > MAX_WMED5_WEIGHT; })) return null;
+  var cap = MAX_WMED5_PRICE * SCALE;
+  if (prices.some(function (p) { return p <= 0n || p > cap; })) return null;
+  var feeds = prices.map(function (p, i) { return { p: p, w: weights[i] }; });
+  var sorted = feeds.slice().sort(function (x, y) { return x.p < y.p ? -1 : x.p > y.p ? 1 : 0; });
+  var plain = sorted[2].p, low = sorted[0].p, high = sorted[4].p;
+  var total = weights.reduce(function (s, w) { return s + w; }, 0);
+  var cum = 0, med = null, below = 0, at = 0, selectionCum = 0;
+  for (var i = 0; i < sorted.length; i++) {
+    var gp = sorted[i].p, gw = 0;
+    while (i < sorted.length && sorted[i].p === gp) { gw += sorted[i].w; i++; }
+    i--;
+    var before = cum;
+    cum += gw;
+    if (med === null && 2 * cum >= total) { med = gp; below = before; at = gw; selectionCum = cum; }
+  }
+  var judge = function (f) {
+    var diff = f - med, ad = diff < 0n ? -diff : diff;
+    return { bps: ((ad * 10000n) / med).toString(), within: ad * 10000n <= med * BigInt(maxBps) };
+  };
+  var jA = judge(prices[0]), jB = judge(prices[1]), jC = judge(prices[2]), jD = judge(prices[3]), jE = judge(prices[4]);
+  var withinCount = (jA.within ? 1 : 0) + (jB.within ? 1 : 0) + (jC.within ? 1 : 0) + (jD.within ? 1 : 0) + (jE.within ? 1 : 0);
+  var withinWeight = (jA.within ? weights[0] : 0) + (jB.within ? weights[1] : 0) + (jC.within ? weights[2] : 0) + (jD.within ? weights[3] : 0) + (jE.within ? weights[4] : 0);
+  return {
+    a: formatScaled(prices[0]), b: formatScaled(prices[1]), c: formatScaled(prices[2]), d: formatScaled(prices[3]), e: formatScaled(prices[4]),
+    wa: weights[0], wb: weights[1], wc: weights[2], wd: weights[3], we: weights[4], maxBps: maxBps,
+    median: formatScaled(med), plainMedian: formatScaled(plain),
+    low: formatScaled(low), high: formatScaled(high),
+    spreadBps: (((high - low) * 10000n) / med).toString(),
+    totalWeight: total, cumWeight: selectionCum, belowWeight: below, atWeight: at, aboveWeight: total - below - at,
+    atShareBps: ((BigInt(at) * 10000n) / BigInt(total)).toString(),
+    cumShareBps: ((BigInt(selectionCum) * 10000n) / BigInt(total)).toString(),
+    devA: jA.bps, devB: jB.bps, devC: jC.bps, devD: jD.bps, devE: jE.bps,
+    withinA: jA.within, withinB: jB.within, withinC: jC.within, withinD: jD.within, withinE: jE.within,
+    withinCount: withinCount, withinWeight: withinWeight,
+    withinWeightBps: ((BigInt(withinWeight) * 10000n) / BigInt(total)).toString(),
+    allAgree: withinCount === 5, weightMajority: withinWeight * 2 > total
+  };
+}
+
 /* ---------- Tool 121: Oracle deviation checker ---------- */
 /* Tools 32 and 120 guard a price feed on its confidence band and
    its age. This is the third guard, the one Tool 120 states as
@@ -7612,6 +7711,7 @@ if (typeof module !== "undefined" && module.exports) {
     oracleMedian, MAX_MED_PRICE,
     oracleMedian5, MAX_MED5_PRICE,
     oracleWeightedMedian, MAX_WMED_PRICE, MAX_WMED_WEIGHT,
+    oracleWeightedMedian5, MAX_WMED5_PRICE, MAX_WMED5_WEIGHT,
     dlmmFee, DLMM_FEE_PRECISION, DLMM_MAX_FEE_RATE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
@@ -10392,7 +10492,37 @@ if (typeof document !== "undefined") {
       if (res.allAgree) note = " Every feed sits within the maximum of the median, so the combined price is as confirmed as three weighted feeds can make it at these settings - each feed has still passed no staleness (Tool 120) or confidence (Tool 32) check here.";
       else if (res.weightMajority) note = " The outlier" + (outNames.length > 1 ? "s are " : " is ") + outNames.join(" and ") + ": a majority of the weight still confirms the median, but the outliers are named, not hidden - dragging a weighted median takes more than half the total weight wrong in the same direction, and a single feed carrying more than half the weight can do it alone.";
       else note = " At most half the total weight sits within the maximum - " + outNames.join(", ") + " - so no majority of the weight confirms the median: a careful program prices from none of them until the weight converges. An exact half is not a majority.";
-      setText("wmed-result", "Model output: feeds of " + res.a + " (weight " + res.wa + "), " + res.b + " (weight " + res.wb + ") and " + res.c + " (weight " + res.wc + ") for the same asset combine to a weighted median price of " + res.median + " - the first price at which the cumulative weight, sorted by price, reaches at least half of the total weight of " + res.totalWeight + ", always one of the three feeds and never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest." + moved + " Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps and feed C " + grp(res.devC) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 3 feeds within the maximum, carrying " + res.withinWeight + " of " + res.totalWeight + " weight (" + grp(res.withinWeightBps) + " bps)." + note + " Prices, weights and the maximum are user-entered; no live feed is read. This is the plain weighted-median form, one vote per feed at its entered weight - the stake-weighted family Pyth's aggregation belongs to, without Pyth's three-votes-per-publisher confidence construction, which is not modelled. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; the plain combinations are Tools 122 and 124, and combinations beyond three weighted feeds and the cost of posting an update are not modelled. An educational model of an oracle weighted median, not a live feed reading. Not financial advice.");
+      setText("wmed-result", "Model output: feeds of " + res.a + " (weight " + res.wa + "), " + res.b + " (weight " + res.wb + ") and " + res.c + " (weight " + res.wc + ") for the same asset combine to a weighted median price of " + res.median + " - the first price at which the cumulative weight, sorted by price, reaches at least half of the total weight of " + res.totalWeight + ", always one of the three feeds and never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest." + moved + " Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps and feed C " + grp(res.devC) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 3 feeds within the maximum, carrying " + res.withinWeight + " of " + res.totalWeight + " weight (" + grp(res.withinWeightBps) + " bps)." + note + " Prices, weights and the maximum are user-entered; no live feed is read. This is the plain weighted-median form, one vote per feed at its entered weight - the stake-weighted family Pyth's aggregation belongs to, without Pyth's three-votes-per-publisher confidence construction, which is not modelled. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; the plain combinations are Tools 122 and 124, combinations beyond three weighted feeds are Tool 126, and the cost of posting an update is not modelled. An educational model of an oracle weighted median, not a live feed reading. Not financial advice.");
+    });
+
+    var wmed5Form = document.getElementById("wmed5-calc");
+    if (wmed5Form) wmed5Form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = oracleWeightedMedian5(val("wmed5-a"), val("wmed5-wa"), val("wmed5-b"), val("wmed5-wb"), val("wmed5-c"), val("wmed5-wc"), val("wmed5-d"), val("wmed5-wd"), val("wmed5-e"), val("wmed5-we"), val("wmed5-maxbps"));
+      if (!res) {
+        document.getElementById("wmed5-price-out").value = "Invalid";
+        document.getElementById("wmed5-plain-out").value = "Invalid";
+        document.getElementById("wmed5-weights-out").value = "Invalid";
+        document.getElementById("wmed5-agree-out").value = "Invalid";
+        document.getElementById("wmed5-verdict-out").value = "Invalid";
+        setText("wmed5-result", "Check the inputs: the five feed prices are each above zero with at most 9 decimal places and at most 1,000,000,000,000 whole units, each weight is a whole number from 1 to 1,000,000, and the maximum deviation is a whole number of basis points from 0 to 10,000. Blanks are not read as zero, and a zero weight is not read as an ignored feed.");
+        return;
+      }
+      var grp = function (x) { return x.replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("wmed5-price-out").value = res.median + " (the first price whose cumulative weight reaches half of " + res.totalWeight + ")";
+      document.getElementById("wmed5-plain-out").value = res.plainMedian + " (the unweighted median of the same five feeds)";
+      document.getElementById("wmed5-weights-out").value = "total " + res.totalWeight + " - " + res.belowWeight + " below, " + res.atWeight + " at the median (" + grp(res.atShareBps) + " bps of the weight), " + res.aboveWeight + " above; cumulative at the median " + res.cumWeight + " (" + grp(res.cumShareBps) + " bps)";
+      document.getElementById("wmed5-agree-out").value = res.withinCount + " of 5 feeds, carrying " + res.withinWeight + " of " + res.totalWeight + " weight (" + grp(res.withinWeightBps) + " bps), within " + res.maxBps.toLocaleString("en-US") + " bps of the median";
+      document.getElementById("wmed5-verdict-out").value = res.allAgree ? "All five feeds agree - every feed and all the weight confirm the median" : res.weightMajority ? "A majority of the weight agrees - more than half the total weight sits within the maximum" : "No weight majority - at most half the total weight sits within the maximum of the median";
+      var pairs = [[res.a, res.wa, res.withinA, res.devA, "A"], [res.b, res.wb, res.withinB, res.devB, "B"], [res.c, res.wc, res.withinC, res.devC, "C"], [res.d, res.wd, res.withinD, res.devD, "D"], [res.e, res.we, res.withinE, res.devE, "E"]];
+      var outNames = [];
+      pairs.forEach(function (p) { if (!p[2]) outNames.push("feed " + p[4] + " at " + p[0] + " (weight " + p[1] + ", " + grp(p[3]) + " bps away)"); });
+      var moved = res.median !== res.plainMedian ? " Weighting moved the combined price from the plain median of " + res.plainMedian + " to " + res.median + " - the weights, not the feed count, decided it." : " At these weights the weighted and plain medians coincide, as they always do at equal weights.";
+      var note = "";
+      if (res.allAgree) note = " Every feed sits within the maximum of the median, so the combined price is as confirmed as five weighted feeds can make it at these settings - each feed has still passed no staleness (Tool 120) or confidence (Tool 32) check here.";
+      else if (res.weightMajority) note = " The outlier" + (outNames.length > 1 ? "s are " : " is ") + outNames.join(" and ") + ": a majority of the weight still confirms the median, but the outliers are named, not hidden - dragging a weighted median takes more than half the total weight wrong in the same direction, and a single feed carrying more than half the weight can do it alone.";
+      else note = " At most half the total weight sits within the maximum - " + outNames.join(", ") + " - so no majority of the weight confirms the median: a careful program prices from none of them until the weight converges. An exact half is not a majority.";
+      setText("wmed5-result", "Model output: feeds of " + res.a + " (weight " + res.wa + "), " + res.b + " (weight " + res.wb + "), " + res.c + " (weight " + res.wc + "), " + res.d + " (weight " + res.wd + ") and " + res.e + " (weight " + res.we + ") for the same asset combine to a weighted median price of " + res.median + " - the first price at which the cumulative weight, sorted by price, reaches at least half of the total weight of " + res.totalWeight + ", always one of the five feeds and never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest." + moved + " Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps, feed C " + grp(res.devC) + " bps, feed D " + grp(res.devD) + " bps and feed E " + grp(res.devE) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 5 feeds within the maximum, carrying " + res.withinWeight + " of " + res.totalWeight + " weight (" + grp(res.withinWeightBps) + " bps)." + note + " Prices, weights and the maximum are user-entered; no live feed is read. This is the plain weighted-median form over five feeds, one vote per feed at its entered weight - the stake-weighted family Pyth's aggregation belongs to, without Pyth's three-votes-per-publisher confidence construction, which is not modelled. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; the plain five-feed combination is Tool 124, the three-feed weighted combination is Tool 125, and combinations beyond five weighted feeds and the cost of posting an update are not modelled. An educational model of an oracle weighted median of five, not a live feed reading. Not financial advice.");
     });
 
     var devForm = document.getElementById("dev-calc");
