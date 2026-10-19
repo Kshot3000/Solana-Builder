@@ -26,8 +26,66 @@
     <p class="lede">I'm Kyle Cox (<a href="https://x.com/kshot9000">@kshot9000</a>) — an independent developer building tools, fixes and guides for Solana and the projects on it: Raydium, Jupiter, Orca, Anchor, Solana Pay and more. This hub collects what I ship: educational tools that teach real Solana mechanics, a catalogue of the ecosystem's core projects, and a getting-started guide for new builders.</p>
     <p class="honesty">Independent builder hub. Not affiliated with the Solana Foundation, Raydium, or any project catalogued here. Every tool on this page is an educational model that runs locally in your browser — not live quotes, not live data, and not financial advice. No wallet connects here and nothing is executed on-chain.</p>
     <article class="card">
+      <h3>125. Oracle weighted-median aggregator - half the weight, not half the feeds</h3>
+      <p>Tools 122 and 124 combine feeds at the plain median and both state weighted medians as not modelled. This models them, in the plain weighted form: each feed carries a <strong>weight</strong> - a stake, a reliability score, a share of the vote - the feeds are sorted by price, weights at the same price are grouped, and the <strong>weighted median</strong> is the <strong>first price whose cumulative weight reaches at least half the total weight</strong>, judged exactly as 2 &#215; cumulative &#8805; total. It is the <strong>lower</strong> weighted median: a price whose cumulative weight reaches exactly half is the median, never an average of it and the next price, so the result is always <strong>one of the entered feed prices</strong>. This is the aggregation family Pyth's white paper describes - a stake-weighted median of publisher votes - simplified to one vote per feed at its entered weight; Pyth's own construction (three votes per publisher, at the price and at price &#177; its confidence interval) is not modelled. Weight changes the fault model: dragging a plain median of three takes two feeds, but dragging a weighted median takes <strong>more than half the total weight</strong> wrong in the same direction, however many feeds that is - one feed carrying <strong>3 of 5</strong> total weight at <strong>300</strong> is the weighted median of feeds 150 (weight 1), 151.5 (weight 1) and 300 (weight 3), while the plain median of the same feeds is 151.5. At equal weights the two medians coincide. Agreement is measured the way Tools 122 and 124 measure it - each feed's distance from the median in bps <strong>of the median</strong>, floored for display and judged by <strong>exact cross-multiplication</strong> - but the verdict counts <strong>weight as well as feeds</strong>: the weight within the maximum, its share of the total, and whether it is strictly more than half. At the headline settings - feeds of <strong>150</strong> at weight <strong>2</strong>, <strong>151.5</strong> at weight <strong>1</strong> and <strong>149</strong> at weight <strong>3</strong>, at a <strong>200</strong> bps maximum - the sorted cumulative weights are 3 at 149, 5 at 150 and 6 at 151.5, so the weighted median is <strong>149</strong> (the heavy low feed reaches half the total weight on its own) where the plain median is <strong>150</strong>; the feeds stand <strong>67</strong>, <strong>167</strong> and <strong>0</strong> bps from it, the spread is <strong>167 bps</strong>, and all three feeds, carrying all 6 weight, agree. An exact half is not a majority: at prices 100, 200 and 300 with weights 2, 1 and 1 the weighted median is 100 - its weight of 2 is exactly half of 4. At dust scale (3, 4 and 5 smallest units at weights 5, 1 and 1) the weighted median is 3 units. A zero weight is rejected rather than silently ignored - a feed the program does not trust at all should not be entered. Staleness is Tool 120, the confidence band is Tool 32, the pairwise check is Tool 121 and the plain combinations are Tools 122 and 124; combinations beyond three weighted feeds, Pyth's three-vote construction and the cost of posting an update are not modelled. Prices, weights and the maximum are user-entered; no live feed is read. An educational model of an oracle weighted median, not a live feed reading. Not financial advice.</p>
+      <form id="wmed-calc">
+        <div class="grid">
+          <div>
+            <label for="wmed-a">Feed A price (units, model)</label>
+            <input id="wmed-a" name="wmed-a" inputmode="decimal" value="150">
+          </div>
+          <div>
+            <label for="wmed-wa">Feed A weight (whole, 1-1000000)</label>
+            <input id="wmed-wa" name="wmed-wa" inputmode="numeric" value="2">
+          </div>
+          <div>
+            <label for="wmed-b">Feed B price (units, model)</label>
+            <input id="wmed-b" name="wmed-b" inputmode="decimal" value="151.5">
+          </div>
+          <div>
+            <label for="wmed-wb">Feed B weight (whole, 1-1000000)</label>
+            <input id="wmed-wb" name="wmed-wb" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label for="wmed-c">Feed C price (units, model)</label>
+            <input id="wmed-c" name="wmed-c" inputmode="decimal" value="149">
+          </div>
+          <div>
+            <label for="wmed-wc">Feed C weight (whole, 1-1000000)</label>
+            <input id="wmed-wc" name="wmed-wc" inputmode="numeric" value="3">
+          </div>
+          <div>
+            <label for="wmed-maxbps">Maximum deviation (bps of the median, model)</label>
+            <input id="wmed-maxbps" name="wmed-maxbps" inputmode="numeric" value="200">
+          </div>
+          <div>
+            <label for="wmed-price-out">Weighted median price (the combined price)</label>
+            <input id="wmed-price-out" name="wmed-price-out" readonly>
+          </div>
+          <div>
+            <label for="wmed-plain-out">Plain median, for comparison</label>
+            <input id="wmed-plain-out" name="wmed-plain-out" readonly>
+          </div>
+          <div>
+            <label for="wmed-weights-out">Weight below, at and above the median</label>
+            <input id="wmed-weights-out" name="wmed-weights-out" readonly>
+          </div>
+          <div>
+            <label for="wmed-agree-out">Agreement with the median, by feed and by weight</label>
+            <input id="wmed-agree-out" name="wmed-agree-out" readonly>
+          </div>
+          <div>
+            <label for="wmed-verdict-out">Verdict at the maximum</label>
+            <input id="wmed-verdict-out" name="wmed-verdict-out" readonly>
+          </div>
+        </div>
+        <button type="submit">Combine the three feeds at the weighted median</button>
+        <p id="wmed-result" class="result" aria-live="polite"></p>
+      </form>
+    </article>
+    <article class="card">
       <h3>124. Oracle median-of-five aggregator - two wild feeds still cannot drag the price</h3>
-      <p>Tool 122 combines three feeds at the median and states combinations beyond three feeds as not modelled. This is the next size up: a program that reads <strong>five independent feeds</strong> for the same asset takes the <strong>median</strong> - the third value once the five are sorted - as its price. The median is always <strong>one of the five feeds</strong>, never an average: with feeds of <strong>150</strong>, <strong>151.5</strong>, <strong>149</strong>, <strong>150.5</strong> and <strong>300</strong> the median is <strong>150.5</strong>, where a mean would read 180.2. The extra feeds buy <strong>fault tolerance</strong>, not precision: <strong>two</strong> feeds can be arbitrarily wrong in the same direction and the median still cannot pass the nearer honest feed - feeds of 150, 151.5, 149, 1,000 and 2,000 still combine to 151.5 - because dragging the middle of five takes <strong>three</strong> feeds wrong in the same direction (150, 300, 310, 320 and 149 combine to 300, and that is the rule's stated limit). Agreement is measured the way Tool 122 measures it: each feed's distance from the median in bps <strong>of the median</strong>, floored for display and judged by <strong>exact cross-multiplication</strong> against a maximum the program sets. At the headline settings - feeds of <strong>150</strong>, <strong>151.5</strong>, <strong>149</strong>, <strong>150.5</strong> and <strong>300</strong> at a <strong>200</strong> bps maximum - the median is <strong>150.5</strong>, the feeds stand <strong>33</strong>, <strong>66</strong>, <strong>99</strong>, <strong>0</strong> and <strong>9,933</strong> bps from it, the spread from lowest to highest is <strong>10,033 bps</strong>, and <strong>4 of 5</strong> agree. At dust scale (feeds of 3, 4, 3, 5 and 3 smallest units) the median is 3 units, quoted by three of the five feeds; at feeds of 100, 200, 1,000, 2,000 and 3,000 the median of 1,000 stands <strong>alone</strong> within the maximum, with no majority confirming it. Staleness is Tool 120, the confidence band is Tool 32, the pairwise check is Tool 121 and the three-feed combination is Tool 122; combinations beyond five feeds, weighted medians and the cost of posting an update are not modelled. Prices and the maximum are user-entered; no live feed is read. An educational model of an oracle median of five, not a live feed reading. Not financial advice.</p>
+      <p>Tool 122 combines three feeds at the median and states combinations beyond three feeds as not modelled. This is the next size up: a program that reads <strong>five independent feeds</strong> for the same asset takes the <strong>median</strong> - the third value once the five are sorted - as its price. The median is always <strong>one of the five feeds</strong>, never an average: with feeds of <strong>150</strong>, <strong>151.5</strong>, <strong>149</strong>, <strong>150.5</strong> and <strong>300</strong> the median is <strong>150.5</strong>, where a mean would read 180.2. The extra feeds buy <strong>fault tolerance</strong>, not precision: <strong>two</strong> feeds can be arbitrarily wrong in the same direction and the median still cannot pass the nearer honest feed - feeds of 150, 151.5, 149, 1,000 and 2,000 still combine to 151.5 - because dragging the middle of five takes <strong>three</strong> feeds wrong in the same direction (150, 300, 310, 320 and 149 combine to 300, and that is the rule's stated limit). Agreement is measured the way Tool 122 measures it: each feed's distance from the median in bps <strong>of the median</strong>, floored for display and judged by <strong>exact cross-multiplication</strong> against a maximum the program sets. At the headline settings - feeds of <strong>150</strong>, <strong>151.5</strong>, <strong>149</strong>, <strong>150.5</strong> and <strong>300</strong> at a <strong>200</strong> bps maximum - the median is <strong>150.5</strong>, the feeds stand <strong>33</strong>, <strong>66</strong>, <strong>99</strong>, <strong>0</strong> and <strong>9,933</strong> bps from it, the spread from lowest to highest is <strong>10,033 bps</strong>, and <strong>4 of 5</strong> agree. At dust scale (feeds of 3, 4, 3, 5 and 3 smallest units) the median is 3 units, quoted by three of the five feeds; at feeds of 100, 200, 1,000, 2,000 and 3,000 the median of 1,000 stands <strong>alone</strong> within the maximum, with no majority confirming it. Staleness is Tool 120, the confidence band is Tool 32, the pairwise check is Tool 121 and the three-feed combination is Tool 122; combinations beyond five feeds, weighted medians are Tool 125, and the cost of posting an update is not modelled. Prices and the maximum are user-entered; no live feed is read. An educational model of an oracle median of five, not a live feed reading. Not financial advice.</p>
       <form id="med5-calc">
         <div class="grid">
           <div>
@@ -143,7 +201,7 @@
     </article>
     <article class="card">
       <h3>122. Oracle median-of-three aggregator - the middle of three feeds is the price</h3>
-      <p>Tools 32, 120 and 121 guard a single price, or a pair of feeds. This is the combination Tool 121 states as not modelled: a program that reads <strong>three independent feeds</strong> for the same asset takes the <strong>median</strong> - the middle value once the three are sorted - as its price. The median is always <strong>one of the three feeds</strong>, never an average: with feeds of <strong>150</strong>, <strong>151.5</strong> and <strong>300</strong> the median is <strong>151.5</strong>, where a mean would read 200.5. One feed can be arbitrarily wrong - stuck, manipulated, fat-fingered - and the median still cannot pass the <strong>nearer of the other two</strong>; two feeds wrong in the same direction still drag it, and that is the rule's stated limit. Agreement is measured the way Tool 121 measures a pair: each feed's distance from the median in bps <strong>of the median</strong>, floored for display and judged by <strong>exact cross-multiplication</strong> against a maximum the program sets. At the headline settings - feeds of <strong>150</strong>, <strong>151.5</strong> and <strong>149</strong> at a <strong>200</strong> bps maximum - the median is <strong>150</strong>, the feeds stand <strong>0</strong>, <strong>100</strong> and <strong>66</strong> bps from it, the spread from lowest to highest is <strong>166 bps</strong>, and all three agree. Feed the headline a wild third feed instead (150, 151.5, 300) and the median barely moves, to 151.5, while the wild feed stands <strong>9,801 bps</strong> away and is named the outlier; at feeds of 100, 200 and 1,000 the median of 200 stands <strong>alone</strong> - no second feed within the maximum - and a careful program prices from none of them until two converge. At dust scale (feeds of 3, 4 and 3 smallest units) the median is 3 units, quoted by two of the three feeds, and the 4-unit feed deviates by 3,333 bps. Staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; combinations beyond three feeds are Tool 124, and weighted medians and the cost of posting an update are not modelled. Prices and the maximum are user-entered; no live feed is read. An educational model of an oracle median, not a live feed reading. Not financial advice.</p>
+      <p>Tools 32, 120 and 121 guard a single price, or a pair of feeds. This is the combination Tool 121 states as not modelled: a program that reads <strong>three independent feeds</strong> for the same asset takes the <strong>median</strong> - the middle value once the three are sorted - as its price. The median is always <strong>one of the three feeds</strong>, never an average: with feeds of <strong>150</strong>, <strong>151.5</strong> and <strong>300</strong> the median is <strong>151.5</strong>, where a mean would read 200.5. One feed can be arbitrarily wrong - stuck, manipulated, fat-fingered - and the median still cannot pass the <strong>nearer of the other two</strong>; two feeds wrong in the same direction still drag it, and that is the rule's stated limit. Agreement is measured the way Tool 121 measures a pair: each feed's distance from the median in bps <strong>of the median</strong>, floored for display and judged by <strong>exact cross-multiplication</strong> against a maximum the program sets. At the headline settings - feeds of <strong>150</strong>, <strong>151.5</strong> and <strong>149</strong> at a <strong>200</strong> bps maximum - the median is <strong>150</strong>, the feeds stand <strong>0</strong>, <strong>100</strong> and <strong>66</strong> bps from it, the spread from lowest to highest is <strong>166 bps</strong>, and all three agree. Feed the headline a wild third feed instead (150, 151.5, 300) and the median barely moves, to 151.5, while the wild feed stands <strong>9,801 bps</strong> away and is named the outlier; at feeds of 100, 200 and 1,000 the median of 200 stands <strong>alone</strong> - no second feed within the maximum - and a careful program prices from none of them until two converge. At dust scale (feeds of 3, 4 and 3 smallest units) the median is 3 units, quoted by two of the three feeds, and the 4-unit feed deviates by 3,333 bps. Staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; combinations beyond three feeds are Tool 124, and weighted medians are Tool 125, and the cost of posting an update is not modelled. Prices and the maximum are user-entered; no live feed is read. An educational model of an oracle median, not a live feed reading. Not financial advice.</p>
       <form id="med-calc">
         <div class="grid">
           <div>
@@ -5426,6 +5484,6 @@
   </div>
 </footer>
 
-<script src="app.js?v=121"></script>
+<script src="app.js?v=122"></script>
 </body>
 </html>
