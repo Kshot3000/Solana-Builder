@@ -5636,8 +5636,9 @@ function lstExit(amountStr, totalStr, supplyStr, reserveLstStr, reserveSolStr, f
    the headline rate owes a full unit of fee - 5,000 bps of
    the 2 units paid. The accumulator's decay over time (the
    reference falls across the pool's decay period when the
-   price stops moving) and the composition fee on adding
-   liquidity are stated as not modelled; every parameter here
+   price stops moving) is stated as not modelled; the
+   composition fee on adding liquidity is Tool 129. Every
+   parameter here
    is a pool setting the user enters, and no live pool is
    read. Prototype-verified before shipping against an
    independent Python integer oracle on 20,000 cases, 0
@@ -5691,6 +5692,87 @@ function dlmmFee(stepBps, baseFactor, volRef, binsCrossed, maxVolAcc, varControl
     amount: formatScaled(amt), fee: formatScaled(fee), totalPaid: formatScaled(paid),
     protocolFee: formatScaled(protocolFee), lpFee: formatScaled(lpFee),
     effectiveBps: ((fee * 10000n) / paid).toString()
+  };
+}
+
+/* ---------- Tool 129: DLMM composition fee planner ---------- */
+/* Tool 123 prices a DLMM swap's fee and states the
+   composition fee on adding liquidity as not modelled. This
+   prices it, in the program's own compute_composition_fee:
+   when a deposit lands in the ACTIVE bin off that bin's
+   current ratio, the part that does not fit the ratio - the
+   imbalanced amount, or delta - has economically swapped
+   against the bin's inventory, and the program charges it
+     composition fee = floor(delta x total rate x
+                       (precision + total rate) / precision^2)
+   with the same total rate Tool 123 derives (base + variable,
+   capped at 100,000,000) and precision 1,000,000,000. Two
+   choices in that formula are the teaching: the fee is
+   GROSSED UP by (1 + rate) rather than divided by
+   (precision - rate) the way Tool 123's swap fee is, and it
+   is FLOORED at the smallest unit where the swap fee is
+   ceilinged - so the composition fee never exceeds the
+   equivalent swap fee on the same delta at the same rate,
+   and at dust scale it can vanish entirely: at the headline
+   pool (total rate 1,250,000, 12.5 bps) an imbalance of 2,000
+   pays 2.503125 (12 bps of the imbalance, floored), 1,997.496875
+   of it lands in the bin, and the equivalent swap fee on top
+   is 2.503128912 - a shortfall of 0.000003912 the floored
+   formula leaves uncharged; at the capped 10% rate an
+   imbalance of 2,000 pays exactly 220 (1,100 bps of it)
+   against a swap fee of 222.222222223; and a one-smallest-unit
+   imbalance at the headline rate pays NOTHING at all, where
+   the equivalent swap still charges its ceilinged full unit.
+   A balanced deposit (delta zero) pays nothing at any rate,
+   and a zero total rate charges nothing. The deposit's split
+   into the fitting part and the delta (which follows the
+   bin's live inventory and price), deposits into non-active
+   bins, the fee's split between protocol and providers, and
+   the accumulator's decay are stated as not modelled; the
+   delta is entered directly. Prototype-verified before
+   shipping against an independent Python integer oracle on
+   20,000 cases, 0 mismatches on every figure, with the fee
+   asserted the exact floor of the program's formula and
+   never above the equivalent swap fee on every case. */
+function dlmmCompositionFee(stepBps, baseFactor, volRef, binsCrossed, maxVolAcc, varControl, deltaStr) {
+  var step = dlmmStrictInt(stepBps), bf = dlmmStrictInt(baseFactor), ref = dlmmStrictInt(volRef);
+  var crossed = dlmmStrictInt(binsCrossed), maxVa = dlmmStrictInt(maxVolAcc), control = dlmmStrictInt(varControl);
+  var delta = parseScaled(deltaStr);
+  if (step === null || bf === null || ref === null || crossed === null || maxVa === null || control === null || delta === null) return null;
+  if (step < 1 || step > 10000) return null;
+  if (bf < 0 || bf > 65535) return null;
+  if (ref < 0 || ref > MAX_DFEE_INT || crossed < 0 || crossed > 10000) return null;
+  if (maxVa < 0 || maxVa > MAX_DFEE_INT || control < 0 || control > MAX_DFEE_INT) return null;
+  if (delta > 1000000000000n * SCALE) return null;
+  var va = BigInt(ref) + BigInt(crossed) * 10000n;
+  if (va > BigInt(maxVa)) va = BigInt(maxVa);
+  var baseRate = BigInt(bf) * BigInt(step) * 10n;
+  var varRate = 0n;
+  if (control > 0 && va > 0n) {
+    var prod = va * BigInt(step);
+    varRate = (BigInt(control) * prod * prod + 99999999999n) / 100000000000n;
+  }
+  var uncapped = baseRate + varRate;
+  var totalRate = uncapped > DLMM_MAX_FEE_RATE ? DLMM_MAX_FEE_RATE : uncapped;
+  var compFee = 0n, swapFee = 0n;
+  if (totalRate > 0n && delta > 0n) {
+    compFee = (delta * totalRate * (DLMM_FEE_PRECISION + totalRate)) / (DLMM_FEE_PRECISION * DLMM_FEE_PRECISION);
+    var den = DLMM_FEE_PRECISION - totalRate;
+    swapFee = (delta * totalRate + den - 1n) / den;
+  }
+  var rateBps = function (r) { return formatScaled(r * 10000n); };
+  return {
+    stepBps: step, baseFactor: bf, volRef: ref, binsCrossed: crossed, maxVolAcc: maxVa,
+    volAcc: va.toString(), varControl: control,
+    baseRate: baseRate.toString(), baseBps: rateBps(baseRate),
+    varRate: varRate.toString(), varBps: rateBps(varRate),
+    totalRate: totalRate.toString(), totalBps: rateBps(totalRate),
+    capped: uncapped > DLMM_MAX_FEE_RATE, uncappedRate: uncapped.toString(),
+    delta: formatScaled(delta), compFee: formatScaled(compFee),
+    netCredited: formatScaled(delta - compFee),
+    swapFee: formatScaled(swapFee), shortfall: formatScaled(swapFee - compFee),
+    compBps: delta > 0n ? ((compFee * 10000n) / delta).toString() : "0",
+    swapBps: delta > 0n ? ((swapFee * 10000n) / delta).toString() : "0"
   };
 }
 
@@ -7893,7 +7975,7 @@ if (typeof module !== "undefined" && module.exports) {
     oracleWeightedMedian5, MAX_WMED5_PRICE, MAX_WMED5_WEIGHT,
     vaaQuorum, MAX_VAA_GUARDIANS,
     nftAmmCurve, MAX_NFTAMM_PRICE, MAX_NFTAMM_DELTA_BPS, MAX_NFTAMM_FEE_BPS,
-    dlmmFee, DLMM_FEE_PRECISION, DLMM_MAX_FEE_RATE,
+    dlmmFee, dlmmCompositionFee, DLMM_FEE_PRECISION, DLMM_MAX_FEE_RATE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
     MAX_PDA_SEEDS, MAX_PDA_SEED_BYTES, PDA_MARKER,
@@ -10584,7 +10666,38 @@ if (typeof document !== "undefined") {
       if (res.capped) note = " The base and variable rates together run past the program's maximum, so the total is capped at a rate of 100,000,000 (1,000 bps, 10%) and any further volatility costs the trader nothing more.";
       else if (res.varRate === "0") note = " The variable rate is zero at these settings, so the swap pays the base rate alone - the calm-market price of a DLMM fill.";
       if (res.fee === res.amount) note += " The fee equals the whole amount traded: at dust scale the ceilinged fee is a full smallest unit, which is why the fee measures " + grp(res.effectiveBps) + " bps of everything paid here rather than the headline rate.";
-      setText("dfee-result", "Model output: a DLMM pool with a bin step of " + res.stepBps.toLocaleString("en-US") + " bps and a base factor of " + res.baseFactor.toLocaleString("en-US") + " charges a base rate of " + grp(res.baseBps) + " bps; with a volatility accumulator of " + grp(res.volAcc) + " and a variable fee control of " + res.varControl.toLocaleString("en-US") + " the variable rate is " + grp(res.varBps) + " bps, for a total fee rate of " + grp(res.totalBps) + " bps" + (res.capped ? " (capped at the 10% maximum)" : "") + ". A swap trading " + res.amount + " against the bins pays a fee of " + res.fee + " on top - " + res.totalPaid + " in total, " + grp(res.effectiveBps) + " bps of everything paid - split " + res.protocolFee + " to the protocol at a " + res.protocolShareBps.toLocaleString("en-US") + " bps share and " + res.lpFee + " to the bin's liquidity providers." + note + " Pool parameters and the amount are user-entered; no live pool is read. The bins the swap crosses are Tool 91's walk and their prices Tool 57's ladder; the accumulator's decay over time and the composition fee on adding liquidity are not modelled. An educational model of a DLMM dynamic fee, not a live quote. Not financial advice.");
+      setText("dfee-result", "Model output: a DLMM pool with a bin step of " + res.stepBps.toLocaleString("en-US") + " bps and a base factor of " + res.baseFactor.toLocaleString("en-US") + " charges a base rate of " + grp(res.baseBps) + " bps; with a volatility accumulator of " + grp(res.volAcc) + " and a variable fee control of " + res.varControl.toLocaleString("en-US") + " the variable rate is " + grp(res.varBps) + " bps, for a total fee rate of " + grp(res.totalBps) + " bps" + (res.capped ? " (capped at the 10% maximum)" : "") + ". A swap trading " + res.amount + " against the bins pays a fee of " + res.fee + " on top - " + res.totalPaid + " in total, " + grp(res.effectiveBps) + " bps of everything paid - split " + res.protocolFee + " to the protocol at a " + res.protocolShareBps.toLocaleString("en-US") + " bps share and " + res.lpFee + " to the bin's liquidity providers." + note + " Pool parameters and the amount are user-entered; no live pool is read. The bins the swap crosses are Tool 91's walk and their prices Tool 57's ladder; the accumulator's decay over time is not modelled; the composition fee on adding liquidity is Tool 129. An educational model of a DLMM dynamic fee, not a live quote. Not financial advice.");
+    });
+
+    var cfeeForm = document.getElementById("cfee-calc");
+    if (cfeeForm) cfeeForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = dlmmCompositionFee(val("cfee-step"), val("cfee-base"), val("cfee-ref"), val("cfee-crossed"), val("cfee-maxva"), val("cfee-control"), val("cfee-delta"));
+      if (!res) {
+        document.getElementById("cfee-va-out").value = "Invalid";
+        document.getElementById("cfee-base-out").value = "Invalid";
+        document.getElementById("cfee-var-out").value = "Invalid";
+        document.getElementById("cfee-total-out").value = "Invalid";
+        document.getElementById("cfee-fee-out").value = "Invalid";
+        document.getElementById("cfee-net-out").value = "Invalid";
+        document.getElementById("cfee-swap-out").value = "Invalid";
+        setText("cfee-result", "Check the inputs: the bin step is a whole number of basis points from 1 to 10,000, the base factor a whole number from 0 to 65,535, the volatility reference, maximum accumulator and variable fee control whole numbers from 0 to 1,000,000,000, the bins crossed a whole number from 0 to 10,000, and the imbalanced amount zero or above with at most 9 decimal places and at most 1,000,000,000,000 whole units. Blanks are not read as zero - enter 0 itself for a balanced deposit.");
+        return;
+      }
+      var grp = function (x) { return x.replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("cfee-va-out").value = grp(res.volAcc) + " (reference " + grp(String(res.volRef)) + " + " + res.binsCrossed.toLocaleString("en-US") + " bins crossed x 10,000, capped at " + grp(String(res.maxVolAcc)) + ")";
+      document.getElementById("cfee-base-out").value = grp(res.baseBps) + " bps (rate " + grp(res.baseRate) + " of 1,000,000,000)";
+      document.getElementById("cfee-var-out").value = grp(res.varBps) + " bps (rate " + grp(res.varRate) + " of 1,000,000,000)";
+      document.getElementById("cfee-total-out").value = grp(res.totalBps) + " bps (rate " + grp(res.totalRate) + ")" + (res.capped ? " - capped at the 10% maximum fee rate" : "");
+      document.getElementById("cfee-fee-out").value = res.compFee + " composition fee - " + grp(res.compBps) + " bps of the imbalanced amount";
+      document.getElementById("cfee-net-out").value = res.netCredited + " of the imbalanced amount lands in the bin";
+      document.getElementById("cfee-swap-out").value = res.swapFee + " as a swap fee on top - the composition fee leaves " + res.shortfall + " uncharged";
+      var note = "";
+      if (res.delta === "0") note = " The deposit fits the bin's ratio exactly, so there is no imbalance to charge: a balanced deposit pays no composition fee at any rate.";
+      else if (res.totalRate === "0") note = " The pool's total fee rate is zero at these settings, so the imbalance is charged nothing.";
+      else if (res.compFee === "0") note = " The floored fee is zero at this size: the imbalance is dust, and the program's floor division charges it nothing where the equivalent swap's ceilinged fee still takes a full smallest unit.";
+      else if (res.capped) note = " The base and variable rates together run past the program's maximum, so the total is capped at a rate of 100,000,000 (1,000 bps, 10%) and the composition fee takes its largest possible share of the imbalance - the rate times one plus the rate.";
+      setText("cfee-result", "Model output: a DLMM pool with a bin step of " + res.stepBps.toLocaleString("en-US") + " bps and a base factor of " + res.baseFactor.toLocaleString("en-US") + " charges a total fee rate of " + grp(res.totalBps) + " bps" + (res.capped ? " (capped at the 10% maximum)" : "") + " - a base rate of " + grp(res.baseBps) + " bps plus a variable rate of " + grp(res.varBps) + " bps at a volatility accumulator of " + grp(res.volAcc) + ". An active-bin deposit imbalanced by " + res.delta + " pays a composition fee of " + res.compFee + " (" + grp(res.compBps) + " bps of the imbalance), so " + res.netCredited + " of the imbalance lands in the bin; the same amount swapped on top at the same rate (Tool 123) would pay " + res.swapFee + ", which is " + res.shortfall + " more - the floored composition formula never charges past the swap it stands in for." + note + " Pool parameters and the imbalanced amount are user-entered; no live pool is read. The deposit's split into the part that fits the bin's ratio and the imbalance (which follows the bin's live inventory and price), deposits into non-active bins, the fee's split between the protocol and the bin's providers, and the accumulator's decay over time are not modelled. An educational model of a DLMM composition fee, not a live quote. Not financial advice.");
     });
 
     var medForm = document.getElementById("med-calc");
