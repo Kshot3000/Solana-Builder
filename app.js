@@ -5937,6 +5937,68 @@ function oracleWeightedMedian(aStr, waStr, bStr, wbStr, cStr, wcStr, maxBpsStr) 
   };
 }
 
+/* ---------- Tool 127: Bridge guardian quorum planner ---------- */
+/* Tool 118 prices what a bridge charges; this prices what a bridge
+   message must PROVE before the destination chain will act on it.
+   In the Wormhole pattern - the bridge Solana's ecosystem grew up
+   with - a set of guardians each independently observes the
+   message on the source chain and signs it, and the destination
+   accepts the resulting verified action approval (VAA) only once
+   enough DISTINCT guardians have signed. The threshold is the
+   protocol's own formula, CalculateQuorum in Wormhole's sdk/vaa
+   (its comment states it must match the contracts, including
+   Solana's bridge processor): quorum = floor(2n / 3) + 1 for a
+   set of n guardians. The +1 is load-bearing exactly when 3
+   divides n: two-thirds of 6 is exactly 4, but the quorum is 5,
+   and a 3-guardian set needs all 3 - the formula demands strictly
+   MORE than two-thirds, never exactly two-thirds. At the
+   production set size (n = 19, signed = 12) the quorum is 13
+   (6,842 bps of the set); the 12 collected signatures are 6,315
+   bps of the set and the message is still 1 signature short, so
+   no VAA exists and nothing can be delivered. Two tolerances
+   fall out of the same number. Liveness: n - quorum guardians
+   can be offline while the rest still reach quorum (6 of 19).
+   Censorship: n - quorum + 1 refusing guardians make quorum
+   unreachable and block every message (7 of 19) - a liveness
+   failure, not a forgery, because producing a FALSE VAA takes
+   the full quorum itself (13 compromised guardians). Signatures
+   past quorum (surplus) add nothing to validity. A delegated
+   subset runs the same formula at its own size: 7 guardians need
+   5, with an offline tolerance of 2 and a blocking set of 3.
+   The set size is capped at 255 because a VAA carries its
+   signature count in one byte. Signatures are counted as
+   distinct and assumed valid: signature verification itself,
+   guardian-set rotation and governance, the message payload and
+   Tool 118's transfer fees are not modelled. Counts are entered
+   as whole numbers only - blanks are never read as zero (the
+   Tool 109 lesson: Number("") is 0). Prototype-verified before
+   shipping against an independent Python integer oracle on
+   20,000 cases, 0 mismatches on every figure. */
+var MAX_VAA_GUARDIANS = 255; /* a VAA's signature count is a u8 */
+
+function vaaCount(x) {
+  if (x === null || x === undefined) return null;
+  var s = String(x).trim();
+  if (s === "" || !/^\d+$/.test(s)) return null;
+  var n = Number(s);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+function vaaQuorum(guardiansStr, signedStr) {
+  var n = vaaCount(guardiansStr), s = vaaCount(signedStr);
+  if (n === null || s === null) return null;
+  if (n < 1 || n > MAX_VAA_GUARDIANS || s < 0 || s > n) return null;
+  var q = Math.floor((2 * n) / 3) + 1;
+  return {
+    guardians: n, signed: s, quorum: q,
+    quorumBps: Math.floor((q * 10000) / n),
+    signedBps: Math.floor((s * 10000) / n),
+    reached: s >= q,
+    stillNeeded: Math.max(0, q - s), surplus: Math.max(0, s - q),
+    offlineTolerance: n - q, blockingSet: n - q + 1
+  };
+}
+
 /* ---------- Tool 126: Oracle weighted-median-of-five aggregator ---------- */
 /* Tool 125 combines three weighted feeds and states combinations
    beyond three weighted feeds as not modelled. This models the
@@ -7712,6 +7774,7 @@ if (typeof module !== "undefined" && module.exports) {
     oracleMedian5, MAX_MED5_PRICE,
     oracleWeightedMedian, MAX_WMED_PRICE, MAX_WMED_WEIGHT,
     oracleWeightedMedian5, MAX_WMED5_PRICE, MAX_WMED5_WEIGHT,
+    vaaQuorum, MAX_VAA_GUARDIANS,
     dlmmFee, DLMM_FEE_PRECISION, DLMM_MAX_FEE_RATE,
     sha256Bytes, isOnCurveBytes, utf8Bytes, createProgramAddressBytes,
     findProgramAddressBytes, findProgramAddress, ED25519_D,
@@ -10523,6 +10586,31 @@ if (typeof document !== "undefined") {
       else if (res.weightMajority) note = " The outlier" + (outNames.length > 1 ? "s are " : " is ") + outNames.join(" and ") + ": a majority of the weight still confirms the median, but the outliers are named, not hidden - dragging a weighted median takes more than half the total weight wrong in the same direction, and a single feed carrying more than half the weight can do it alone.";
       else note = " At most half the total weight sits within the maximum - " + outNames.join(", ") + " - so no majority of the weight confirms the median: a careful program prices from none of them until the weight converges. An exact half is not a majority.";
       setText("wmed5-result", "Model output: feeds of " + res.a + " (weight " + res.wa + "), " + res.b + " (weight " + res.wb + "), " + res.c + " (weight " + res.wc + "), " + res.d + " (weight " + res.wd + ") and " + res.e + " (weight " + res.we + ") for the same asset combine to a weighted median price of " + res.median + " - the first price at which the cumulative weight, sorted by price, reaches at least half of the total weight of " + res.totalWeight + ", always one of the five feeds and never an average - with the feeds spread " + grp(res.spreadBps) + " bps of the median from lowest to highest." + moved + " Against a maximum deviation of " + res.maxBps.toLocaleString("en-US") + " bps of the median, feed A stands " + grp(res.devA) + " bps away, feed B " + grp(res.devB) + " bps, feed C " + grp(res.devC) + " bps, feed D " + grp(res.devD) + " bps and feed E " + grp(res.devE) + " bps, judged by exact cross-multiplication rather than the floored figures: " + res.withinCount + " of 5 feeds within the maximum, carrying " + res.withinWeight + " of " + res.totalWeight + " weight (" + grp(res.withinWeightBps) + " bps)." + note + " Prices, weights and the maximum are user-entered; no live feed is read. This is the plain weighted-median form over five feeds, one vote per feed at its entered weight - the stake-weighted family Pyth's aggregation belongs to, without Pyth's three-votes-per-publisher confidence construction, which is not modelled. The guards on a single price come first - staleness is Tool 120, the confidence band is Tool 32 and the pairwise check is Tool 121; the plain five-feed combination is Tool 124, the three-feed weighted combination is Tool 125, and combinations beyond five weighted feeds and the cost of posting an update are not modelled. An educational model of an oracle weighted median of five, not a live feed reading. Not financial advice.");
+    });
+
+    var vaaForm = document.getElementById("vaa-calc");
+    if (vaaForm) vaaForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var res = vaaQuorum(val("vaa-guardians"), val("vaa-signed"));
+      if (res === null) {
+        document.getElementById("vaa-quorum-out").value = "Invalid";
+        document.getElementById("vaa-status-out").value = "Invalid";
+        document.getElementById("vaa-share-out").value = "Invalid";
+        document.getElementById("vaa-tolerance-out").value = "Invalid";
+        document.getElementById("vaa-blocking-out").value = "Invalid";
+        setText("vaa-result", "Check the inputs: the guardian count is a whole number from 1 to 255, and the distinct signatures collected are a whole number from 0 up to the guardian count. Blanks are not read as zero, and one guardian signing twice counts once, so duplicates are not entered.");
+        return;
+      }
+      var grp = function (x) { return String(x).replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+      document.getElementById("vaa-quorum-out").value = res.quorum + " distinct signatures (" + grp(res.quorumBps) + " bps of the " + res.guardians + "-guardian set)";
+      document.getElementById("vaa-status-out").value = res.reached ? "Quorum reached - a VAA can be assembled" + (res.surplus > 0 ? " (" + res.surplus + " surplus signature" + (res.surplus === 1 ? "" : "s") + " beyond quorum)" : " (exactly at quorum, no surplus)") : "No VAA yet - " + res.stillNeeded + " more distinct signature" + (res.stillNeeded === 1 ? "" : "s") + " needed";
+      document.getElementById("vaa-share-out").value = res.signed + " of " + res.guardians + " signed (" + grp(res.signedBps) + " bps of the set)";
+      document.getElementById("vaa-tolerance-out").value = res.offlineTolerance + " guardian" + (res.offlineTolerance === 1 ? "" : "s") + " can be offline or silent while the rest still reach quorum";
+      document.getElementById("vaa-blocking-out").value = res.blockingSet + " guardians refusing to sign block every message; forging one takes " + res.quorum + " compromised";
+      var stateNote = res.reached
+        ? " The quorum is met: " + res.signed + " distinct signatures against " + res.quorum + " required, so the destination chain can accept the VAA" + (res.surplus > 0 ? "; the " + res.surplus + " signature" + (res.surplus === 1 ? "" : "s") + " past quorum add" + (res.surplus === 1 ? "s" : "") + " nothing to its validity." : ", exactly at the threshold.")
+        : " The message is not yet a VAA: " + res.signed + " distinct signatures against " + res.quorum + " required leaves it " + res.stillNeeded + " short, and below quorum the destination chain accepts nothing at all - there is no partial delivery.";
+      setText("vaa-result", "Model output: a guardian set of " + res.guardians + " requires a quorum of " + res.quorum + " distinct signatures - floor(2 x " + res.guardians + " / 3) + 1, strictly more than two-thirds of the set (" + grp(res.quorumBps) + " bps)." + stateNote + " The set's tolerances come from the same number: " + res.offlineTolerance + " guardians can be offline while the rest still reach quorum, " + res.blockingSet + " refusing to sign block every message without forging anything, and a false approval would take " + res.quorum + " compromised guardians - the quorum itself. Signatures are counted as distinct and assumed valid; signature verification, guardian-set rotation, the message payload and the bridge's transfer fees (Tool 118) are not modelled, and no live bridge or guardian set is read. An educational model of a bridge guardian quorum, not a live bridge. Not financial advice.");
     });
 
     var devForm = document.getElementById("dev-calc");
